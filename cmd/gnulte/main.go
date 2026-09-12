@@ -23,7 +23,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -140,6 +139,9 @@ func main() {
 		}
 		return
 	}
+	if !*noBanner && !*quiet {
+		printBanner()
+	}
 	if err := safety.EnsureAccepted(); err != nil {
 		fatal(err)
 	}
@@ -158,14 +160,21 @@ func main() {
 	}
 
 	if !*noBanner && !*quiet {
-		fmt.Println("GNULTE-GO — GNU LAN Network Testing Environment v" + version)
-		fmt.Println("authorized network testing only")
-		fmt.Println()
+		bootSeq(cfg)
+		quickRef()
 	}
 
-	targetsList, err := resolveTargets(*targets, *macArg, *rangeCIDR, *whitelist, cfg)
-	if err != nil {
-		fatal(err)
+	interactive := stdinIsTTY() && !*force
+	scanCtx := context.Background()
+	var targetsList []string
+	if interactive && *targets == "" && *macArg == "" && *rangeCIDR == "" {
+		targetsList = scanAndSelect(scanCtx, cfg)
+	} else {
+		var err error
+		targetsList, err = resolveTargets(*targets, *macArg, *rangeCIDR, *whitelist, cfg)
+		if err != nil {
+			fatal(err)
+		}
 	}
 
 	ec := engine.Config{
@@ -212,6 +221,9 @@ func main() {
 	if *block {
 		ec.Mode = engine.ModeBlock
 	}
+	if interactive && ec.Mode != engine.ModeBlock {
+		paramsWizard(&ec, duration)
+	}
 	if problems := engine.DepsCheck(&ec); len(problems) > 0 {
 		fatal(fmt.Errorf("%s", strings.Join(problems, "\n  • ")))
 	}
@@ -223,7 +235,10 @@ func main() {
 		safetySummary(&ec, *randomArg, *profile != "")
 	}
 	if !*force {
-		if ok := confirm(); !ok {
+		if !stdinIsTTY() {
+			fatal(fmt.Errorf("this test needs interactive confirmation — run gnulte from a terminal, or pass --force with explicit flags"))
+		}
+		if !confirmStart() {
 			fmt.Println("Aborted — nothing was started.")
 			return
 		}
@@ -397,15 +412,6 @@ func safetySummary(c *engine.Config, randomize, profile bool) {
 	fmt.Println("  Use only where you are authorized and the activity is lawful.")
 	fmt.Println("══════════════════════════════════════════════════")
 	fmt.Println()
-}
-
-func confirm() bool {
-	fmt.Print("Proceed? type 'YES' to continue, or anything else to abort: ")
-	sc := bufio.NewScanner(os.Stdin)
-	if !sc.Scan() {
-		return false
-	}
-	return strings.TrimSpace(sc.Text()) == "YES"
 }
 
 func fatal(err error) {

@@ -1,4 +1,4 @@
-// GNULTE-GO — network testing toolkit.
+// GNULTE — network testing toolkit.
 //
 // Copyright (C) 2026 Neptune Productions.
 //

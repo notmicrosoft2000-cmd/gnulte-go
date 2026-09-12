@@ -1,4 +1,4 @@
-// GNULTE-GO — network testing toolkit.
+// GNULTE — network testing toolkit.
 //
 // Copyright (C) 2026 Neptune Productions.
 //
@@ -40,7 +40,7 @@ import (
 	"gnulte-go/internal/sound"
 )
 
-const version = "0.1.0"
+const version = "10.0"
 
 func main() {
 	var (

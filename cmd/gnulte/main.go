@@ -1,4 +1,4 @@
-// GNULTE-GO — network testing toolkit.
+// GNULTE — network testing toolkit.
 //
 // Copyright (C) 2026 Neptune Productions.
 //
@@ -29,6 +29,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"sort"
 	"strings"
@@ -42,7 +43,7 @@ import (
 	"gnulte-go/internal/safety"
 )
 
-const version = "0.1.0"
+const version = "10.0"
 
 // profiles mirrors the Bash toolkit's presets: latency|jitter|loss|dup|reorder|bandwidth.
 var profiles = map[string][6]int{
@@ -117,7 +118,7 @@ func main() {
 	flag.Parse()
 
 	if *showVer {
-		fmt.Printf("gnulte (Go) v%s\n", version)
+		fmt.Printf("GNULTE v%s (Go)\n", version)
 		return
 	}
 	if *listProf {
@@ -139,11 +140,39 @@ func main() {
 		}
 		return
 	}
-	if !*noBanner && !*quiet {
+	if !*noBanner && !*quiet && os.Getenv("GNULTE_AS_ROOT") != "1" {
 		printBanner()
 	}
 	if err := safety.EnsureAccepted(); err != nil {
 		fatal(err)
+	}
+
+	// Administrator-privilege handshake. A regular user launch prints the
+	// banner, shows the admin box and re-executes itself with sudo (password
+	// prompted in the terminal). The elevated child skips all of that via
+	// GNULTE_AS_ROOT, so the banner only ever appears once.
+	if os.Geteuid() != 0 && os.Getenv("GNULTE_AS_ROOT") != "1" {
+		if !stdinIsTTY() {
+			fatal(fmt.Errorf("GNULTE needs root — run it from a terminal so it can request administrator access, or invoke it with sudo"))
+		}
+		adminBox()
+		args := append([]string{"-E", os.Args[0]}, os.Args[1:]...)
+		cmd := exec.Command("sudo", args...)
+		cmd.Env = append(os.Environ(), "GNULTE_AS_ROOT=1")
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			if ee, ok := err.(*exec.ExitError); ok {
+				os.Exit(ee.ExitCode())
+			}
+			fatal(fmt.Errorf("failed to obtain administrator access: %w", err))
+		}
+		os.Exit(0)
+	}
+	if os.Getenv("GNULTE_AS_ROOT") == "1" {
+		fmt.Println("  " + okText("Sudo access granted — running with administrator privileges."))
+		fmt.Println()
 	}
 
 	cfg, err := netutil.DefaultRoute()
@@ -245,7 +274,7 @@ func main() {
 	}
 
 	if !*quiet {
-		fmt.Println("◆ the next operations need root; start with sudo if you have not.")
+		fmt.Println("  " + okText("Elevated session active — test operations run with root privileges."))
 	}
 	sess, err := engine.Start(ec)
 	if err != nil {
@@ -455,9 +484,10 @@ func runDupcheck(iface string) {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `gnulte (Go) v%s — authorized network testing only
+	fmt.Fprintf(os.Stderr, `GNULTE v%s (Go) — authorized network testing only
 
 Usage:
+  gnulte [options]        (prompts for sudo on first launch)
   sudo gnulte [options]
 
 Targeting:

@@ -1,4 +1,4 @@
-// GNULTE-GO — network testing toolkit.
+// GNULTE — network testing toolkit.
 //
 // Copyright (C) 2026 Neptune Productions.
 //
@@ -54,7 +54,7 @@ var docs = []struct {
 			"repository for the full official text. It covers redistribution and\n" +
 			"modification only and grants no permission to test any network."},
 	{"SAFETY",
-		"GNULTE-GO can perform ARP-based man-in-the-middle operation, traffic\n" +
+		"GNULTE can perform ARP-based man-in-the-middle operation, traffic\n" +
 			"manipulation, impairment, packet capture, and LAN discovery/active\n" +
 			"reconnaissance. Use these only on networks/devices you own or are\n" +
 			"explicitly authorized to test. Capture and impairment can affect\n" +
@@ -76,9 +76,9 @@ var docs = []struct {
 }
 
 // Notice is the text shown before any interactive prompt.
-const notice = `IMPORTANT GNULTE-GO SAFETY NOTICE
+const notice = `IMPORTANT GNULTE SAFETY NOTICE
 
-GNULTE-GO MAY:
+GNULTE MAY:
 * Perform ARP-based man-in-the-middle operations.
 * Manipulate, degrade, throttle, or fully block network traffic.
 * Capture network traffic.
@@ -87,7 +87,7 @@ GNULTE-GO MAY:
 ONLY USE THESE FEATURES ON NETWORKS AND SYSTEMS THAT YOU OWN OR
 ARE EXPLICITLY AUTHORIZED TO TEST.
 
-DO NOT USE GNULTE-GO TO INTERCEPT, DISRUPT, DEGRADE, CAPTURE, OR
+DO NOT USE GNULTE TO INTERCEPT, DISRUPT, DEGRADE, CAPTURE, OR
 MODIFY OTHER PEOPLE'S TRAFFIC WITHOUT AUTHORIZATION.
 
 THE SOFTWARE IS PROVIDED WITHOUT WARRANTY TO THE MAXIMUM EXTENT
@@ -208,7 +208,7 @@ func interact() error {
 	for {
 		fmt.Println()
 		fmt.Println("════════════════════════════════════════════════════════")
-		fmt.Println("                  GNULTE-GO FIRST RUN")
+		fmt.Println("                  GNULTE v10.0 FIRST RUN")
 		fmt.Println("════════════════════════════════════════════════════════")
 		fmt.Print(notice)
 		for i, d := range docs {
@@ -228,7 +228,7 @@ func interact() error {
 
 		switch upper {
 		case "Q":
-			fmt.Println("Exiting. GNULTE-GO will require this review on next launch.")
+			fmt.Println("Exiting. GNULTE will require this review on next launch.")
 			return errors.New("quit before acceptance")
 		case "IAGREE":
 			if err := writeRecord(path, fullAck()); err != nil {
@@ -333,6 +333,6 @@ func Reset() error {
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	fmt.Println("GNULTE-GO acceptance record removed. The gate will run again.")
+	fmt.Println("GNULTE acceptance record removed. The gate will run again.")
 	return nil
 }

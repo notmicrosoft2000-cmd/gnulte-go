@@ -1,4 +1,4 @@
-// GNULTE-GO — network testing toolkit.
+// GNULTE — network testing toolkit (Go).
 //
 // Copyright (C) 2026 Neptune Productions.
 //
@@ -17,9 +17,9 @@
 
 package main
 
-// Interactive start: banner art, a real-checks boot sequence, a live device
-// scan with spinner, a numbered target menu and the impairment wizard. These
-// run when gnulte is launched from a terminal (mirroring the Bash toolkit).
+// The GNULTE front end: animated banner, administrator-privilege handshake,
+// live boot checks, spinner scans, a guided device menu and the impairment
+// wizard — the same experience the shop version shipped, now in Go.
 
 import (
 	"bufio"
@@ -64,7 +64,7 @@ const (
 	cYellow = "\033[1;33m"
 	cCyan   = "\033[0;36m"
 	cHeader = "\033[1;36m"
-	cTarget = "\033[0;33m"
+	cTarget = "\033[1;33m"
 )
 
 func c(code, s string) string {
@@ -84,7 +84,15 @@ func stdinIsTTY() bool {
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
-// printBanner draws the ASCII logo and tagline.
+func okText(s string) string {
+	return c(cGreen+cBold, "[✓]") + " " + s
+}
+
+func warnText(s string) string {
+	return c(cYellow+cBold, "[!]") + " " + s
+}
+
+// printBanner draws the ASCII logo and tagline with a pulse on the subtitle.
 func printBanner() {
 	fmt.Println(c(cHeader, `  ██████╗ ███╗   ██╗██╗   ██╗██╗  ████████╗███████╗`))
 	fmt.Println(c(cHeader, ` ██╔════╝ ████╗  ██║██║   ██║██║  ╚══██╔══╝██╔════╝`))
@@ -92,57 +100,117 @@ func printBanner() {
 	fmt.Println(c(cHeader, ` ██║   ██║██║╚██╗██║██║   ██║██║     ██║   ██╔══╝  `))
 	fmt.Println(c(cHeader, ` ╚██████╔╝██║ ╚████║╚██████╔╝███████╗██║   ███████╗`))
 	fmt.Println(c(cHeader, `  ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ ╚══════╝╚═╝   ╚══════╝`))
+	fmt.Println()
 	fmt.Println("  " + c(cCyan+cBold, "GNU LAN Network Testing Environment"))
-	fmt.Println("  " + c(cDim, "Version "+version+" • Authorised testing on networks you own"))
+	pulseLine("  Version "+version+" — the original toolkit, now in Go", cCyan, cDim)
+	fmt.Println("  " + c(cDim, "Authorised testing on networks you own."))
 	fmt.Println()
 }
 
-// bootSeq runs the real startup checks (nothing simulated, no fake pauses).
+// pulseLine blinks a line between bright and dim before leaving it resolved.
+func pulseLine(text, bright, dim string) {
+	if !ansi {
+		fmt.Println("  " + text)
+		return
+	}
+	for i := 0; i < 3; i++ {
+		fmt.Printf("\r" + c(bright+cBold, text))
+		time.Sleep(110 * time.Millisecond)
+		fmt.Printf("\r" + c(dim, text))
+		time.Sleep(110 * time.Millisecond)
+	}
+	fmt.Printf("\r" + c(bright+cBold, text) + "\n")
+}
+
+// adminBox mirrors the toolkit's "Administrator Privileges Required" handshake
+// shown before the password prompt.
+func adminBox() {
+	fmt.Println()
+	fmt.Println(c(cYellow, "════════════════════════════════════════════════════════════════════"))
+	fmt.Println(c(cYellow+cBold, "          ADMINISTRATOR PRIVILEGES REQUIRED"))
+	fmt.Println(c(cYellow, "════════════════════════════════════════════════════════════════════"))
+	fmt.Println()
+	fmt.Println("GNULTE needs sudo (root) access for the following reasons:")
+	fmt.Println()
+	fmt.Println("  • arp-scan  – raw sockets to scan the network")
+	fmt.Println("  • arpspoof  – raw sockets to send ARP packets")
+	fmt.Println("  • tc        – kernel-level control of packet flow")
+	fmt.Println("  • sysctl    – enable IP forwarding for MITM operation")
+	fmt.Println("  • iptables  – forward/DROP rules for block mode")
+	fmt.Println()
+	fmt.Println("Without sudo, these cannot function. GNULTE will now request")
+	fmt.Println("your password and run the test session with the privileges it needs.")
+	fmt.Println()
+	fmt.Println(c(cYellow, "════════════════════════════════════════════════════════════════════"))
+	fmt.Println()
+}
+
+// bootSeq runs the startup checks step by step: each phase animates while its
+// real check runs, then resolves to a check mark.
 func bootSeq(cfg netutil.Config) {
-	fmt.Println(c(cCyan+cBold, "  GNULTE-GO v"+version+" — Initialising"))
-	fmt.Println("  " + c(cDim, "Real checks only — nothing here is simulated or delayed."))
+	fmt.Println("  " + c(cCyan+cBold, " GNULTE v"+version+" — Initialising"))
+	fmt.Println("  " + c(cDim, " Real checks only — every ✓ below is a live result."))
 	fmt.Println()
 
-	fmt.Println("  ● Loading configuration...")
-	fmt.Println("    " + okText("flags + built-in defaults in use"))
+	bootPhase("Loading configuration")
+	bootResult("flags + built-in defaults in use", false)
 
-	fmt.Println("  ● Calibrating network interfaces...")
-	fmt.Printf("    %s interface %s (%s)\n", okText(""), cfg.Interface, cfg.SelfIP)
+	bootPhase("Calibrating network interfaces")
+	bootResult(fmt.Sprintf("interface %s (%s)", cfg.Interface, cfg.SelfIP), false)
 
-	fmt.Println("  ● Verifying utilities...")
-	for _, ut := range []string{"arpspoof", "tc", "ping", "arping"} {
-		if _, err := exec.LookPath(ut); err == nil {
-			fmt.Printf("    %s %s\n", okText(""), ut)
+	bootPhase("Verifying utilities")
+	for _, ut := range []string{"arpspoof", "tc", "ping", "arping", "iptables"} {
+		_, err := exec.LookPath(ut)
+		if err != nil {
+			bootResult(ut+" (MISSING — install it for full function)", true)
 		} else {
-			fmt.Printf("    %s %s (missing)\n", warnText(""), ut)
+			bootResult(ut, false)
 		}
 	}
 
-	fmt.Println("  ● Preparing traffic engine...")
+	bootPhase("Preparing traffic engine")
 	if fwd, err := os.ReadFile("/proc/sys/net/ipv4/ip_forward"); err == nil {
-		fmt.Printf("    %s ip_forward=%s (toggled only during a test)\n", okText(""), strings.TrimSpace(string(fwd)))
+		bootResult("ip_forward="+strings.TrimSpace(string(fwd))+" (toggled only during a test)", false)
+	} else {
+		bootResult("could not read ip_forward", true)
 	}
+
+	fmt.Println()
+	pulseLine("▸ GNULTE v"+version+" ready — building your session below", cTarget, cDim)
 	fmt.Println()
 }
 
-func okText(s string) string {
-	return c(cGreen, "[✓] "+s)
+// bootPhase animates a spinner on a phase line, then leaves the title behind.
+func bootPhase(title string) {
+	fmt.Printf("  ● %s...", title)
+	if ansi {
+		spin := []rune("⠋⠙⠹⠸")
+		for i := 0; i < 4; i++ {
+			fmt.Printf("\r  ● %s %c ", title, spin[i])
+			time.Sleep(70 * time.Millisecond)
+		}
+	}
+	fmt.Printf("\r  ● %s...\n", title)
 }
 
-func warnText(s string) string {
-	return c(cYellow, "[!] "+s)
+func bootResult(detail string, warn bool) {
+	if warn {
+		fmt.Println("    " + warnText(detail))
+		return
+	}
+	fmt.Println("    " + okText(detail))
 }
 
-// quickRef shows the main examples, mirroring the Bash startup reference.
+// quickRef shows the main examples.
 func quickRef() {
 	fmt.Println(c(cDim, "  ─────────────────────────────────────────────────"))
 	fmt.Println("  " + c(cBold+cHeader, "QUICK REFERENCE") + "  " + c(cDim, "(full list: -h)"))
 	fmt.Println("    gnulte -t 192.168.1.20 --profile voip --duration 300")
-	fmt.Println("    gnulte -r 192.168.1.0/24 -w 192.168.1.100       range attack")
-	fmt.Println("    gnulte -t 192.168.1.20 --block                   100% block")
-	fmt.Println("    gnulte -t 192.168.1.20 --sound --random           ping beeps + random walk")
-	fmt.Println("    gnulte --scan / --dupcheck                       discovery tools")
-	fmt.Println("  " + c(cDim, "  With no targeting flags, gnulte opens the guided menu below."))
+	fmt.Println("    gnulte -r 192.168.1.0/24 -w 192.168.1.100        range attack")
+	fmt.Println("    gnulte -t 192.168.1.20 --block                    100% block")
+	fmt.Println("    gnulte -t 192.168.1.20 --sound --random            ping beeps + random walk")
+	fmt.Println("    gnulte --scan / --dupcheck                        discovery tools")
+	fmt.Println("  " + c(cDim, "  With no targeting flags, the guided menu opens below."))
 	fmt.Println(c(cDim, "  ─────────────────────────────────────────────────"))
 	fmt.Println()
 }
@@ -151,17 +219,17 @@ func quickRef() {
 func spinnerMsg(msg string, done <-chan struct{}) {
 	if !ansi {
 		<-done
-		fmt.Printf("%s %s\n", okText(""), msg)
+		fmt.Println(okText(msg))
 		return
 	}
 	spin := []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
 	i := 0
-	t := time.NewTicker(80 * time.Millisecond)
+	t := time.NewTicker(70 * time.Millisecond)
 	defer t.Stop()
 	for {
 		select {
 		case <-done:
-			fmt.Printf("\r%s %s                    \n", okText(""), msg)
+			fmt.Printf("\r%s %s                     \n", okText(""), msg)
 			return
 		case <-t.C:
 			fmt.Printf("\r[%c] %s ", spin[i%len(spin)], msg)
@@ -360,7 +428,11 @@ func paramsWizard(ec *engine.Config, duration *int) {
 	promptInt("Duplicate (%)", "  Duplicate packets (confuses TCP).", fmt.Sprintf("%d", ec.DupPct), &ec.DupPct)
 	promptInt("Reorder (%)", "  Out-of-order packets (breaks TCP flow).", fmt.Sprintf("%d", ec.ReorderPct), &ec.ReorderPct)
 	promptInt("Bandwidth (kbps)", "  Limit in kbps, 0 = unlimited. 2048=2Mbps | 512 | 128 | 64.", fmt.Sprintf("%d", ec.BandwidthKbps), &ec.BandwidthKbps)
-	promptInt("Duration (s)", "  Auto-stop after N seconds (0 = until Ctrl+C).", fmt.Sprintf("%d", *duration), duration)
+	if *duration == 0 {
+		promptInt("Duration (s)", "  Auto-stop after N seconds (0 = until Ctrl+C).", "0", duration)
+	} else {
+		promptInt("Duration (s)", "  Auto-stop after N seconds (0 = until Ctrl+C).", fmt.Sprintf("%d", *duration), duration)
+	}
 
 	fmt.Println("  Configuration:")
 	fmt.Printf("    %s latency=%dms jitter=%dms loss=%d%% dup=%d%% reorder=%d%% cap=%dkbps\n",
@@ -371,7 +443,7 @@ func paramsWizard(ec *engine.Config, duration *int) {
 	fmt.Println()
 }
 
-// confirmStart mirrors the Bash "Begin test? (y/N)" prompt.
+// confirmStart mirrors the toolkit's "Begin test? (y/N)" prompt.
 func confirmStart() bool {
 	ans := prompt("Begin test? (y/N): ")
 	if ans == "" {

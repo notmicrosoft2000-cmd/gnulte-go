@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GNULTE-GO uninstaller — removes the Go binaries and docs.
+# GNULTE uninstaller — removes the Go binaries and docs.
 #
 # Copyright (C) 2026 Neptune Productions. Licensed under the GPLv3.
 set -euo pipefail
@@ -42,4 +42,4 @@ if [[ "$PURGE" == "1" && -n "${SUDO_USER:-}" ]]; then
     echo "[+] Purged safety acceptance records."
 fi
 
-echo "GNULTE-GO uninstalled."
+echo "GNULTE uninstalled."

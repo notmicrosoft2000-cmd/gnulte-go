@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GNULTE-GO installer — installs the Go binaries system-wide.
+# GNULTE installer — installs the Go binaries system-wide.
 #
 # Copyright (C) 2026 Neptune Productions. Licensed under the GPLv3.
 set -euo pipefail
@@ -7,7 +7,7 @@ set -euo pipefail
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BINDIR="${BINDIR:-/usr/local/bin}"
 DOCDIR="/usr/local/share/doc/gnulte-go"
-VERSION="0.1.0"
+VERSION="10.0"
 
 # --- root handling ---
 
@@ -52,7 +52,7 @@ for f in gnulte gnulte-scan; do
         exit 1
     fi
 done
-if ! ./gnulte --version | grep -q "0.1.0"; then
+if ! ./gnulte --version | grep -q "v${VERSION}"; then
     echo "gnulte does not report v${VERSION}; aborting." >&2
     exit 1
 fi
@@ -78,7 +78,7 @@ for doc in GNULTE SAFETY DISCLAIMER AUTHORIZED-USE NETWORK-TESTING; do
 done
 
 echo ""
-echo "GNULTE-GO v${VERSION} installed successfully."
+echo "GNULTE v${VERSION} installed successfully."
 echo "  Binaries: ${BINDIR}/gnulte, ${BINDIR}/gnulte-scan"
 echo "  Docs:     ${DOCDIR}/"
 echo ""

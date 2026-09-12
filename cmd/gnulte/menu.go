@@ -96,10 +96,10 @@ func warnText(s string) string {
 func printBanner() {
 	fmt.Println(c(cHeader, `  ██████╗ ███╗   ██╗██╗   ██╗██╗  ████████╗███████╗`))
 	fmt.Println(c(cHeader, ` ██╔════╝ ████╗  ██║██║   ██║██║  ╚══██╔══╝██╔════╝`))
-	fmt.Println(c(cHeader, ` ██║  ███╗██╔██╗ ██║██║   ██║██║     ██║   █████╗  `))
-	fmt.Println(c(cHeader, ` ██║   ██║██║╚██╗██║██║   ██║██║     ██║   ██╔══╝  `))
-	fmt.Println(c(cHeader, ` ╚██████╔╝██║ ╚████║╚██████╔╝███████╗██║   ███████╗`))
-	fmt.Println(c(cHeader, `  ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ ╚══════╝╚═╝   ╚══════╝`))
+	fmt.Println(c(cHeader, ` ██║  ███╗██╔██╗ ██║██║   ██║██║     ██║   █████╗     /████╗ /████╗ ██╗`))
+	fmt.Println(c(cHeader, ` ██║   ██║██║╚██╗██║██║   ██║██║     ██║   ██╔══╝    /██╔══╝/██╔═██╗██║`))
+	fmt.Println(c(cHeader, ` ╚██████╔╝██║ ╚████║╚██████╔╝███████╗██║   ███████╗  ██║  ██╗██║  ██║╚═╝`))
+	fmt.Println(c(cHeader, `  ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ ╚══════╝╚═╝   ╚══════╝  ╚█████╔╝╚█████╔╝██╗`))
 	fmt.Println()
 	fmt.Println("  " + c(cCyan+cBold, "GNU LAN Network Testing Environment"))
 	pulseLine("  Version "+version+" — the original toolkit, now in Go", cCyan, cDim)
@@ -113,11 +113,11 @@ func pulseLine(text, bright, dim string) {
 		fmt.Println("  " + text)
 		return
 	}
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 		fmt.Printf("\r" + c(bright+cBold, text))
-		time.Sleep(110 * time.Millisecond)
+		time.Sleep(90 * time.Millisecond)
 		fmt.Printf("\r" + c(dim, text))
-		time.Sleep(110 * time.Millisecond)
+		time.Sleep(90 * time.Millisecond)
 	}
 	fmt.Printf("\r" + c(bright+cBold, text) + "\n")
 }
@@ -184,10 +184,10 @@ func bootSeq(cfg netutil.Config) {
 func bootPhase(title string) {
 	fmt.Printf("  ● %s...", title)
 	if ansi {
-		spin := []rune("⠋⠙⠹⠸")
-		for i := 0; i < 4; i++ {
+		spin := []rune("⠋⠙⠹")
+		for i := 0; i < 3; i++ {
 			fmt.Printf("\r  ● %s %c ", title, spin[i])
-			time.Sleep(70 * time.Millisecond)
+			time.Sleep(60 * time.Millisecond)
 		}
 	}
 	fmt.Printf("\r  ● %s...\n", title)
@@ -215,25 +215,33 @@ func quickRef() {
 	fmt.Println()
 }
 
-// spinnerMsg animates a spinner until done is closed, then prints a check mark.
-func spinnerMsg(msg string, done <-chan struct{}) {
+// progressBar draws a compact bar driven by real work progress, then inks
+// over it with a check mark. total is the number of probes; prog streams
+// (completed, alive) counts. Falls back to a plain log line when piped.
+func progressBar(msg string, total int, done <-chan struct{}, prog <-chan [2]int) {
+	const width = 18
 	if !ansi {
 		<-done
 		fmt.Println(okText(msg))
 		return
 	}
-	spin := []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
-	i := 0
-	t := time.NewTicker(70 * time.Millisecond)
-	defer t.Stop()
+	seg := 0
 	for {
 		select {
 		case <-done:
-			fmt.Printf("\r%s %s                     \n", okText(""), msg)
+			fill := strings.Repeat("█", width)
+			fmt.Printf("\r  [%s] %s %s\n", c(cGreen, fill), msg, okText(""))
 			return
-		case <-t.C:
-			fmt.Printf("\r[%c] %s ", spin[i%len(spin)], msg)
-			i++
+		case p, ok := <-prog:
+			if !ok {
+				prog = nil
+				continue
+			}
+			if total > 0 {
+				seg = p[0] * width / total
+			}
+			fill := strings.Repeat("█", seg) + strings.Repeat("░", width-seg)
+			fmt.Printf("\r  [%s] %s %d/%d · %d live", fill, msg, p[0], total, p[1])
 		}
 	}
 }
@@ -249,11 +257,19 @@ func scanAndSelect(ctx context.Context, cfg netutil.Config) []string {
 
 	var rows []discover.Row
 	workDone := make(chan struct{})
+	progCh := make(chan [2]int, 8)
 	go func() {
 		defer close(workDone)
-		rows = rowsFromScan(cfg, discover.PingSweep(ctx, hosts, 128))
+		live := discover.PingSweep(ctx, hosts, 128, func(done, alive int) {
+			select {
+			case progCh <- [2]int{done, alive}:
+			default:
+			}
+		})
+		close(progCh)
+		rows = rowsFromScan(cfg, live)
 	}()
-	spinnerMsg("Probing "+subnet+" for live devices...", workDone)
+	progressBar("scanning "+subnet+" for live devices", len(hosts), workDone, progCh)
 
 	if len(rows) == 0 {
 		fatal(fmt.Errorf("no other devices found on the network"))

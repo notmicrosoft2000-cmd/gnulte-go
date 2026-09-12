@@ -48,25 +48,36 @@ type Row struct {
 }
 
 // PingSweep tests every IP with `ping -c1 -W1 -n`, in parallel, honoring
-// threads. Returns the sorted list of live addresses.
-func PingSweep(ctx context.Context, targets []string, threads int) []string {
+// threads. Returns the sorted list of live addresses. An optional progress
+// callback receives (completed, alive) counts as probes finish.
+func PingSweep(ctx context.Context, targets []string, threads int, onProgress ...func(completed, alive int)) []string {
 	if threads < 1 {
 		threads = 1
 	}
 	jobs := make(chan string)
 	var live []string
 	var mu sync.Mutex
+	var completed, alive int
+	report := func(d, a int) {
+		if len(onProgress) > 0 && onProgress[0] != nil {
+			onProgress[0](d, a)
+		}
+	}
 	var wg sync.WaitGroup
 	for i := 0; i < threads; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for ip := range jobs {
-				if ipAlive(ctx, ip) {
-					mu.Lock()
+				ok := ipAlive(ctx, ip)
+				mu.Lock()
+				completed++
+				if ok {
 					live = append(live, ip)
-					mu.Unlock()
+					alive++
 				}
+				report(completed, alive)
+				mu.Unlock()
 			}
 		}()
 	}
@@ -210,8 +221,11 @@ func loadVendors() map[string]string {
 	return db
 }
 
-// ResolveHost does reverse DNS (falls back gracefully).
+// ResolveHost does reverse DNS, bounded so a LAN without a reverse zone
+// cannot stall the scan (falls back gracefully).
 func ResolveHost(ctx context.Context, ip string) string {
+	ctx, cancel := context.WithTimeout(ctx, 700*time.Millisecond)
+	defer cancel()
 	r, err := net.DefaultResolver.LookupAddr(ctx, ip)
 	if err != nil || len(r) == 0 {
 		return ""

@@ -3,11 +3,12 @@ package monitor
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 func TestPingOnceLocalhost(t *testing.T) {
 	ctx := context.Background()
-	rtt := PingOnce(ctx, "127.0.0.1")
+	rtt := PingOnce(ctx, "127.0.0.1", time.Second)
 	if rtt < 0 {
 		t.Fatalf("localhost should respond to ping, got rtt=%d (is the loopback up?)", rtt)
 	}

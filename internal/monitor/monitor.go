@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -68,12 +69,44 @@ type Result struct {
 	Stats Stats
 }
 
+// outTTY reports whether the live console output is a real terminal (color).
+var outTTY = func() bool {
+	fi, err := os.Stdout.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}()
+
+// rttColor renders an RTT, color-coded by severity on terminals.
+func rttColor(ms int) string {
+	s := fmt.Sprintf("%dms", ms)
+	if !outTTY {
+		return s
+	}
+	switch {
+	case ms < 200:
+		return "\033[0;32m" + s + "\033[0m"
+	case ms < 500:
+		return "\033[1;33m" + s + "\033[0m"
+	default:
+		return "\033[0;31m" + s + "\033[0m"
+	}
+}
+
+func badText(s string) string {
+	if !outTTY {
+		return s
+	}
+	return "\033[0;31m" + s + "\033[0m"
+}
+
 // Monitor pings Targets on Interval and reports results.
 type Monitor struct {
 	Targets  []string
 	Interval time.Duration
-	Sound    bool
-	Quiet    bool
+	// Timeout bounds a single ping. It should cover the planned latency so a
+	// slow-but-reachable target is not reported as unreachable.
+	Timeout time.Duration
+	Sound   bool
+	Quiet   bool
 
 	// ExportFile streams every sample as CSV (ts,ip,rtt_ms,ok) when set.
 	ExportFile string
@@ -109,6 +142,14 @@ func (m *Monitor) openExport() error {
 	return nil
 }
 
+// timeout returns the per-ping timeout, defaulting to 1s.
+func (m *Monitor) timeout() time.Duration {
+	if m.Timeout > 0 {
+		return m.Timeout
+	}
+	return time.Second
+}
+
 func (m *Monitor) closeExport() {
 	m.expMu.Lock()
 	defer m.expMu.Unlock()
@@ -129,9 +170,15 @@ func (m *Monitor) exportCSV(ip string, rtt RTT) {
 		time.Now().Format("2006-01-02T15:04:05"), ip, rtt, rtt >= 0)
 }
 
-// PingOnce performs a single 1s-timeout ping and returns the RTT (or -1).
-func PingOnce(ctx context.Context, ip string) RTT {
-	out, err := exec.CommandContext(ctx, "ping", "-c", "1", "-W", "1", "-n", ip).CombinedOutput()
+// PingOnce performs a single ping with the given timeout and returns the RTT
+// (or -1 on no reply). The timeout must cover the planned latency, or a slow
+// but reachable target would be misread as offline.
+func PingOnce(ctx context.Context, ip string, timeout time.Duration) RTT {
+	secs := int(timeout / time.Second)
+	if secs < 1 {
+		secs = 1
+	}
+	out, err := exec.CommandContext(ctx, "ping", "-c", "1", "-W", strconv.Itoa(secs), "-n", ip).CombinedOutput()
 	if err != nil {
 		return -1
 	}
@@ -178,13 +225,13 @@ func (m *Monitor) runSingle(ctx context.Context, ip string) error {
 			m.publish(ip, st)
 			return nil
 		case <-tick.C:
-			rtt := PingOnce(ctx, ip)
+			rtt := PingOnce(ctx, ip, m.timeout())
 			m.exportCSV(ip, rtt)
 			st.Last = rtt
 			if rtt < 0 {
 				st.Drops++
 				if !m.Quiet {
-					fmt.Printf("[%s] %-16s unreachable\n", time.Now().Format("15:04:05"), ip)
+					fmt.Printf("[%s] %-16s %s\n", time.Now().Format("15:04:05"), ip, badText("unreachable"))
 				}
 				if m.Sound {
 					sound.PingResult(0, false)
@@ -200,7 +247,7 @@ func (m *Monitor) runSingle(ctx context.Context, ip string) error {
 				}
 				st.Samples = append(st.Samples, rtt)
 				if !m.Quiet {
-					fmt.Printf("[%s] %-16s %4dms  OK\n", time.Now().Format("15:04:05"), ip, rtt)
+					fmt.Printf("[%s] %-16s %5s  OK\n", time.Now().Format("15:04:05"), ip, rttColor(rtt))
 				}
 				if m.Sound {
 					sound.PingResult(rtt, true)
@@ -250,7 +297,7 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 				case <-ctx.Done():
 					return
 				case <-tick.C:
-					rtt := PingOnce(ctx, ip)
+					rtt := PingOnce(ctx, ip, m.timeout())
 					m.exportCSV(ip, rtt)
 					ok := rtt >= 0
 					stats[i].Last = rtt

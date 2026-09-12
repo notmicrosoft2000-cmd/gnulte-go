@@ -188,12 +188,14 @@ func main() {
 		return
 	}
 
+	interactive := stdinIsTTY() && !*force
 	if !*noBanner && !*quiet {
 		bootSeq(cfg)
-		quickRef()
+		if !interactive {
+			quickRef()
+		}
 	}
 
-	interactive := stdinIsTTY() && !*force
 	scanCtx := context.Background()
 	var targetsList []string
 	if interactive && *targets == "" && *macArg == "" && *rangeCIDR == "" {
@@ -281,7 +283,8 @@ func main() {
 		fatal(err)
 	}
 	if !*quiet {
-		fmt.Println("test running — Ctrl+C to stop and restore normal connectivity")
+		fmt.Println("  " + okText("Session armed — pinging "+strings.Join(targetsList, ", ")))
+		fmt.Println(c(cDim, "  Ctrl+C stops the test and restores normal connectivity"))
 		fmt.Println()
 	}
 
@@ -304,6 +307,9 @@ func main() {
 		Quiet:      *quiet,
 		ExportFile: *exportArg,
 	}
+	// The per-ping timeout must exceed the planned latency, or a degraded but
+	// reachable target (e.g. the 3000ms voip profile) would read as offline.
+	mon.Timeout = time.Duration(ec.LatencyMS+ec.JitterMS+2000) * time.Millisecond
 	if *randomArg && ec.Mode == engine.ModeShape {
 		mon.OnTick = func() {
 			// Toggle parameters mid-test as the Bash toolkit did: random walk

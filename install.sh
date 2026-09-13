@@ -43,10 +43,11 @@ fi
 cd "$SRC_DIR"
 go build -trimpath -ldflags "-s -w" -o gnulte ./cmd/gnulte || exit 1
 go build -trimpath -ldflags "-s -w" -o gnulte-scan ./cmd/gnulte-scan || exit 1
+go build -trimpath -ldflags "-s -w" -o gnulte-wifi ./cmd/gnulte-wifi || exit 1
 
 # --- verify before installing ---
 
-for f in gnulte gnulte-scan; do
+for f in gnulte gnulte-scan gnulte-wifi; do
     if ! file "$f" | grep -q "ELF"; then
         echo "built $f does not look like an ELF binary; aborting." >&2
         exit 1
@@ -61,6 +62,7 @@ echo "[*] installing to ${BINDIR}..."
 mkdir -p "$BINDIR"
 install -m755 "$SRC_DIR/gnulte" "$BINDIR/gnulte"
 install -m755 "$SRC_DIR/gnulte-scan" "$BINDIR/gnulte-scan"
+install -m755 "$SRC_DIR/gnulte-wifi" "$BINDIR/gnulte-wifi"
 
 # --- install legal / safety documentation ---
 
@@ -79,7 +81,7 @@ done
 
 echo ""
 echo "GNULTE v${VERSION} installed successfully."
-echo "  Binaries: ${BINDIR}/gnulte, ${BINDIR}/gnulte-scan"
+echo "  Binaries: ${BINDIR}/gnulte, ${BINDIR}/gnulte-scan, ${BINDIR}/gnulte-wifi"
 echo "  Docs:     ${DOCDIR}/"
 echo ""
 echo "Run gnulte (it elevates via sudo as needed)."

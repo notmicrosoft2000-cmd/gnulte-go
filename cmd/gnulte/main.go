@@ -41,6 +41,7 @@ import (
 	"gnulte-go/internal/monitor"
 	"gnulte-go/internal/netutil"
 	"gnulte-go/internal/safety"
+	"gnulte-go/internal/ux"
 )
 
 const version = "10.0"
@@ -87,7 +88,9 @@ func main() {
 		randomArg   = flag.Bool("random", false, "randomize latency/jitter/loss every second")
 		exportArg   = flag.String("export", "", "stream per-second results to a CSV file")
 		dupcheckArg = flag.Bool("dupcheck", false, "scan the LAN for duplicate IPs / ARP conflicts and exit")
-		reportDir   = flag.String("report", "", "write a post-test report (report.txt + report.html) to DIR")
+		reportFile  = flag.String("report", "", "write the post-test HTML report (full log history) to FILE")
+		noReport    = flag.Bool("no-report", false, "skip writing the post-test HTML report")
+		probePorts  = flag.String("probe-ports", "", "TCP fallback probe ports for ICMP-filtered targets, e.g. 443,80,53")
 
 		duration   = flag.Int("duration", 0, "auto-stop after N seconds (0 = until interrupt)")
 		captureArg = flag.String("c", "", "capture target traffic with tcpdump to FILE ('-' = stdout)")
@@ -328,6 +331,7 @@ func main() {
 		ExportFile: *exportArg,
 		Iface:      cfg.Interface,
 		Impairment: impairmentString(&ec, *profile),
+		TCPPorts:   ux.SplitPorts(*probePorts),
 	}
 	// The per-ping timeout must exceed the planned latency, or a degraded but
 	// reachable target (e.g. the 3000ms voip profile) would read as offline.
@@ -348,11 +352,15 @@ func main() {
 
 	endTime := time.Now()
 	sess.Stop()
-	if *reportDir != "" {
-		if err := writeReport(*reportDir, mon.Results, startTime, endTime); err != nil {
+	if !*noReport {
+		path := *reportFile
+		if path == "" {
+			path = defaultSessionPath()
+		}
+		if err := writeSessionReport(path, mon.Log, mon.Results, startTime, endTime); err != nil {
 			fmt.Fprintf(os.Stderr, "gnulte: report: %v\n", err)
 		} else if !*quiet {
-			fmt.Printf("report written to %s\n", *reportDir)
+			fmt.Printf("session report written to %s\n", path)
 		}
 	}
 	if !*quiet {
@@ -567,7 +575,9 @@ Advanced:
       --sound             beep per ping result, pitch scales with latency (default: on)
       --no-sound          disable the per-ping beeps
       --export FILE       stream per-second results to a CSV file
-      --report DIR         write a post-test report (report.txt + report.html)
+      --report FILE       write the post-test HTML report (full log history)
+      --no-report         skip writing the post-test HTML report (written by default)
+      --probe-ports PORTS TCP fallback probe ports when ICMP is filtered (default 443,80,53)
       --force             skip interactive confirmations
       --no-banner         skip the banner (alias: --minimal)
   -q, --quiet             results only

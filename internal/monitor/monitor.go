@@ -25,12 +25,11 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"os/exec"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"gnulte-go/internal/probe"
 	"gnulte-go/internal/sound"
 )
 
@@ -192,6 +191,17 @@ type Monitor struct {
 	Iface      string
 	Impairment string
 
+	// TCPPorts are the fallback probe ports tried when the target does not
+	// answer ICMP echo (many hosts and firewalls filter it). Defaults to
+	// 443, 80, 53 when empty. A TCP SYN/ACK or RST both prove the host is alive
+	// and yield a measurable latency.
+	TCPPorts []int
+
+	// Log records every permanent console line for the post-test HTML report
+	// (the whole live log history, not just the summary).
+	Log   []string
+	logMu sync.Mutex
+
 	// ExportFile streams every sample as CSV (ts,ip,rtt_ms,ok) when set.
 	ExportFile string
 	// OnTick is invoked once per second while the monitor runs.
@@ -202,6 +212,13 @@ type Monitor struct {
 
 	expMu sync.Mutex
 	exp   *os.File
+}
+
+// rec appends one plain-text console line to the session history.
+func (m *Monitor) rec(line string) {
+	m.logMu.Lock()
+	defer m.logMu.Unlock()
+	m.Log = append(m.Log, line)
 }
 
 func (m *Monitor) publish(ip string, st *Stats) {
@@ -259,33 +276,34 @@ func (m *Monitor) exportCSV(ip string, rtt RTT) {
 // the planned latency, or a slow but reachable target would be misread as
 // offline.
 func PingOnce(ctx context.Context, ip string, timeout time.Duration) (rtt RTT, ttl int) {
-	secs := int((timeout + time.Second - 1) / time.Second)
-	if secs < 1 {
-		secs = 1
+	return probe.Ping(ctx, ip, timeout)
+}
+
+// probePorts returns the configured TCP fallback ports (defaulted in probe).
+func (m *Monitor) probePorts() []int {
+	if len(m.TCPPorts) > 0 {
+		return m.TCPPorts
 	}
-	out, err := exec.CommandContext(ctx, "ping", "-c", "1", "-W", strconv.Itoa(secs), "-n", ip).Output()
-	if err != nil {
-		return -1, 0
-	}
-	s := string(out)
-	if i := strings.Index(s, "ttl="); i >= 0 {
-		j := i + 4
-		for j < len(s) && s[j] >= '0' && s[j] <= '9' {
-			j++
+	return probe.DefaultPorts
+}
+
+// sample measures one target on the primary channel (ICMP echo) and falls back
+// to TCP connects when echo is silent, so a target whose firewall filters ICMP
+// is not misread as offline. It returns the RTT, a human note ("ttl=64",
+// "tcp:443 4ms") and whether the target answered at all.
+func (m *Monitor) sample(ctx context.Context, ip string) (rtt RTT, note string, ok bool) {
+	rtt, ttl := PingOnce(ctx, ip, m.timeout())
+	if rtt >= 0 {
+		if ttl > 0 {
+			note = fmt.Sprintf("ttl=%d", ttl)
 		}
-		ttl, _ = strconv.Atoi(s[i+4 : j])
+		return rtt, note, true
 	}
-	i := strings.Index(s, "time=")
-	if i < 0 || i+5 > len(s) {
-		return -1, ttl
+	res := probe.ProbeTCP(ctx, ip, m.probePorts())
+	if res.Alive() {
+		return res.Latency(), res.Note(), true
 	}
-	rest := s[i+5:]
-	j := strings.IndexAny(rest, " \n\t")
-	if j < 0 {
-		j = len(rest)
-	}
-	rtt, _ = strconv.Atoi(rest[:j])
-	return rtt, ttl
+	return -1, "", false
 }
 
 // Run blocks until ctx is cancelled. Renders console-log history for one
@@ -303,7 +321,7 @@ func (m *Monitor) Run(ctx context.Context) error {
 }
 
 // printHeader paints the static console header with the impairment recipe, the
-// Bash monitor window style.
+// Bash monitor window style, and records it in the session log.
 func (m *Monitor) printHeader() {
 	if m.Quiet {
 		return
@@ -319,21 +337,27 @@ func (m *Monitor) printHeader() {
 		}
 		bits += fmt.Sprintf(" · every %ds", secs)
 	}
-	fmt.Println(dim("══════════════════════════════════════════════════════════════"))
-	fmt.Println("  " + paint(cCyan, "GNULTE") + " · live test console")
+	line := func(s, t string) {
+		fmt.Println(s)
+		m.rec(t)
+	}
+	line(dim("══════════════════════════════════════════════════════════════"),
+		"══════════════════════════════════════════════════════════════")
+	line(paint(cCyan, "GNULTE")+" · live test console", "GNULTE · live test console")
 	if len(m.Targets) == 1 {
-		fmt.Printf("  target      %s\n", m.Targets[0])
+		line(fmt.Sprintf("  target      %s", m.Targets[0]), fmt.Sprintf("  target      %s", m.Targets[0]))
 	} else {
-		fmt.Printf("  targets     %d hosts\n", len(m.Targets))
+		line(fmt.Sprintf("  targets     %d hosts", len(m.Targets)), fmt.Sprintf("  targets     %d hosts", len(m.Targets)))
 	}
 	if m.Iface != "" {
-		fmt.Printf("  interface   %s\n", m.Iface)
+		line(fmt.Sprintf("  interface   %s", m.Iface), fmt.Sprintf("  interface   %s", m.Iface))
 	}
 	if m.Impairment != "" {
-		fmt.Printf("  impairment  %s\n", m.Impairment)
+		line(fmt.Sprintf("  impairment  %s", m.Impairment), fmt.Sprintf("  impairment  %s", m.Impairment))
 	}
-	fmt.Printf("  session     %s\n", bits)
-	fmt.Println(dim("══════════════════════════════════════════════════════════════"))
+	line(fmt.Sprintf("  session     %s", bits), fmt.Sprintf("  session     %s", bits))
+	line(dim("══════════════════════════════════════════════════════════════"),
+		"══════════════════════════════════════════════════════════════")
 }
 
 // runSingle prints each sample as a permanent log line (matches the Bash
@@ -359,18 +383,22 @@ func (m *Monitor) runSingle(ctx context.Context, ip string) error {
 				return nil
 			default:
 			}
-			rtt, ttl := PingOnce(ctx, ip, m.timeout())
+			rtt, note, ok := m.sample(ctx, ip)
 			seq++
 			m.exportCSV(ip, rtt)
 			st.Last = rtt
 			now := time.Now().Format("15:04:05")
-			if rtt < 0 {
+			if !ok {
 				st.Drops++
+				plain := fmt.Sprintf("  #%03d [%s] ✗ %-16s %10s  %s  %s",
+					seq, now, ip, "unreachable", "timeout",
+					fmt.Sprintf("(no reply in %ds)", int(m.timeout()/time.Second)))
 				if !m.Quiet {
 					fmt.Printf("  %s [%s] %s %-16s %10s  %s %s\n",
 						segColor(seq), now, tickMark(false), ip,
 						paint(cRed+cBold, "unreachable"), paint(cDim, "timeout"),
 						dim(fmt.Sprintf("(no reply in %ds)", int(m.timeout()/time.Second))))
+					m.rec(plain)
 				}
 				if m.Sound {
 					sound.PingResult(0, false)
@@ -386,16 +414,15 @@ func (m *Monitor) runSingle(ctx context.Context, ip string) error {
 				}
 				st.Samples = append(st.Samples, rtt)
 				if !m.Quiet {
-					ttlS := "—"
-					if ttl > 0 {
-						ttlS = strconv.Itoa(ttl)
+					if note == "" {
+						note = "—"
 					}
-					line := fmt.Sprintf("  %s [%s] %s %-16s %10s  ttl=%s",
-						segColor(seq), now, tickMark(true), ip, rttColor(rtt), ttlS)
-					if tr := trendOf(prev, rtt); tr != "" {
-						line += " " + tr
+					if strings.HasPrefix(note, "tcp:") {
+						note += dim("  (icmp silent)")
 					}
+					line, plainLine := m.singleLine(seq, now, ip, rtt, note, prev)
 					fmt.Println(line)
+					m.rec(plainLine)
 				}
 				if m.Sound {
 					sound.PingResult(rtt, true)
@@ -412,6 +439,39 @@ func (m *Monitor) runSingle(ctx context.Context, ip string) error {
 	}
 }
 
+// singleLine renders one success sample, returning the coloured console line
+// and the matching plain-text history line.
+func (m *Monitor) singleLine(seq int, now, ip string, rtt RTT, note string, prev RTT) (string, string) {
+	trCol := trendOf(prev, rtt)
+	trPlain := ""
+	if prev >= 0 {
+		trPlain = trendPlain(prev, rtt)
+	}
+	colored := fmt.Sprintf("  %s [%s] %s %-16s %10s  %s",
+		segColor(seq), now, tickMark(true), ip, rttColor(rtt), note)
+	if trCol != "" {
+		colored += " " + trCol
+	}
+	plain := fmt.Sprintf("  #%03d [%s] ✓ %-16s %10s  %s", seq, now, ip, fmt.Sprintf("%dms", rtt), note)
+	if trPlain != "" {
+		plain += " " + trPlain
+	}
+	return colored, plain
+}
+
+// trendPlain is the colour-free trend arrow used by the session log.
+func trendPlain(prev, cur RTT) string {
+	d := cur - prev
+	switch {
+	case d == 0:
+		return "•"
+	case d > 0:
+		return fmt.Sprintf("▲ +%d", d)
+	default:
+		return fmt.Sprintf("▼ %d", d)
+	}
+}
+
 func (m *Monitor) singleSummary(ip string, st *Stats) {
 	if m.Quiet {
 		return
@@ -421,20 +481,31 @@ func (m *Monitor) singleSummary(ip string, st *Stats) {
 	}
 	seen := st.Count
 	loss := st.lossPct()
-	fmt.Println(dim("────────────────────────────── summary ──────────────────────────────"))
+	var head, plainHead string
 	if seen > 0 {
-		fmt.Printf("  %s · ok %d/%d · avg %s · min %s · max %s · jitter ±%dms · loss %.0f%%\n",
+		head = fmt.Sprintf("  %s · ok %d/%d · avg %s · min %s · max %s · jitter ±%dms · loss %.0f%%",
 			ip, seen, st.attempts(), rttColor(int(st.avg())),
 			rttColor(int(st.Min)), rttColor(int(st.Max)), st.jitter(), loss)
+		plainHead = fmt.Sprintf("  %s · ok %d/%d · avg %dms · min %dms · max %dms · jitter ±%dms · loss %.0f%%",
+			ip, seen, st.attempts(), st.avg(), st.Min, st.Max, st.jitter(), loss)
 	} else {
-		fmt.Printf("  %s · ok 0/%d · no replies · loss %.0f%%\n", ip, st.attempts(), loss)
+		head = fmt.Sprintf("  %s · ok 0/%d · no replies · loss %.0f%%", ip, st.attempts(), loss)
+		plainHead = head
 	}
-	fmt.Println(dim("──────────────────────────────────────────────────────────────────────"))
+	delim := "────────────────────────────── summary ──────────────────────────────"
+	delim2 := "──────────────────────────────────────────────────────────────────────"
+	fmt.Println(dim(delim))
+	m.rec(delim)
+	fmt.Println(head)
+	m.rec(plainHead)
+	fmt.Println(dim(delim2))
+	m.rec(delim2)
 }
 
 // runMulti renders a live dashboard that is rewritten each second.
 func (m *Monitor) runMulti(ctx context.Context) error {
 	stats := make([]*Stats, len(m.Targets))
+	lastNote := make([]string, len(m.Targets))
 	for i := range stats {
 		stats[i] = &Stats{Samples: []int{}}
 	}
@@ -458,9 +529,9 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 						return
 					default:
 					}
-					rtt, _ := PingOnce(ctx, ip, m.timeout())
+					rtt, note, ok := m.sample(ctx, ip)
 					m.exportCSV(ip, rtt)
-					ok := rtt >= 0
+					lastNote[i] = note
 					stats[i].Last = rtt
 					if ok {
 						stats[i].Count++
@@ -478,6 +549,25 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 					// Sound only on state transitions (avoids a beep per host/s).
 					if m.Sound && started[i] && prevOK[i] != ok {
 						sound.PingResult(rtt, ok)
+					}
+					if !m.Quiet {
+						// History line: one permanent row per sample so the
+						// report carries the whole log, not just the snapshot.
+						mark, rttS := "✓", "—"
+						if ok {
+							rttS = fmt.Sprintf("%dms", rtt)
+						} else {
+							mark = "✗"
+						}
+						noteS := note
+						if !ok {
+							noteS = "unreachable"
+						}
+						if noteS == "" {
+							noteS = "—"
+						}
+						m.rec(fmt.Sprintf("  [%s] %s %-16s %10s  %s",
+							time.Now().Format("15:04:05"), mark, ip, rttS, noteS))
 					}
 					started[i] = true
 					prevOK[i] = ok
@@ -497,7 +587,7 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 			}
 			return nil
 		case <-tick.C:
-			m.renderDashboard(stats)
+			m.renderDashboard(stats, lastNote)
 			if m.OnTick != nil {
 				m.OnTick()
 			}
@@ -537,7 +627,7 @@ func statusIcon(v RTT) string {
 	}
 }
 
-func (m *Monitor) renderDashboard(stats []*Stats) {
+func (m *Monitor) renderDashboard(stats []*Stats, lastNote []string) {
 	// Frame height: blank line + 2 rows per target + timestamp footer.
 	frames := 2 + 2*len(m.Targets)
 	fmt.Printf("\033[%dA\033[J", frames)
@@ -548,6 +638,9 @@ func (m *Monitor) renderDashboard(stats []*Stats) {
 		last := "--"
 		if st.Last >= 0 {
 			last = fmt.Sprintf("%dms", st.Last)
+			if n := lastNote[i]; strings.HasPrefix(n, "tcp:") {
+				last += dim(" (" + n + ")")
+			}
 		}
 		mn, mx := "--", "--"
 		if st.Count > 0 {

@@ -18,7 +18,10 @@
 // Command gnulte-scan is the Go rewrite of the GNULTE LAN scanner.
 //
 // It discovers live hosts on the local network, identifies NIC vendors,
-// resolves hostnames, classifies devices, and can export JSON/YAML/CSV.
+// resolves hostnames, classifies devices, and can export JSON/YAML/CSV. The
+// live console is terminal-width aware (the bar, table, and banner adapt to
+// the window), animations are spinner/loading-bar based (no flashing text),
+// and every session ends with a self-contained HTML report of the whole log.
 // Only scan networks you own or are authorized to test.
 package main
 
@@ -29,6 +32,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -38,9 +42,28 @@ import (
 	"gnulte-go/internal/out"
 	"gnulte-go/internal/safety"
 	"gnulte-go/internal/sound"
+	"gnulte-go/internal/ux"
 )
 
 const version = "10.0"
+
+// session collects the permanent console lines so the final HTML report can
+// reproduce the entire log history of the run.
+type session struct {
+	log []string
+}
+
+var sess session
+
+// pl prints the display line to the console writer and records a plain-text
+// twin for the report. The console writer points at stderr during exports so
+// the data stream (stdout) stays machine-parseable.
+func (s *session) pl(display, plain string) {
+	fmt.Fprintln(ux.Out, display)
+	if plain != "" {
+		s.log = append(s.log, plain)
+	}
+}
 
 func main() {
 	var (
@@ -53,6 +76,8 @@ func main() {
 		asCSV     = flag.Bool("c", false, "output CSV")
 		quiet     = flag.Bool("q", false, "quiet: results only")
 		useSound  = flag.Bool("sound", false, "play a tone per result")
+		reportArg = flag.String("report", "", "write the post-test HTML report (full log history) to FILE")
+		noReport  = flag.Bool("no-report", false, "skip writing the post-test HTML report")
 		showDocs  = flag.Bool("docs", false, "print the safety documents and exit")
 		resetSafe = flag.Bool("reset-safety", false, "remove the acceptance record and exit")
 		showVer   = flag.Bool("version", false, "print version and exit")
@@ -67,6 +92,19 @@ func main() {
 	flag.BoolVar(quiet, "quiet", false, "quiet: results only")
 	flag.Usage = usage
 	flag.Parse()
+
+	// Machine formats own stdout: the human console narrative moves to stderr
+	// so `gnulte-scan --json | jq` sees nothing but JSON. Live tools keep the
+	// whole console on stdout.
+	exporting := *asJSON || *asYAML || *asCSV
+	showUI := !*quiet
+	if exporting {
+		ux.Out = os.Stderr
+	}
+
+	// Terminal metrics are captured once, before any output redirection, so the
+	// banner, bar, and table all size themselves against the real window.
+	cols := ux.Width()
 
 	if *showVer {
 		fmt.Printf("gnulte-scan (Go) v%s\n", version)
@@ -105,40 +143,99 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
+	subnet := subnetString(cfg)
 
 	if !*quiet {
-		fmt.Printf("gnulte-scan (Go) v%s  —  authorized testing only\n", version)
-		fmt.Printf("Interface : %s\n", cfg.Interface)
-		fmt.Printf("This host : %s\n", orUnknown(cfg.SelfIP))
-		fmt.Printf("Gateway   : %s\n", orUnknown(cfg.Gateway))
-		fmt.Printf("Scanning  : %d addresses with %d workers\n\n", len(targets), *threads)
+		banner(cols)
+		sess.pl(fmt.Sprintf("  interface   %s  %s", cfg.Interface, orUnknown(cfg.SelfIP)),
+			fmt.Sprintf("  interface   %s  %s", cfg.Interface, orUnknown(cfg.SelfIP)))
+		sess.pl(fmt.Sprintf("  gateway     %s", orUnknown(cfg.Gateway)),
+			fmt.Sprintf("  gateway     %s", orUnknown(cfg.Gateway)))
+		sess.pl(fmt.Sprintf("  scope       %s  ·  %d addresses · %d workers", orUnknown(subnet), len(targets), *threads),
+			fmt.Sprintf("  scope       %s  ·  %d addresses · %d workers", orUnknown(subnet), len(targets), *threads))
+		fmt.Fprintln(ux.Out)
 	}
 
-	live := discover.PingSweep(ctx, targets, *threads)
-	neighbors := discover.Neighbors(ctx, cfg.Interface)
+	// Scan phase: spinner + width-aware loading bar (no flashing).
+	var bar *ux.Bar
+	if showUI {
+		bar = ux.NewBar("scanning "+orUnknown(subnet)+" for live hosts", len(targets))
+	}
+	live := discover.PingSweep(ctx, targets, *threads, func(done, alive int) {
+		if bar != nil {
+			bar.Update(done, alive)
+		}
+	})
+	if bar != nil {
+		bar.Finish(len(targets), len(live))
+	}
 
-	rows := buildRows(ctx, live, neighbors, cfg)
+	// Lease ICMP-filters respect ARP: neighbors who ignore echo still appear.
+	if showUI {
+		busy := ux.NewBusy(fmt.Sprintf("resolving %d host(s)", len(live)))
+		resCh := make(chan []discover.Row, 1)
+		go func() {
+			resCh <- buildRows(ctx, live, discover.Neighbors(context.Background(), cfg.Interface), cfg)
+		}()
+		for {
+			select {
+			case rows = <-resCh:
+				busy.Done(fmt.Sprintf("%d device(s) identified", len(rows)))
+			case <-time.After(60 * time.Millisecond):
+				busy.Spin()
+				continue
+			}
+			break
+		}
+	} else {
+		rows = buildRows(ctx, live, discover.Neighbors(context.Background(), cfg.Interface), cfg)
+	}
 	if *deep {
-		deepScan(ctx, rows, *threads)
+		deepBusy := ux.NewBusy(fmt.Sprintf("deep-scanning %d host(s) with nmap", len(rows)))
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			deepScan(ctx, rows, *threads)
+		}()
+		for {
+			select {
+			case <-done:
+				deepBusy.Done("deep scan complete")
+			case <-time.After(60 * time.Millisecond):
+				deepBusy.Spin()
+				continue
+			}
+			break
+		}
 	}
 	out.SortByIP(rows)
 
+	exported := false
 	switch {
 	case *asJSON:
 		err = out.JSON(os.Stdout, rows)
+		exported = true
 	case *asYAML:
 		err = out.YAML(os.Stdout, rows)
+		exported = true
 	case *asCSV:
 		err = out.CSV(os.Stdout, rows)
+		exported = true
 	default:
-		out.Table(os.Stdout, rows)
+		renderTable(&sess, rows, cols)
 	}
 	if err != nil {
 		fatal(err)
 	}
 
 	if !*quiet {
-		fmt.Printf("\nScan complete: %d host(s) responded — %s\n", len(rows), time.Now().Format("15:04:05"))
+		if exported {
+			sess.pl(fmt.Sprintf("exported %d host(s) — %s", len(rows), exportKind(*asJSON, *asYAML, *asCSV)),
+				fmt.Sprintf("exported %d host(s)", len(rows)))
+			fmt.Fprintln(ux.Out)
+		}
+		sess.pl(fmt.Sprintf("scan complete — %d host(s) responded · %s", len(rows), time.Now().Format("15:04:05")),
+			fmt.Sprintf("scan complete — %d host(s) responded · %s", len(rows), time.Now().Format("15:04:05")))
 	}
 	if *useSound {
 		if len(rows) == 0 {
@@ -147,6 +244,61 @@ func main() {
 			sound.Found()
 		}
 	}
+
+	if !*noReport {
+		path := *reportArg
+		if path == "" {
+			path = fmt.Sprintf("gnulte-scan-report-%s.html", time.Now().Format("20060102-150405"))
+		}
+		meta := scanMeta{Interface: cfg.Interface, SelfIP: cfg.SelfIP, Gateway: cfg.Gateway, Subnet: subnet}
+		if err := writeScanReport(path, sess.log, rows, meta); err != nil {
+			fmt.Fprintf(os.Stderr, "gnulte-scan: report: %v\n", err)
+		} else if !*quiet {
+			fmt.Fprintf(ux.Out, "HTML report written to %s\n", path)
+		}
+	}
+}
+
+// rows holds the discovered devices; kept package-scope so the busy spinner
+// goroutine can hand it over without an awkward type dance in main.
+var rows []discover.Row
+
+func exportKind(j, y, c bool) string {
+	switch {
+	case j:
+		return "JSON"
+	case y:
+		return "YAML"
+	case c:
+		return "CSV"
+	}
+	return ""
+}
+
+// banner draws a width-aware title bar with static styling (no animation).
+func banner(cols int) {
+	w := ux.Clamp(cols-2, 24, 78)
+	line := "  " + strings.Repeat("═", w)
+	sess.pl(ux.C(ux.Dim, line), line)
+	sess.pl("  "+ux.C(ux.Header, "GNULTE SCAN")+"   "+ux.C(ux.Cyan, "v"+version)+"   "+ux.C(ux.Dim, "LAN discovery"),
+		"  GNULTE SCAN   v"+version+"   LAN discovery")
+	sess.pl("  "+ux.C(ux.Dim, "authorized network testing only"), "  authorized network testing only")
+	sess.pl(ux.C(ux.Dim, line), line)
+	fmt.Fprintln(ux.Out)
+}
+
+// subnetString renders the derived subnet CIDR for the header and report.
+func subnetString(cfg netutil.Config) string {
+	if cfg.SelfIP == "" || cfg.Netmask == "" {
+		return ""
+	}
+	ip := net.ParseIP(cfg.SelfIP).To4()
+	mask := net.ParseIP(cfg.Netmask).To4()
+	if ip == nil || mask == nil {
+		return ""
+	}
+	net := net.IPNet{IP: ip.Mask(net.IPMask(mask)), Mask: net.IPMask(mask)}
+	return net.String()
 }
 
 func buildRows(ctx context.Context, live []string, neighbors map[string]string, cfg netutil.Config) []discover.Row {
@@ -264,6 +416,8 @@ Options:
   -c, --csv               output CSV
   -q, --quiet             results only, no header/summary
       --sound             play a tone for the result
+      --report FILE       write the post-test HTML report (full log history)
+      --no-report         skip writing the HTML report (written by default)
       --docs              print the safety documents and exit
       --reset-safety      remove the acceptance record and exit
       --version           print version and exit

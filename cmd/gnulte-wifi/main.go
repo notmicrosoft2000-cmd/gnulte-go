@@ -224,7 +224,8 @@ func main() {
 		fmt.Println()
 	}
 
-	var seq, sent, bursts uint16
+	var seq uint16
+	var sent, bursts uint64
 loop:
 	for {
 		select {

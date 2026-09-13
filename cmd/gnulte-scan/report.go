@@ -71,8 +71,18 @@ pre{background:#0d0d0d;border:1px solid #2a2a2a;padding:1em;overflow-x:auto;whit
 	}
 
 	if len(rows) > 0 {
+		// The Ports/OS column must be decided from every row, not just the
+		// first (IP-sorted) one: a later host may be the only one deep-scanned,
+		// and a column present for some rows but not others misaligns the table.
+		hasDeep := false
+		for _, r := range rows {
+			if r.Ports != "" || r.OS != "" {
+				hasDeep = true
+				break
+			}
+		}
 		b.WriteString("<h2>Discovered hosts</h2>\n<table>\n<tr><th>IP</th><th>MAC</th><th>Vendor</th><th>Hostname</th><th>Type</th>")
-		if rows[0].Ports != "" || rows[0].OS != "" {
+		if hasDeep {
 			b.WriteString("<th>Ports / OS</th>")
 		}
 		b.WriteString("</tr>\n")
@@ -82,7 +92,7 @@ pre{background:#0d0d0d;border:1px solid #2a2a2a;padding:1em;overflow-x:auto;whit
 			b.WriteString("<td>" + htmlEsc(orDash(r.Vendor)) + "</td>")
 			b.WriteString("<td>" + htmlEsc(orDash(r.Hostname)) + "</td>")
 			b.WriteString("<td>" + htmlEsc(orDash(r.Type)) + "</td>")
-			if rows[0].Ports != "" || rows[0].OS != "" {
+			if hasDeep {
 				extra := ""
 				if r.Ports != "" {
 					extra = r.Ports

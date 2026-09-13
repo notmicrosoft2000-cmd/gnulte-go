@@ -260,6 +260,9 @@ func scanAndSelect(ctx context.Context, cfg netutil.Config) []string {
 	if err != nil || len(hosts) == 0 {
 		fatal(fmt.Errorf("could not enumerate %s (%v)", subnet, err))
 	}
+	if len(hosts) > 1024 {
+		fmt.Printf("  %s subnet %s has %d addresses — the sweep may take a while\n", warnText(""), subnet, len(hosts))
+	}
 
 	var rows []discover.Row
 	workDone := make(chan struct{})
@@ -304,6 +307,7 @@ func scanAndSelect(ctx context.Context, cfg netutil.Config) []string {
 	for {
 		fmt.Print(c(cDim, "Enter device number(s) (comma-separated) or 'r' for all: "))
 		if !stdinReader().Scan() {
+			promptEOF = true // Ctrl-D on an empty line aborts instead of looping
 			return nil
 		}
 		sel := strings.TrimSpace(stdinReader().Text())
@@ -386,14 +390,17 @@ func rowsFromScan(cfg netutil.Config, live []string) []discover.Row {
 	return rows
 }
 
-// subnetCIDR derives a /CIDR from the interface IP and dotted netmask.
+// subnetCIDR derives a /CIDR from the interface IP and dotted netmask. The
+// prefix length comes from the mask's leading 1-bits — counting octets equal
+// to "255" wrongly turned 255.255.254.0 into /16 and 255.255.255.128 into /24.
 func subnetCIDR(ip, mask string) string {
-	ip4 := strings.Split(mask, ".")
-	ones := 0
-	for _, o := range ip4 {
-		if o == "255" {
-			ones += 8
-		}
+	m := net.ParseIP(mask)
+	if m == nil {
+		return fmt.Sprintf("%s/24", ip)
+	}
+	ones, bits := net.IPMask(m.To4()).Size()
+	if bits == 0 || ones == 0 { // non-contiguous or zero mask: keep it simple
+		return fmt.Sprintf("%s/24", ip)
 	}
 	_, ipnet, err := net.ParseCIDR(fmt.Sprintf("%s/%d", ip, ones))
 	if err != nil {
@@ -402,9 +409,15 @@ func subnetCIDR(ip, mask string) string {
 	return ipnet.String()
 }
 
+// promptEOF is set when stdin hit end-of-input (Ctrl-D or a closed pipe):
+// callers then treat the reply as "abort" instead of "keep the default", so a
+// stray Ctrl-D cannot silently walk the whole wizard with defaults.
+var promptEOF bool
+
 func prompt(promptFmt string, args ...any) string {
 	fmt.Printf(promptFmt, args...)
 	if !stdinReader().Scan() {
+		promptEOF = true
 		return ""
 	}
 	return strings.TrimSpace(stdinReader().Text())

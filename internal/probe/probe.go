@@ -26,6 +26,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os/exec"
 	"strconv"
@@ -164,8 +165,18 @@ func Ping(ctx context.Context, ip string, timeout time.Duration) (rtt int, ttl i
 	if j < 0 {
 		j = len(rest)
 	}
-	rtt, _ = strconv.Atoi(rest[:j])
-	return rtt, ttl
+	return parseMillis(rest[:j], ttl), ttl
+}
+
+// parseMillis converts the tail of a ping "time=…" value (e.g. "0.042",
+// "11.0", "3", "<1") into a rounded integer number of milliseconds, or -1
+// when it cannot be parsed. "<1" means a sub-millisecond reply.
+func parseMillis(tok string, ttl int) int {
+	f, err := strconv.ParseFloat(strings.TrimPrefix(tok, "<"), 64)
+	if err != nil {
+		return -1
+	}
+	return int(math.Round(f))
 }
 
 // Probe measures reachability to ip. ICMP echo is tried first (the classic

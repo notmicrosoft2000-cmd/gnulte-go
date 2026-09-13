@@ -230,6 +230,7 @@ type Session struct {
 	spoofs         []*exec.Cmd
 	qdiscBefore    string
 	qdiscApplied   bool
+	restoreErr     []string
 	capture        *exec.Cmd
 	captureWait    chan struct{}
 }
@@ -518,6 +519,8 @@ func restoreQdiscArgs(iface, before string) []string {
 }
 
 // Stop tears everything down in reverse order and restores the original state.
+// Cleanup failures are collected; call RestoreProblems to warn the operator
+// rather than pretending connectivity was fully restored.
 func (s *Session) Stop() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -529,22 +532,35 @@ func (s *Session) Stop() {
 	s.stopSpoofs()
 
 	if s.qdiscApplied {
-		_ = runRoot("tc", "qdisc", "del", "dev", s.cfg.Interface, "root")
-		if args := restoreQdiscArgs(s.cfg.Interface, s.qdiscBefore); len(args) > 0 {
-			_ = runRoot("tc", args...)
+		if err := runRoot("tc", "qdisc", "del", "dev", s.cfg.Interface, "root"); err != nil {
+			s.restoreErr = append(s.restoreErr, "tc qdisc del: "+err.Error())
+		} else if args := restoreQdiscArgs(s.cfg.Interface, s.qdiscBefore); len(args) > 0 {
+			if err := runRoot("tc", args...); err != nil {
+				s.restoreErr = append(s.restoreErr, "tc qdisc restore: "+err.Error())
+			}
 		}
 	}
 
 	if s.forwardTouched {
-		_ = writeForward(s.origForward)
+		if err := writeForward(s.origForward); err != nil {
+			s.restoreErr = append(s.restoreErr, "ip_forward restore: "+err.Error())
+		}
 	}
 
 	for _, d := range s.drops {
 		args := []string{"-D", "FORWARD"}
 		args = append(args, strings.Fields(d)...)
-		_ = runRoot("iptables", args...)
+		if err := runRoot("iptables", args...); err != nil {
+			s.restoreErr = append(s.restoreErr, "iptables -D FORWARD: "+err.Error())
+		}
 	}
 	s.drops = nil
 
 	s.stopCapture()
+}
+
+// RestoreProblems lists any teardown step that failed to restore the network,
+// best-effort only: the caller decides how loudly to complain.
+func (s *Session) RestoreProblems() []string {
+	return append([]string(nil), s.restoreErr...)
 }

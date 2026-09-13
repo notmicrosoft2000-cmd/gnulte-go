@@ -221,6 +221,10 @@ type Monitor struct {
 	// monitoring: the host whose beeps are audible.
 	sel int32
 
+	// mu guards stats[i]/lastNote[i] writes from the per-target goroutines
+	// against the dashboard reader in the main loop.
+	mu sync.Mutex
+
 	// Results is filled once Run returns.
 	Results []Result
 
@@ -587,6 +591,7 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 					}
 					rtt, note, ok := m.sample(ctx, ip)
 					m.exportCSV(ip, rtt)
+					m.mu.Lock()
 					lastNote[i] = note
 					stats[i].Last = rtt
 					if ok {
@@ -602,6 +607,7 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 					} else {
 						stats[i].Drops++
 					}
+					m.mu.Unlock()
 					// Beep every sample of the host the arrows have selected,
 					// pitched by its latency — the sound mirrors what the
 					// selected target's link is doing right now.
@@ -690,6 +696,8 @@ func statusIcon(v RTT) string {
 }
 
 func (m *Monitor) renderDashboard(stats []*Stats, lastNote []string, keyboard, view bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	sel := int(atomic.LoadInt32(&m.sel))
 	lines := make([]string, 0, 2+2*len(m.Targets))
 	lines = append(lines, "")

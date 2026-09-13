@@ -123,7 +123,12 @@ func main() {
 	if err != nil {
 		fatal(fmt.Errorf("could not count %s traffic: %v", nic, err))
 	}
-	counter.Snapshot() // baseline so the first second shows a real rate
+	// A down interface yields a nil counter (traffic.New returns (nil, nil)):
+	// the dashboard then shows every host as idle instead of panicking.
+	hasCounter := counter != nil
+	if hasCounter {
+		counter.Snapshot() // baseline so the first second shows a real rate
+	}
 
 	leave := func() {}
 	inView := false
@@ -131,14 +136,18 @@ func main() {
 		var ok bool
 		if leave, ok = tui.EnterView(); ok {
 			inView = true
-			tui.RegisterCleanup(leave)         // Ctrl+C during the view restores the screen
-			tui.RegisterCleanup(counter.Close) // and never leaves the socket open
+			tui.RegisterCleanup(leave) // Ctrl+C during the view restores the screen
+			if hasCounter {
+				tui.RegisterCleanup(counter.Close) // and never leaves the socket open
+			}
 		}
 	}
 	var once sync.Once
 	safeLeave := func() { once.Do(leave) }
 	defer safeLeave()
-	defer counter.Close()
+	if hasCounter {
+		defer counter.Close()
+	}
 
 	tick := time.NewTicker(time.Duration(iv) * time.Second)
 	defer tick.Stop()
@@ -150,7 +159,10 @@ func main() {
 			}
 			return
 		case <-tick.C:
-			rates := counter.Snapshot()
+			var rates map[string]traffic.Rate
+			if hasCounter {
+				rates = counter.Snapshot()
+			}
 			lines := render(hosts, rates, nic, iv)
 			if inView {
 				tui.DrawFrame(os.Stdout, ux.Width(), lines)
@@ -194,9 +206,12 @@ func render(hosts []string, rates map[string]traffic.Rate, nic string, iv int) [
 	first := true
 	for _, ip := range hosts {
 		r := rates[ip]
-		key := "  " + ux.C(ux.Yellow, ip)
+		// Pad the plain IP before colouring: padding a string that already
+		// carries ANSI escapes misaligns the columns by the escape length.
+		label := ux.TruncPad(ip, 16)
+		key := "  " + ux.C(ux.Yellow, label)
 		if first {
-			key = "▸" + ux.C(ux.Yellow, ip)
+			key = "▸ " + ux.C(ux.Yellow, label)
 			first = false
 		}
 		dl := rateLine(r.RXBytes, r.RXPkts)

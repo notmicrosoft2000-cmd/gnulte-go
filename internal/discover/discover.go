@@ -60,6 +60,11 @@ func PingSweep(ctx context.Context, targets []string, threads int, onProgress ..
 	if threads < 1 {
 		threads = 1
 	}
+	// Cap concurrency: 100k concurrent ping subprocesses must never happen,
+	// even if the operator passes -t 100000.
+	if threads > 512 {
+		threads = 512
+	}
 	jobs := make(chan string)
 	var live []string
 	var mu sync.Mutex

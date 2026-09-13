@@ -155,6 +155,27 @@ func main() {
 	flag.Visit(func(f *flag.Flag) {
 		explicit[f.Name] = true
 	})
+	// Canonical aliases: -l, -j, -p, -d, -e, -b are the short forms of
+	// the impairment fields; mark their long names as "explicit" when the
+	// short form was typed, so profile presets don't silently override them.
+	if explicit["l"] {
+		explicit["latency"] = true
+	}
+	if explicit["j"] {
+		explicit["jitter"] = true
+	}
+	if explicit["p"] {
+		explicit["loss"] = true
+	}
+	if explicit["d"] {
+		explicit["duplicate"] = true
+	}
+	if explicit["e"] {
+		explicit["reorder"] = true
+	}
+	if explicit["b"] {
+		explicit["bandwidth"] = true
+	}
 
 	// Persisted defaults are read once, up front, so every default decision
 	// below (interface, interval, beeps, report) can consult them.
@@ -319,6 +340,12 @@ func main() {
 	if interactive && ec.Mode != engine.ModeBlock {
 		paramsWizard(&ec, duration, &beep, interval)
 	}
+	// A stray Ctrl-D anywhere in the wizard is an abort, not a "keep every
+	// default" walk-through: get out before anything is started.
+	if promptEOF {
+		fmt.Println("Aborted — nothing was started.")
+		os.Exit(2)
+	}
 	if !explicit["interval"] && prefs.IntervalSec >= 1 {
 		*interval = prefs.IntervalSec
 	}
@@ -342,7 +369,7 @@ func main() {
 		}
 		if !confirmStart() {
 			fmt.Println("Aborted — nothing was started.")
-			return
+			os.Exit(2)
 		}
 	}
 
@@ -398,14 +425,27 @@ func main() {
 			nc.LatencyMS = clamp(ec.LatencyMS+rand.Intn(1000)-500, 100, 60000)
 			nc.JitterMS = clamp(ec.JitterMS+rand.Intn(400)-200, 50, 60000)
 			nc.LossPct = rand.Intn(10)
-			_ = sess.UpdateParams(nc)
+			if err := sess.UpdateParams(nc); err != nil && !*quiet {
+				// A failed tc change must not kill the test, but the operator
+				// should hear that RANDOM mode has stopped re-rolling.
+				fmt.Fprintln(os.Stderr, "gnulte: random update failed:", err)
+			}
 		}
 	}
 	startTime := time.Now()
-	_ = mon.Run(monCtx)
+	if err := mon.Run(monCtx); err != nil && !*quiet {
+		fmt.Fprintf(os.Stderr, "gnulte: monitor: %v\n", err)
+	}
 
 	endTime := time.Now()
 	sess.Stop()
+	if probs := sess.RestoreProblems(); len(probs) > 0 {
+		fmt.Fprintln(os.Stderr, "gnulte: warning: some network state could not be restored automatically:")
+		for _, p := range probs {
+			fmt.Fprintln(os.Stderr, "  • "+p)
+		}
+		fmt.Fprintln(os.Stderr, "  inspect `tc qdisc show` and `iptables -L FORWARD` and clean up by hand if needed.")
+	}
 	if !explicit["no-report"] && !explicit["report"] && !prefs.HTMLReport {
 		*noReport = true
 	}

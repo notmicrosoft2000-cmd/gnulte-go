@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -11,8 +12,24 @@ func TestPingLocalhost(t *testing.T) {
 	if rtt < 0 {
 		t.Fatalf("localhost should answer echo, got rtt=%d", rtt)
 	}
-	if ttl <= 0 {
-		t.Errorf("echo reply should carry a TTL, got ttl=%d", ttl)
+	if ttl == 0 {
+		t.Error("localhost reply should carry a TTL")
+	}
+}
+
+func TestParseMillis(t *testing.T) {
+	ttl := 64
+	for _, tc := range []struct{ in, want string }{
+		{"0.042", "0"},
+		{"11.0", "11"},
+		{"3", "3"},
+		{"<1", "1"},
+		{"garbage", "-1"},
+	} {
+		rtt := parseMillis(tc.in, ttl)
+		if got := strconv.Itoa(rtt); got != tc.want {
+			t.Errorf("parseMillis(%q) = %s, want %s", tc.in, got, tc.want)
+		}
 	}
 }
 

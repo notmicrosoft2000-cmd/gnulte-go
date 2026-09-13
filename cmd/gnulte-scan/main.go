@@ -41,7 +41,9 @@ import (
 	"gnulte-go/internal/netutil"
 	"gnulte-go/internal/out"
 	"gnulte-go/internal/safety"
+	"gnulte-go/internal/settings"
 	"gnulte-go/internal/sound"
+	"gnulte-go/internal/tui"
 	"gnulte-go/internal/ux"
 )
 
@@ -67,20 +69,21 @@ func (s *session) pl(display, plain string) {
 
 func main() {
 	var (
-		iface     = flag.String("i", "", "network interface (default: auto-detect)")
-		cidr      = flag.String("C", "", "CIDR to scan (default: from interface)")
-		threads   = flag.Int("t", 64, "parallel ping workers")
-		deep      = flag.Bool("d", false, "deep scan alive hosts with the in-Go port scanner")
-		asJSON    = flag.Bool("j", false, "output JSON")
-		asYAML    = flag.Bool("y", false, "output YAML")
-		asCSV     = flag.Bool("c", false, "output CSV")
-		quiet     = flag.Bool("q", false, "quiet: results only")
-		useSound  = flag.Bool("sound", false, "play a tone per result")
-		reportArg = flag.String("report", "", "write the post-test HTML report (full log history) to FILE")
-		noReport  = flag.Bool("no-report", false, "skip writing the post-test HTML report")
-		showDocs  = flag.Bool("docs", false, "print the safety documents and exit")
-		resetSafe = flag.Bool("reset-safety", false, "remove the acceptance record and exit")
-		showVer   = flag.Bool("version", false, "print version and exit")
+		iface       = flag.String("i", "", "network interface (default: auto-detect)")
+		cidr        = flag.String("C", "", "CIDR to scan (default: from interface)")
+		threads     = flag.Int("t", 64, "parallel ping workers")
+		deep        = flag.Bool("d", false, "deep scan alive hosts with the in-Go port scanner")
+		asJSON      = flag.Bool("j", false, "output JSON")
+		asYAML      = flag.Bool("y", false, "output YAML")
+		asCSV       = flag.Bool("c", false, "output CSV")
+		quiet       = flag.Bool("q", false, "quiet: results only")
+		useSound    = flag.Bool("sound", false, "play a tone per result")
+		reportArg   = flag.String("report", "", "write the post-test HTML report (full log history) to FILE")
+		noReport    = flag.Bool("no-report", false, "skip writing the post-test HTML report")
+		showDocs    = flag.Bool("docs", false, "print the safety documents and exit")
+		resetSafe   = flag.Bool("reset-safety", false, "remove the acceptance record and exit")
+		showVer     = flag.Bool("version", false, "print version and exit")
+		settingsArg = flag.Bool("settings", false, "open the settings editor (saved defaults) and exit")
 	)
 	flag.StringVar(iface, "interface", "", "network interface (default: auto-detect)")
 	flag.StringVar(cidr, "cidr", "", "CIDR to scan (default: from interface)")
@@ -119,6 +122,40 @@ func main() {
 			fatal(err)
 		}
 		return
+	}
+
+	// Which flags the operator typed (saved settings only fill the rest).
+	explicit := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) {
+		explicit[f.Name] = true
+	})
+
+	prefs, err := settings.Load()
+	if err != nil {
+		fatal(fmt.Errorf("settings: %v", err))
+	}
+	if *settingsArg {
+		if !ux.TTY() || !tui.StdinTTY() {
+			fatal(fmt.Errorf("the settings editor needs a real terminal"))
+		}
+		updated, err := settings.Edit(prefs)
+		if err != nil {
+			fatal(err)
+		}
+		if err := settings.Save(updated); err != nil {
+			fatal(fmt.Errorf("settings: %v", err))
+		}
+		fmt.Printf("settings saved to %s\n", settings.Path())
+		return
+	}
+	if !explicit["threads"] && prefs.ScanThreads >= 1 {
+		*threads = prefs.ScanThreads
+	}
+	if !explicit["i"] && !explicit["interface"] && prefs.Interface != "" {
+		*iface = prefs.Interface
+	}
+	if !explicit["report"] && !explicit["no-report"] && !prefs.HTMLReport {
+		*noReport = true
 	}
 
 	if err := safety.EnsureAccepted(); err != nil {
@@ -420,6 +457,7 @@ Options:
       --sound             play a tone for the result
       --report FILE       write the post-test HTML report (full log history)
       --no-report         skip writing the HTML report (written by default)
+      --settings          open the settings editor (saved defaults) and exit
       --docs              print the safety documents and exit
       --reset-safety      remove the acceptance record and exit
       --version           print version and exit

@@ -38,6 +38,8 @@ import (
 
 	"gnulte-go/internal/airframes"
 	"gnulte-go/internal/safety"
+	"gnulte-go/internal/settings"
+	"gnulte-go/internal/tui"
 	"gnulte-go/internal/ux"
 )
 
@@ -54,12 +56,13 @@ func main() {
 		once     = flag.Bool("once", false, "send a single burst and exit")
 		duration = flag.Int("duration", 0, "auto-stop after N seconds (0 = until interrupt)")
 
-		force     = flag.Bool("force", false, "skip interactive confirmations (require explicit flags)")
-		noBanner  = flag.Bool("no-banner", false, "skip the banner")
-		quiet     = flag.Bool("q", false, "quiet: results only")
-		showDocs  = flag.Bool("docs", false, "print the safety documents and exit")
-		resetSafe = flag.Bool("reset-safety", false, "remove the acceptance record and exit")
-		showVer   = flag.Bool("version", false, "print version and exit")
+		force       = flag.Bool("force", false, "skip interactive confirmations (require explicit flags)")
+		noBanner    = flag.Bool("no-banner", false, "skip the banner")
+		quiet       = flag.Bool("q", false, "quiet: results only")
+		showDocs    = flag.Bool("docs", false, "print the safety documents and exit")
+		resetSafe   = flag.Bool("reset-safety", false, "remove the acceptance record and exit")
+		showVer     = flag.Bool("version", false, "print version and exit")
+		settingsArg = flag.Bool("settings", false, "open the settings editor (saved defaults) and exit")
 	)
 	flag.StringVar(ifaceArg, "interface", "", "wireless interface in monitor mode (e.g. wlan0mon)")
 	flag.StringVar(bssidArg, "ap", "", "access point BSSID (router MAC), e.g. 00:0c:41:63:45:6a")
@@ -82,6 +85,34 @@ func main() {
 			fatal(err)
 		}
 		return
+	}
+	explicit := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) {
+		explicit[f.Name] = true
+	})
+	prefs, err := settings.Load()
+	if err != nil {
+		fatal(fmt.Errorf("settings: %v", err))
+	}
+	if *settingsArg {
+		if !ux.TTY() || !tui.StdinTTY() {
+			fatal(fmt.Errorf("the settings editor needs a real terminal"))
+		}
+		updated, err := settings.Edit(prefs)
+		if err != nil {
+			fatal(err)
+		}
+		if err := settings.Save(updated); err != nil {
+			fatal(fmt.Errorf("settings: %v", err))
+		}
+		fmt.Printf("settings saved to %s\n", settings.Path())
+		return
+	}
+	if !explicit["count"] && prefs.WifiCount >= 1 {
+		*count = prefs.WifiCount
+	}
+	if !explicit["delay"] && prefs.WifiDelaySec >= 1 {
+		*delay = prefs.WifiDelaySec
 	}
 	if !*noBanner && !*quiet && os.Getenv("GNULTE_AS_ROOT") != "1" {
 		banner()
@@ -365,6 +396,7 @@ Options:
       --force             skip interactive confirmations
       --no-banner         skip the banner (alias: --minimal)
   -q, --quiet             results only
+      --settings          open the settings editor (saved defaults) and exit
       --docs              print the safety documents and exit
       --reset-safety      remove the acceptance record and exit
       --version           print version and exit

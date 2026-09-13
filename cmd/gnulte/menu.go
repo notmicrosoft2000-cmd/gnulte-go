@@ -28,6 +28,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,6 +38,7 @@ import (
 	"gnulte-go/internal/engine"
 	"gnulte-go/internal/netutil"
 	"gnulte-go/internal/out"
+	"gnulte-go/internal/ux"
 )
 
 var ansi = outTTY()
@@ -212,6 +214,8 @@ func quickRef() {
 	fmt.Println("    gnulte -t 192.168.1.20 --interval 2                  ping every 2s")
 	fmt.Println("    gnulte --no-sound                                   silence the ping beeps")
 	fmt.Println("    gnulte --scan / --dupcheck                          discovery tools")
+	fmt.Println("    gnulte --settings                                 edit saved defaults")
+	fmt.Println("    gnulte-traffic -i wlan0 -t 192.168.1.1,192.168.1.50   live per-host speed")
 	fmt.Println("  " + c(cDim, "  With no targeting flags, the guided menu opens below."))
 	fmt.Println(c(cDim, "  ─────────────────────────────────────────────────"))
 	fmt.Println()
@@ -494,4 +498,56 @@ func confirmStart() bool {
 	}
 	a := strings.ToLower(ans)
 	return a == "y" || a == "yes"
+}
+
+// trafficWindowChoice asks whether to show all targets in this dashboard or
+// open a separate traffic & speed monitor window for side-by-side watching.
+func trafficWindowChoice() bool {
+	fmt.Println()
+	fmt.Println(c(cCyan+cBold, " Two or more targets selected — how do you want to watch them?"))
+	fmt.Println("   1) all targets in this console dashboard (default)")
+	fmt.Println("   2) traffic & speed monitor in a separate terminal window")
+	sel := prompt("   choice [1/2]: ")
+	fmt.Println()
+	return strings.TrimSpace(sel) == "2"
+}
+
+// launchTrafficWindow detaches a gnulte-traffic window for the watched targets
+// so the two views can be compared side by side. It warns rather than failing
+// when no terminal emulator is available.
+func launchTrafficWindow(interval int, iface string, targets []string) {
+	bin := trafficBinary()
+	if bin == "" {
+		fmt.Println("  " + warnText("gnulte-traffic is not installed — run the traffic monitor separately (gnulte-traffic -i ... -t ...)"))
+		return
+	}
+	args := []string{bin, "-i", iface, "-t", strings.Join(targets, ",")}
+	if interval > 0 {
+		args = append(args, "--interval", strconv.Itoa(interval))
+	}
+	started, err := ux.LaunchTerminal(args...)
+	if err != nil {
+		fmt.Printf("  %s could not open a terminal window: %v\n", warnText(""), err)
+		return
+	}
+	if !started {
+		fmt.Println("  " + warnText("no terminal emulator found — add $TERMINAL (e.g. export TERMINAL='xterm -e') to enable the separate window"))
+		return
+	}
+	fmt.Println("  " + okText("Traffic monitor opened in a separate window — "+strings.Join(targets, ", ")))
+}
+
+// trafficBinary locates the installed gnulte-traffic binary (directly beside
+// the running gnulte or in PATH).
+func trafficBinary() string {
+	if p, err := exec.LookPath("gnulte-traffic"); err == nil {
+		return p
+	}
+	if exe, err := os.Executable(); err == nil {
+		p := filepath.Join(filepath.Dir(exe), "gnulte-traffic")
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
 }

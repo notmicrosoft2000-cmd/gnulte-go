@@ -22,6 +22,7 @@
 package ux
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -80,6 +81,51 @@ func RuneLen(s string) int {
 	return len([]rune(s))
 }
 
+// TruncPad lays s onto exactly width cells without ever wrapping: ANSI escape
+// sequences do not count toward the width, over-long visible text is truncated
+// (re-applying a colour reset so the next frame does not inherit a tint), and
+// short text is padded with trailing spaces to the full width. This is what
+// keeps full-frame redraws exactly one line tall per row.
+func TruncPad(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	runes := []rune(s)
+	var b strings.Builder
+	b.Grow(len(s) + 4)
+	w := 0
+	i := 0
+	sawESC := false
+	for i < len(runes) {
+		if runes[i] == 0x1b {
+			start := i
+			i++
+			for i < len(runes) && !('@' <= runes[i] && runes[i] <= '~') {
+				i++
+			}
+			if i < len(runes) {
+				i++ // final byte of the CSI/OSC sequence
+			}
+			b.WriteString(string(runes[start:i]))
+			sawESC = true
+			continue
+		}
+		if w >= width {
+			break
+		}
+		b.WriteRune(runes[i])
+		w++
+		i++
+	}
+	if sawESC && i < len(runes) {
+		b.WriteString(Reset) // truncation cut into live colour
+	}
+	for pad := width - w; pad > 0; pad-- {
+		b.WriteByte(' ')
+	}
+	return b.String()
+}
+
 // Trunc ellipsizes s at n runes.
 func Trunc(s string, n int) string {
 	r := []rune(s)
@@ -90,6 +136,19 @@ func Trunc(s string, n int) string {
 		return "…"
 	}
 	return string(r[:n-1]) + "…"
+}
+
+// HumanRate renders a byte count as a size-suffixed rate per second, e.g.
+// "1.2KB/s" or "98B/s", shared by the monitor and traffic dashboards.
+func HumanRate(b int64) string {
+	switch {
+	case b < 1024:
+		return fmt.Sprintf("%dB/s", b)
+	case b < 1024*1024:
+		return fmt.Sprintf("%.1fKB/s", float64(b)/1024)
+	default:
+		return fmt.Sprintf("%.1fMB/s", float64(b)/(1024*1024))
+	}
 }
 
 // SplitHostPorts parses "443,80,53" into a port list, skipping garbage.

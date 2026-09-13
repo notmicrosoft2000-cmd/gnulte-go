@@ -44,10 +44,11 @@ cd "$SRC_DIR"
 go build -trimpath -ldflags "-s -w" -o gnulte ./cmd/gnulte || exit 1
 go build -trimpath -ldflags "-s -w" -o gnulte-scan ./cmd/gnulte-scan || exit 1
 go build -trimpath -ldflags "-s -w" -o gnulte-wifi ./cmd/gnulte-wifi || exit 1
+go build -trimpath -ldflags "-s -w" -o gnulte-traffic ./cmd/gnulte-traffic || exit 1
 
 # --- verify before installing ---
 
-for f in gnulte gnulte-scan gnulte-wifi; do
+for f in gnulte gnulte-scan gnulte-wifi gnulte-traffic; do
     if ! file "$f" | grep -q "ELF"; then
         echo "built $f does not look like an ELF binary; aborting." >&2
         exit 1
@@ -57,12 +58,17 @@ if ! ./gnulte --version | grep -q "v${VERSION}"; then
     echo "gnulte does not report v${VERSION}; aborting." >&2
     exit 1
 fi
+if ! ./gnulte-traffic --version | grep -q "v${VERSION}"; then
+    echo "gnulte-traffic does not report v${VERSION}; aborting." >&2
+    exit 1
+fi
 
 echo "[*] installing to ${BINDIR}..."
 mkdir -p "$BINDIR"
 install -m755 "$SRC_DIR/gnulte" "$BINDIR/gnulte"
 install -m755 "$SRC_DIR/gnulte-scan" "$BINDIR/gnulte-scan"
 install -m755 "$SRC_DIR/gnulte-wifi" "$BINDIR/gnulte-wifi"
+install -m755 "$SRC_DIR/gnulte-traffic" "$BINDIR/gnulte-traffic"
 
 # --- install legal / safety documentation ---
 
@@ -81,7 +87,7 @@ done
 
 echo ""
 echo "GNULTE v${VERSION} installed successfully."
-echo "  Binaries: ${BINDIR}/gnulte, ${BINDIR}/gnulte-scan, ${BINDIR}/gnulte-wifi"
+echo "  Binaries: ${BINDIR}/gnulte, ${BINDIR}/gnulte-scan, ${BINDIR}/gnulte-wifi, ${BINDIR}/gnulte-traffic"
 echo "  Docs:     ${DOCDIR}/"
 echo ""
 echo "Run gnulte (it elevates via sudo as needed)."

@@ -41,6 +41,8 @@ import (
 	"gnulte-go/internal/monitor"
 	"gnulte-go/internal/netutil"
 	"gnulte-go/internal/safety"
+	"gnulte-go/internal/settings"
+	"gnulte-go/internal/tui"
 	"gnulte-go/internal/ux"
 )
 
@@ -92,18 +94,20 @@ func main() {
 		noReport    = flag.Bool("no-report", false, "skip writing the post-test HTML report")
 		probePorts  = flag.String("probe-ports", "", "TCP fallback probe ports for ICMP-filtered targets, e.g. 443,80,53")
 
-		duration   = flag.Int("duration", 0, "auto-stop after N seconds (0 = until interrupt)")
-		captureArg = flag.String("c", "", "capture target traffic with tcpdump to FILE ('-' = stdout)")
-		block      = flag.Bool("block", false, "fully block the target (no forwarding) instead of shaping")
-		soundArg   = flag.Bool("sound", true, "beep per ping result, pitch scaled by latency (default: on)")
-		noSound    = flag.Bool("no-sound", false, "disable the per-ping beeps")
-		interval   = flag.Int("interval", 1, "seconds between pings (1-60)")
-		force      = flag.Bool("force", false, "skip interactive confirmations (require explicit flags)")
-		noBanner   = flag.Bool("no-banner", false, "skip the banner (alias: --minimal)")
-		quiet      = flag.Bool("q", false, "quiet: results only")
-		showDocs   = flag.Bool("docs", false, "print the safety documents and exit")
-		resetSafe  = flag.Bool("reset-safety", false, "remove the acceptance record and exit")
-		showVer    = flag.Bool("version", false, "print version and exit")
+		duration    = flag.Int("duration", 0, "auto-stop after N seconds (0 = until interrupt)")
+		captureArg  = flag.String("c", "", "capture target traffic with tcpdump to FILE ('-' = stdout)")
+		block       = flag.Bool("block", false, "fully block the target (no forwarding) instead of shaping")
+		soundArg    = flag.Bool("sound", true, "beep per ping result, pitch scaled by latency (default: on)")
+		noSound     = flag.Bool("no-sound", false, "disable the per-ping beeps")
+		interval    = flag.Int("interval", 1, "seconds between pings (1-60)")
+		force       = flag.Bool("force", false, "skip interactive confirmations (require explicit flags)")
+		noBanner    = flag.Bool("no-banner", false, "skip the banner (alias: --minimal)")
+		quiet       = flag.Bool("q", false, "quiet: results only")
+		showDocs    = flag.Bool("docs", false, "print the safety documents and exit")
+		resetSafe   = flag.Bool("reset-safety", false, "remove the acceptance record and exit")
+		showVer     = flag.Bool("version", false, "print version and exit")
+		settingsArg = flag.Bool("settings", false, "open the settings editor (saved defaults) and exit")
+		trafficWin  = flag.Bool("traffic-window", false, "with 2+ targets, open the traffic & speed monitor in a separate terminal window")
 	)
 	flag.StringVar(ifaceArg, "interface", "", "network interface (default: auto-detect)")
 	flag.StringVar(targets, "target", "", "target IP(s), comma-separated")
@@ -145,6 +149,40 @@ func main() {
 		}
 		return
 	}
+
+	// Which flags the operator typed (settings defaults only fill the rest).
+	explicit := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) {
+		explicit[f.Name] = true
+	})
+
+	// Persisted defaults are read once, up front, so every default decision
+	// below (interface, interval, beeps, report) can consult them.
+	prefs, err := settings.Load()
+	if err != nil {
+		fatal(fmt.Errorf("settings: %v", err))
+	}
+
+	// The settings editor is a full-screen terminal TU/t and writes straight
+	// back to the config file, then hands control back to the shell.
+	if *settingsArg {
+		if !stdinIsTTY() {
+			fatal(fmt.Errorf("the settings editor needs a real terminal"))
+		}
+		updated, err := settings.Edit(prefs)
+		if err != nil {
+			if err == tui.ErrNotTerminal {
+				fatal(fmt.Errorf("the settings editor needs a real terminal"))
+			}
+			fatal(err)
+		}
+		if err := settings.Save(updated); err != nil {
+			fatal(fmt.Errorf("settings: %v", err))
+		}
+		fmt.Printf("settings saved to %s\n", settings.Path())
+		return
+	}
+
 	if !*noBanner && !*quiet && os.Getenv("GNULTE_AS_ROOT") != "1" {
 		printBanner()
 	}
@@ -203,6 +241,8 @@ func main() {
 	}
 	if *ifaceArg != "" {
 		cfg.Interface = *ifaceArg
+	} else if prefs.Interface != "" {
+		cfg.Interface = prefs.Interface
 	}
 
 	if *dupcheckArg {
@@ -247,10 +287,6 @@ func main() {
 	if *rangeCIDR != "" {
 		ec.RangeStart = cfg.Gateway // gateway is never dropped in a range sweep
 	}
-	explicit := map[string]bool{}
-	flag.Visit(func(f *flag.Flag) {
-		explicit[f.Name] = true
-	})
 	if *profile != "" {
 		p, ok := profiles[*profile]
 		if !ok {
@@ -274,10 +310,17 @@ func main() {
 	if *block {
 		ec.Mode = engine.ModeBlock
 	}
-	// Beeps are on by default; an advanced run or the wizard can turn them off.
+	// Beeps are on by default; the saved settings, an explicit flag, or the
+	// wizard can turn them off.
 	beep := *soundArg && !*noSound
+	if !explicit["sound"] && !explicit["no-sound"] {
+		beep = prefs.Beeps
+	}
 	if interactive && ec.Mode != engine.ModeBlock {
 		paramsWizard(&ec, duration, &beep, interval)
+	}
+	if !explicit["interval"] && prefs.IntervalSec >= 1 {
+		*interval = prefs.IntervalSec
 	}
 	iv := time.Second
 	if *interval >= 1 {
@@ -301,6 +344,17 @@ func main() {
 			fmt.Println("Aborted — nothing was started.")
 			return
 		}
+	}
+
+	// With two or more targets the operator can watch them two ways: the
+	// console dashboard (default) or a dedicated traffic & speed monitor in
+	// its own terminal window, so the two stay side by side.
+	openTraffic := *trafficWin
+	if !openTraffic && len(targetsList) >= 2 && interactive && !*quiet {
+		openTraffic = trafficWindowChoice()
+	}
+	if openTraffic {
+		launchTrafficWindow(prefs.TrafficSec, cfg.Interface, targetsList)
 	}
 
 	monCtx := sigCtx
@@ -352,6 +406,9 @@ func main() {
 
 	endTime := time.Now()
 	sess.Stop()
+	if !explicit["no-report"] && !explicit["report"] && !prefs.HTMLReport {
+		*noReport = true
+	}
 	if !*noReport {
 		path := *reportFile
 		if path == "" {
@@ -567,6 +624,11 @@ Profiles:
       --list-profiles     list the preset profiles and exit
       --random            re-roll latency/jitter/loss every second
 
+Watch:
+      --traffic-window    with 2+ targets, open the traffic & speed monitor
+                          in a separate terminal window
+  -q, --quiet             results only
+
 Advanced:
       --duration SECONDS  auto-stop after N seconds
       --interval SECONDS  ping every N seconds (default 1)
@@ -580,8 +642,8 @@ Advanced:
       --probe-ports PORTS TCP fallback probe ports when ICMP is filtered (default 443,80,53)
       --force             skip interactive confirmations
       --no-banner         skip the banner (alias: --minimal)
-  -q, --quiet             results only
       --dupcheck          scan LAN for duplicate IPs / ARP conflicts and exit
+      --settings          open the settings editor (saved defaults) and exit
       --docs              print the safety documents and exit
       --reset-safety      remove the acceptance record and exit
       --version           print version and exit

@@ -33,6 +33,8 @@ import (
 	"gnulte-go/internal/probe"
 	"gnulte-go/internal/sound"
 	"gnulte-go/internal/traffic"
+	"gnulte-go/internal/tui"
+	"gnulte-go/internal/ux"
 )
 
 // RTT is a single ping sample in milliseconds (-1 when the target did not
@@ -552,6 +554,20 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 	restore := enableKeyboard(len(m.Targets), &m.sel)
 	defer restore()
 
+	// Flicker-free dashboard: switch to the terminal's alternate buffer and
+	// repaint the whole frame in one flush every tick, so there is no per-line
+	// flashing. Single-target runs deliberately stay a scrolling console log
+	// (runSingle), and piped output skips the alternate buffer entirely.
+	leave := func() {}
+	view := false
+	if !m.Quiet && ux.TTY() {
+		if l, ok := tui.EnterView(); ok {
+			leave, view = l, true
+			tui.RegisterCleanup(l) // a hard interrupt still restores the screen
+		}
+	}
+	defer leave()
+
 	var wg sync.WaitGroup
 	for i, ip := range m.Targets {
 		wg.Add(1)
@@ -633,7 +649,7 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 			}
 			return nil
 		case <-tick.C:
-			m.renderDashboard(stats, lastNote, keyboard)
+			m.renderDashboard(stats, lastNote, keyboard, view)
 			if m.OnTick != nil {
 				m.OnTick()
 			}
@@ -673,13 +689,11 @@ func statusIcon(v RTT) string {
 	}
 }
 
-func (m *Monitor) renderDashboard(stats []*Stats, lastNote []string, keyboard bool) {
+func (m *Monitor) renderDashboard(stats []*Stats, lastNote []string, keyboard, view bool) {
 	sel := int(atomic.LoadInt32(&m.sel))
-	// Frame height: blank line + 2 rows per target + timestamp footer.
-	frames := 2 + 2*len(m.Targets)
-	fmt.Printf("\033[%dA\033[J", frames)
+	lines := make([]string, 0, 2+2*len(m.Targets))
+	lines = append(lines, "")
 
-	fmt.Println()
 	for i, ip := range m.Targets {
 		st := stats[i]
 		mark := "   "
@@ -719,8 +733,8 @@ func (m *Monitor) renderDashboard(stats []*Stats, lastNote []string, keyboard bo
 		if tr != "" {
 			trS = paint(cCyan, tr)
 		}
-		fmt.Printf("  %s%s %s  %s  last %s  avg %s  loss %s  %s\n",
-			mark, idx, statusIcon(st.Last), paint(cYellow, ip), last, avg, loss, trS)
+		lines = append(lines, fmt.Sprintf("  %s%s %s  %s  last %s  avg %s  loss %s  %s",
+			mark, idx, statusIcon(st.Last), paint(cYellow, ip), last, avg, loss, trS))
 
 		// Line 2: span metrics and the tiny latency sparkline, dim.
 		mn, mx := "--", "--"
@@ -739,10 +753,21 @@ func (m *Monitor) renderDashboard(stats []*Stats, lastNote []string, keyboard bo
 			}
 			spark = string(sp[:min(len(sp), 30)])
 		}
-		fmt.Printf("      %-16s min %s · max %s · jitter ±%dms %s %s\n",
-			"", mn, mx, st.jitter(), tcpNote, dim(spark))
+		lines = append(lines, fmt.Sprintf("      %-16s min %s · max %s · jitter ±%dms %s %s",
+			"", mn, mx, st.jitter(), tcpNote, dim(spark)))
 	}
-	fmt.Printf("  [%s]\n", time.Now().Format("15:04:05"))
+	lines = append(lines, fmt.Sprintf("  [%s]", time.Now().Format("15:04:05")))
+
+	if view {
+		// Alternate buffer: one buffered write per second — no flicker.
+		tui.DrawFrame(os.Stdout, ux.Width(), lines)
+		return
+	}
+	// Piped/logged output: back up over the previous frame in one ANSI move.
+	fmt.Printf("\033[%dA\033[J", len(lines))
+	for _, ln := range lines {
+		fmt.Println(ln)
+	}
 }
 
 func min(a, b int) int {
@@ -762,23 +787,11 @@ func (m *Monitor) rateText(ip string) string {
 	if r.RXBytes == 0 && r.TXBytes == 0 && r.RXPkts == 0 && r.TXPkts == 0 {
 		return "↓0 ↑0"
 	}
-	s := "↓" + humanRate(r.RXBytes)
+	s := "↓" + ux.HumanRate(r.RXBytes)
 	if r.TXBytes > 0 {
-		s += " " + "↑" + humanRate(r.TXBytes)
+		s += " " + "↑" + ux.HumanRate(r.TXBytes)
 	}
 	return s
-}
-
-// humanRate renders a byte rate with a size suffix, per second.
-func humanRate(b int64) string {
-	switch {
-	case b < 1024:
-		return fmt.Sprintf("%dB/s", b)
-	case b < 1024*1024:
-		return fmt.Sprintf("%.1fKB/s", float64(b)/1024)
-	default:
-		return fmt.Sprintf("%.1fMB/s", float64(b)/(1024*1024))
-	}
 }
 
 // stdinIsTTY reports whether standard input is a real terminal (needed for the

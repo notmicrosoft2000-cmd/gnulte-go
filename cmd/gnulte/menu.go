@@ -208,8 +208,10 @@ func quickRef() {
 	fmt.Println("    gnulte -t 192.168.1.20 --profile voip --duration 300")
 	fmt.Println("    gnulte -r 192.168.1.0/24 -w 192.168.1.100        range attack")
 	fmt.Println("    gnulte -t 192.168.1.20 --block                    100% block")
-	fmt.Println("    gnulte -t 192.168.1.20 --sound --random            ping beeps + random walk")
-	fmt.Println("    gnulte --scan / --dupcheck                        discovery tools")
+	fmt.Println("    gnulte -t 192.168.1.20 --random                     beeps + random walk")
+	fmt.Println("    gnulte -t 192.168.1.20 --interval 2                  ping every 2s")
+	fmt.Println("    gnulte --no-sound                                   silence the ping beeps")
+	fmt.Println("    gnulte --scan / --dupcheck                          discovery tools")
 	fmt.Println("  " + c(cDim, "  With no targeting flags, the guided menu opens below."))
 	fmt.Println(c(cDim, "  ─────────────────────────────────────────────────"))
 	fmt.Println()
@@ -405,9 +407,9 @@ func prompt(promptFmt string, args ...any) string {
 }
 
 // paramsWizard interactively configures latency/jitter/loss/dup/reorder/
-// bandwidth/duration. Defaults prefill from the current config (already
-// influenced by any flags or profile); Enter keeps a value.
-func paramsWizard(ec *engine.Config, duration *int) {
+// bandwidth/duration/sound/interval. Defaults prefill from the current config
+// (already influenced by any flags or profile); Enter keeps a value.
+func paramsWizard(ec *engine.Config, duration *int, beep *bool, interval *int) {
 	fmt.Println()
 	fmt.Println("  " + c(cBold+cCyan, "Parameter Configuration:") + "  " + c(cDim, "Enter keeps current values."))
 	fmt.Println()
@@ -450,13 +452,38 @@ func paramsWizard(ec *engine.Config, duration *int) {
 		promptInt("Duration (s)", "  Auto-stop after N seconds (0 = until Ctrl+C).", fmt.Sprintf("%d", *duration), duration)
 	}
 
+	fmt.Println("  " + c(cDim, "Sounds: a short tone per ping — higher pitch = faster reply."))
+	soundCur := "y"
+	if !*beep {
+		soundCur = "n"
+	}
+	if ans := prompt("  Beep per ping result? (y/N) [%s]: ", soundCur); ans != "" {
+		*beep = strings.HasPrefix(strings.ToLower(ans), "y")
+	}
+	if ans := prompt("  Ping every N seconds [%d]: ", *interval); ans != "" {
+		if v, err := strconv.Atoi(ans); err == nil && v >= 1 {
+			*interval = v
+		} else {
+			fmt.Println("  " + warnText(fmt.Sprintf("ignoring non-numeric interval (kept %ds)", *interval)))
+		}
+	}
+
 	fmt.Println("  Configuration:")
 	fmt.Printf("    %s latency=%dms jitter=%dms loss=%d%% dup=%d%% reorder=%d%% cap=%dkbps\n",
 		okText(""), ec.LatencyMS, ec.JitterMS, ec.LossPct, ec.DupPct, ec.ReorderPct, ec.BandwidthKbps)
 	if *duration > 0 {
 		fmt.Printf("    duration=%ds\n", *duration)
 	}
+	fmt.Printf("    beeps=%s interval=%d%s\n", onOff(*beep), *interval, c(cDim, "s"))
 	fmt.Println()
+}
+
+// onOff returns a compact yes/no label.
+func onOff(b bool) string {
+	if b {
+		return "on"
+	}
+	return "off"
 }
 
 // confirmStart mirrors the toolkit's "Begin test? (y/N)" prompt.

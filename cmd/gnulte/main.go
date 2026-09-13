@@ -92,7 +92,9 @@ func main() {
 		duration   = flag.Int("duration", 0, "auto-stop after N seconds (0 = until interrupt)")
 		captureArg = flag.String("c", "", "capture target traffic with tcpdump to FILE ('-' = stdout)")
 		block      = flag.Bool("block", false, "fully block the target (no forwarding) instead of shaping")
-		soundArg   = flag.Bool("sound", false, "beep per ping result")
+		soundArg   = flag.Bool("sound", true, "beep per ping result, pitch scaled by latency (default: on)")
+		noSound    = flag.Bool("no-sound", false, "disable the per-ping beeps")
+		interval   = flag.Int("interval", 1, "seconds between pings (1-60)")
 		force      = flag.Bool("force", false, "skip interactive confirmations (require explicit flags)")
 		noBanner   = flag.Bool("no-banner", false, "skip the banner (alias: --minimal)")
 		quiet      = flag.Bool("q", false, "quiet: results only")
@@ -175,6 +177,23 @@ func main() {
 		fmt.Println()
 	}
 
+	// Interrupt handling. A single Ctrl+C cancels the running session and
+	// triggers a full state restore; a second one exits immediately, because a
+	// stuck child must never leave the network half-shaped.
+	sigCtx, sigStop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer sigStop()
+	go func() {
+		<-sigCtx.Done()
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+		select {
+		case <-ch:
+			fmt.Fprintln(os.Stderr, "\ngnulte: forced exit on second interrupt — state restore interrupted.")
+			os.Exit(130)
+		case <-time.After(8 * time.Second):
+		}
+	}()
+
 	cfg, err := netutil.DefaultRoute()
 	if err != nil {
 		fatal(fmt.Errorf("network detection failed: %w", err))
@@ -196,13 +215,13 @@ func main() {
 		}
 	}
 
-	scanCtx := context.Background()
+	scanCtx := sigCtx
 	var targetsList []string
 	if interactive && *targets == "" && *macArg == "" && *rangeCIDR == "" {
 		targetsList = scanAndSelect(scanCtx, cfg)
 	} else {
 		var err error
-		targetsList, err = resolveTargets(*targets, *macArg, *rangeCIDR, *whitelist, cfg)
+		targetsList, err = resolveTargets(sigCtx, *targets, *macArg, *rangeCIDR, *whitelist, cfg)
 		if err != nil {
 			fatal(err)
 		}
@@ -252,8 +271,14 @@ func main() {
 	if *block {
 		ec.Mode = engine.ModeBlock
 	}
+	// Beeps are on by default; an advanced run or the wizard can turn them off.
+	beep := *soundArg && !*noSound
 	if interactive && ec.Mode != engine.ModeBlock {
-		paramsWizard(&ec, duration)
+		paramsWizard(&ec, duration, &beep, interval)
+	}
+	iv := time.Second
+	if *interval >= 1 {
+		iv = time.Duration(*interval) * time.Second
 	}
 	if problems := engine.DepsCheck(&ec); len(problems) > 0 {
 		fatal(fmt.Errorf("%s", strings.Join(problems, "\n  • ")))
@@ -263,7 +288,7 @@ func main() {
 	}
 
 	if !*quiet {
-		safetySummary(&ec, *randomArg, *profile != "")
+		safetySummary(&ec, *randomArg, *profile != "", beep, iv)
 	}
 	if !*force {
 		if !stdinIsTTY() {
@@ -275,10 +300,17 @@ func main() {
 		}
 	}
 
+	monCtx := sigCtx
+	if *duration > 0 {
+		var dur context.CancelFunc
+		monCtx, dur = context.WithTimeout(sigCtx, time.Duration(*duration)*time.Second)
+		defer dur()
+	}
+
 	if !*quiet {
 		fmt.Println("  " + okText("Elevated session active — test operations run with root privileges."))
 	}
-	sess, err := engine.Start(ec)
+	sess, err := engine.Start(monCtx, ec)
 	if err != nil {
 		fatal(err)
 	}
@@ -288,24 +320,14 @@ func main() {
 		fmt.Println()
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	var monCtx context.Context
-	if *duration > 0 {
-		var dur CancelFunc
-		monCtx, dur = context.WithTimeout(ctx, time.Duration(*duration)*time.Second)
-		defer dur()
-	} else {
-		monCtx = ctx
-	}
-
 	mon := &monitor.Monitor{
 		Targets:    targetsList,
-		Interval:   time.Second,
-		Sound:      *soundArg,
+		Interval:   iv,
+		Sound:      beep,
 		Quiet:      *quiet,
 		ExportFile: *exportArg,
+		Iface:      cfg.Interface,
+		Impairment: impairmentString(&ec, *profile),
 	}
 	// The per-ping timeout must exceed the planned latency, or a degraded but
 	// reachable target (e.g. the 3000ms voip profile) would read as offline.
@@ -338,10 +360,8 @@ func main() {
 	}
 }
 
-type CancelFunc = context.CancelFunc
-
 // resolveTargets combines --target/--mac/--range into a target list.
-func resolveTargets(tAmt, tMac, rCIDR, wl string, cfg netutil.Config) ([]string, error) {
+func resolveTargets(ctx context.Context, tAmt, tMac, rCIDR, wl string, cfg netutil.Config) ([]string, error) {
 	var list []string
 	excluded := map[string]bool{cfg.SelfIP: true}
 	for _, w := range splitCSV(wl) {
@@ -374,7 +394,7 @@ func resolveTargets(tAmt, tMac, rCIDR, wl string, cfg netutil.Config) ([]string,
 			return nil, fmt.Errorf("invalid range: %w", err)
 		}
 		// Ping sweep so the engine only spoofs devices that actually exist.
-		live := discover.PingSweep(context.Background(), iplist, 64)
+		live := discover.PingSweep(ctx, iplist, 64)
 		for _, ip := range live {
 			if !excluded[ip] {
 				list = append(list, ip)
@@ -421,7 +441,30 @@ func splitCSV(s string) []string {
 	return strings.Split(s, ",")
 }
 
-func safetySummary(c *engine.Config, randomize, profile bool) {
+// impairmentString summarises the shaping recipe for the live console header.
+func impairmentString(c *engine.Config, prof string) string {
+	if c.Mode == engine.ModeBlock {
+		return "100% BLOCK — no forwarding"
+	}
+	parts := []string{
+		fmt.Sprintf("latency %dms", c.LatencyMS),
+		fmt.Sprintf("jitter %dms", c.JitterMS),
+		fmt.Sprintf("loss %d%%", c.LossPct),
+		fmt.Sprintf("dup %d%%", c.DupPct),
+		fmt.Sprintf("reorder %d%%", c.ReorderPct),
+	}
+	if c.BandwidthKbps > 0 {
+		parts = append(parts, fmt.Sprintf("cap %dkbps", c.BandwidthKbps))
+	} else {
+		parts = append(parts, "unlimited")
+	}
+	if prof != "" {
+		parts = append(parts, "profile "+prof)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func safetySummary(c *engine.Config, randomize, profile, beep bool, iv time.Duration) {
 	fmt.Println("══════════════════════════════════════════════════")
 	fmt.Println("                    CONFIRM TEST")
 	fmt.Println("══════════════════════════════════════════════════")
@@ -440,6 +483,7 @@ func safetySummary(c *engine.Config, randomize, profile bool) {
 			fmt.Println("                (profile preset applied — explicit flags override)")
 		}
 	}
+	fmt.Printf("  Monitor     : ping every %ds, beeps %s\n", int(iv/time.Second), onOff(beep))
 	if c.CaptureFile != "" {
 		fmt.Printf("  Capture     : %s (may store UNENCRYPTED data — treat as a secret)\n", c.CaptureFile)
 	}
@@ -517,9 +561,11 @@ Profiles:
 
 Advanced:
       --duration SECONDS  auto-stop after N seconds
+      --interval SECONDS  ping every N seconds (default 1)
   -c, --capture FILE      capture target traffic with tcpdump ('.'- = stdout)
       --block             fully block the target (no forwarding)
-      --sound             beep per ping result
+      --sound             beep per ping result, pitch scales with latency (default: on)
+      --no-sound          disable the per-ping beeps
       --export FILE       stream per-second results to a CSV file
       --report DIR         write a post-test report (report.txt + report.html)
       --force             skip interactive confirmations

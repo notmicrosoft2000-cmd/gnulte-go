@@ -235,7 +235,10 @@ type Session struct {
 }
 
 // Start arms the test: forwarding, block rules, capture, spoofing, shaping.
-func Start(cfg Config) (*Session, error) {
+// Children (capture/spoof/tc) are tied to ctx so an interrupt cancels them
+// promptly; cleanup commands run in their own process group so a terminal
+// Ctrl+C cannot kill the restore mid-way.
+func Start(ctx context.Context, cfg Config) (*Session, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -253,8 +256,6 @@ func Start(cfg Config) (*Session, error) {
 	}
 	s.origForward = orig
 
-	ctx := context.Background()
-
 	// -- IP forwarding: block stops it, shape enables it.
 	switch cfg.Mode {
 	case ModeBlock:
@@ -268,8 +269,7 @@ func Start(cfg Config) (*Session, error) {
 		for _, r := range drops {
 			args := []string{"-I", "FORWARD"}
 			args = append(args, r...)
-			cmd := exec.Command("iptables", args...)
-			if err := cmd.Run(); err != nil {
+			if err := runRoot("iptables", args...); err != nil {
 				s.Stop()
 				return nil, fmt.Errorf("iptables %s: %w", strings.Join(args, " "), err)
 			}
@@ -308,6 +308,14 @@ func Start(cfg Config) (*Session, error) {
 	return s, nil
 }
 
+// runRoot runs a privilege-requiring command detached from the terminal's
+// process group, so a Ctrl+C on the session does not kill the restore.
+func runRoot(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	return cmd.Run()
+}
+
 func (s *Session) startCapture(ctx context.Context) error {
 	// Overwrite guard (mirrors Bash behaviour).
 	if s.cfg.CaptureFile != "-" {
@@ -316,6 +324,7 @@ func (s *Session) startCapture(ctx context.Context) error {
 		}
 	}
 	cmd := exec.CommandContext(ctx, "tcpdump", captureArgs(&s.cfg, s.cfg.Interface)...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if s.cfg.CaptureFile == "-" {
 		cmd.Stdout = os.Stdout
 	} else {
@@ -391,10 +400,12 @@ func (s *Session) applyTC(ctx context.Context) error {
 		}
 	}
 	// Deleting the current root qdisc is best-effort (none may exist yet).
-	_ = exec.Command("tc", "qdisc", "del", "dev", s.cfg.Interface, "root").Run()
+	_ = runRoot("tc", "qdisc", "del", "dev", s.cfg.Interface, "root")
 	tree := tcTreeCommands(&s.cfg, s.cfg.Interface)
 	for _, args := range tree[1:] {
-		if err := exec.CommandContext(ctx, "tc", args...).Run(); err != nil {
+		cmd := exec.CommandContext(ctx, "tc", args...)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("tc %s: %w", strings.Join(args, " "), err)
 		}
 	}
@@ -417,7 +428,7 @@ func (s *Session) UpdateParams(c Config) error {
 	cur.ReorderPct = c.ReorderPct
 	cur.BandwidthKbps = c.BandwidthKbps
 	for _, args := range tcChangeCommands(&cur, s.cfg.Interface) {
-		if err := exec.Command("tc", args...).Run(); err != nil {
+		if err := runRoot("tc", args...); err != nil {
 			return fmt.Errorf("tc change %s: %w", strings.Join(args, " "), err)
 		}
 	}
@@ -433,7 +444,7 @@ func (s *Session) stopSpoofs() {
 	if s.cfg.Gateway != "" {
 		// Gratuitous ARP so neighbors re-learn the real router MAC quickly.
 		if _, err := exec.LookPath("arping"); err == nil {
-			_ = exec.Command("arping", "-q", "-c", "3", "-U", "-I", s.cfg.Interface, s.cfg.Gateway).Run()
+			_ = runRoot("arping", "-q", "-c", "3", "-U", "-I", s.cfg.Interface, s.cfg.Gateway)
 		}
 	}
 }
@@ -518,9 +529,9 @@ func (s *Session) Stop() {
 	s.stopSpoofs()
 
 	if s.qdiscApplied {
-		_ = exec.Command("tc", "qdisc", "del", "dev", s.cfg.Interface, "root").Run()
+		_ = runRoot("tc", "qdisc", "del", "dev", s.cfg.Interface, "root")
 		if args := restoreQdiscArgs(s.cfg.Interface, s.qdiscBefore); len(args) > 0 {
-			_ = exec.Command("tc", args...).Run()
+			_ = runRoot("tc", args...)
 		}
 	}
 
@@ -531,7 +542,7 @@ func (s *Session) Stop() {
 	for _, d := range s.drops {
 		args := []string{"-D", "FORWARD"}
 		args = append(args, strings.Fields(d)...)
-		_ = exec.Command("iptables", args...).Run()
+		_ = runRoot("iptables", args...)
 	}
 	s.drops = nil
 

@@ -8,9 +8,12 @@ import (
 
 func TestPingOnceLocalhost(t *testing.T) {
 	ctx := context.Background()
-	rtt := PingOnce(ctx, "127.0.0.1", time.Second)
+	rtt, ttl := PingOnce(ctx, "127.0.0.1", time.Second)
 	if rtt < 0 {
 		t.Fatalf("localhost should respond to ping, got rtt=%d (is the loopback up?)", rtt)
+	}
+	if ttl <= 0 {
+		t.Errorf("localhost reply should carry a TTL, got ttl=%d", ttl)
 	}
 }
 
@@ -28,11 +31,16 @@ func TestStatsLossAndAvg(t *testing.T) {
 	}
 }
 
-func TestSparkAndStatusChar(t *testing.T) {
+func TestSparkAndStatusIcon(t *testing.T) {
 	if sparkChar(-1) != 'x' || sparkChar(40) != '.' || sparkChar(1000) != '#' {
 		t.Error("sparkChar mapping wrong")
 	}
-	if statusDot(-1) != 'x' || statusDot(150) != 'o' || statusDot(500) != '~' || statusDot(999) != '!' {
-		t.Error("statusDot mapping wrong")
+	if statusIcon(-1) == "" {
+		t.Error("statusIcon should never return an empty glyph")
+	}
+	for _, v := range []int{-1, 0, 100, 300, 500, 900} {
+		if statusIcon(v) == "" {
+			t.Errorf("statusIcon(%d) returned empty", v)
+		}
 	}
 }

@@ -50,11 +50,14 @@ func playerPath() (string, bool) {
 }
 
 // Beep plays a sine tone (frequency Hz, duration seconds), non-blocking.
+// If no audio player is available it falls back to the terminal bell, but only
+// when stdout is a terminal (so piped logs stay clean).
 func Beep(freq float64, dur time.Duration) {
 	p, ok := playerPath()
 	if !ok || freq <= 0 || dur <= 0 {
-		// Fallback: terminal bell, rate-limited by the caller's cadence.
-		os.Stdout.WriteString("\a")
+		if stdoutIsTTY() {
+			os.Stdout.WriteString("\a")
+		}
 		return
 	}
 	path := writeWAV(freq, dur)
@@ -64,7 +67,9 @@ func Beep(freq float64, dur time.Duration) {
 	}
 	if err := cmd.Start(); err != nil {
 		os.Remove(path)
-		os.Stdout.WriteString("\a")
+		if stdoutIsTTY() {
+			os.Stdout.WriteString("\a")
+		}
 		return
 	}
 	go func() {
@@ -99,6 +104,12 @@ func Found() { Beep(880, 70*time.Millisecond) }
 
 // Empty emits the "nothing found" buzz.
 func Empty() { Beep(196, 350*time.Millisecond) }
+
+// stdoutIsTTY reports whether stdout has a controlling terminal.
+func stdoutIsTTY() bool {
+	fi, err := os.Stdout.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
 
 func writeWAV(freq float64, dur time.Duration) string {
 	const rate = 44100

@@ -23,6 +23,7 @@ package monitor
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"strconv"
@@ -63,6 +64,40 @@ func (st *Stats) lossPct() float64 {
 	return float64(st.Drops) * 100 / float64(attempts)
 }
 
+// jitter returns the mean absolute deviation from the average RTT.
+func (st *Stats) jitter() int64 {
+	if st.Count == 0 {
+		return 0
+	}
+	av := st.avg()
+	var sum int64
+	for _, s := range st.Samples {
+		d := int64(s) - av
+		if d < 0 {
+			d = -d
+		}
+		sum += d
+	}
+	return sum / int64(len(st.Samples))
+}
+
+func (st *Stats) stdev() float64 {
+	n := len(st.Samples)
+	if n < 2 {
+		return 0
+	}
+	av := st.avg()
+	var ss float64
+	for _, s := range st.Samples {
+		d := float64(int64(s) - av)
+		ss += d * d
+	}
+	return math.Sqrt(ss / float64(n-1))
+}
+
+// attempts is the total number of ping tries (successes + drops).
+func (st *Stats) attempts() int { return st.Count + st.Drops }
+
 // Result pairs one target with its final statistics (safe to read after Run).
 type Result struct {
 	IP    string
@@ -75,28 +110,72 @@ var outTTY = func() bool {
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }()
 
+const (
+	cReset  = "\033[0m"
+	cGreen  = "\033[0;32m"
+	cRed    = "\033[0;31m"
+	cYellow = "\033[1;33m"
+	cDim    = "\033[2m"
+	cCyan   = "\033[0;36m"
+)
+
+func paint(code, s string) string {
+	if !outTTY {
+		return s
+	}
+	return code + s + cReset
+}
+
+func dim(s string) string { return paint(cDim, s) }
+
 // rttColor renders an RTT, color-coded by severity on terminals.
 func rttColor(ms int) string {
 	s := fmt.Sprintf("%dms", ms)
-	if !outTTY {
-		return s
-	}
 	switch {
 	case ms < 200:
-		return "\033[0;32m" + s + "\033[0m"
+		return paint(cGreen, s)
 	case ms < 500:
-		return "\033[1;33m" + s + "\033[0m"
+		return paint(cYellow, s)
 	default:
-		return "\033[0;31m" + s + "\033[0m"
+		return paint(cRed, s)
 	}
 }
 
-func badText(s string) string {
-	if !outTTY {
-		return s
+// segColor renders the sample sequence number, tinted when packets drop.
+func segColor(n int) string { return paint(cDim, fmt.Sprintf("%03d", n)) }
+
+// tickMark is a styled per-sample status glyph.
+func tickMark(ok bool) string {
+	if ok {
+		return paint(cGreen, "✓")
 	}
-	return "\033[0;31m" + s + "\033[0m"
+	return paint(cRed, "✗")
 }
+
+// trendOf renders the change against the previous sample as an arrow.
+func trendOf(prev, cur RTT) string {
+	if prev < 0 || cur < 0 {
+		return "" // nothing to compare yet
+	}
+	d := cur - prev
+	switch {
+	case d == 0:
+		return paint(cDim, "•")
+	case d > 0:
+		up := paint(cYellow, fmt.Sprintf("▲ +%d", d))
+		if d >= 200 {
+			up = paint(cRed, fmt.Sprintf("▲ +%d", d))
+		}
+		return up
+	default:
+		return paint(cGreen, fmt.Sprintf("▼ %d", d))
+	}
+}
+
+func badText(s string) string { return paint(cRed, s) }
+
+// cBold is used by badText callers and unreachable rows.
+const cBold = "\033[1m"
 
 // Monitor pings Targets on Interval and reports results.
 type Monitor struct {
@@ -107,6 +186,11 @@ type Monitor struct {
 	Timeout time.Duration
 	Sound   bool
 	Quiet   bool
+
+	// Iface and Impairment decorate the live console header (interface used
+	// and the applied impairment recipe).
+	Iface      string
+	Impairment string
 
 	// ExportFile streams every sample as CSV (ts,ip,rtt_ms,ok) when set.
 	ExportFile string
@@ -171,32 +255,37 @@ func (m *Monitor) exportCSV(ip string, rtt RTT) {
 }
 
 // PingOnce performs a single ping with the given timeout and returns the RTT
-// (or -1 on no reply). The timeout must cover the planned latency, or a slow
-// but reachable target would be misread as offline.
-func PingOnce(ctx context.Context, ip string, timeout time.Duration) RTT {
-	secs := int(timeout / time.Second)
+// (or -1 on no reply) and the TTL seen in the reply. The timeout must cover
+// the planned latency, or a slow but reachable target would be misread as
+// offline.
+func PingOnce(ctx context.Context, ip string, timeout time.Duration) (rtt RTT, ttl int) {
+	secs := int((timeout + time.Second - 1) / time.Second)
 	if secs < 1 {
 		secs = 1
 	}
-	out, err := exec.CommandContext(ctx, "ping", "-c", "1", "-W", strconv.Itoa(secs), "-n", ip).CombinedOutput()
+	out, err := exec.CommandContext(ctx, "ping", "-c", "1", "-W", strconv.Itoa(secs), "-n", ip).Output()
 	if err != nil {
-		return -1
+		return -1, 0
 	}
 	s := string(out)
+	if i := strings.Index(s, "ttl="); i >= 0 {
+		j := i + 4
+		for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+			j++
+		}
+		ttl, _ = strconv.Atoi(s[i+4 : j])
+	}
 	i := strings.Index(s, "time=")
 	if i < 0 || i+5 > len(s) {
-		return -1
+		return -1, ttl
 	}
 	rest := s[i+5:]
 	j := strings.IndexAny(rest, " \n\t")
 	if j < 0 {
 		j = len(rest)
 	}
-	var ms int
-	if _, err := fmt.Sscanf(rest[:j], "%d", &ms); err != nil {
-		return -1
-	}
-	return ms
+	rtt, _ = strconv.Atoi(rest[:j])
+	return rtt, ttl
 }
 
 // Run blocks until ctx is cancelled. Renders console-log history for one
@@ -206,10 +295,45 @@ func (m *Monitor) Run(ctx context.Context) error {
 		return err
 	}
 	defer m.closeExport()
+	m.printHeader()
 	if len(m.Targets) == 1 {
 		return m.runSingle(ctx, m.Targets[0])
 	}
 	return m.runMulti(ctx)
+}
+
+// printHeader paints the static console header with the impairment recipe, the
+// Bash monitor window style.
+func (m *Monitor) printHeader() {
+	if m.Quiet {
+		return
+	}
+	bits := "beeps " + "on"
+	if !m.Sound {
+		bits = "beeps off"
+	}
+	if m.Interval > 0 {
+		secs := int((m.Interval + 499*time.Millisecond) / time.Second)
+		if secs < 1 {
+			secs = 1
+		}
+		bits += fmt.Sprintf(" · every %ds", secs)
+	}
+	fmt.Println(dim("══════════════════════════════════════════════════════════════"))
+	fmt.Println("  " + paint(cCyan, "GNULTE") + " · live test console")
+	if len(m.Targets) == 1 {
+		fmt.Printf("  target      %s\n", m.Targets[0])
+	} else {
+		fmt.Printf("  targets     %d hosts\n", len(m.Targets))
+	}
+	if m.Iface != "" {
+		fmt.Printf("  interface   %s\n", m.Iface)
+	}
+	if m.Impairment != "" {
+		fmt.Printf("  impairment  %s\n", m.Impairment)
+	}
+	fmt.Printf("  session     %s\n", bits)
+	fmt.Println(dim("══════════════════════════════════════════════════════════════"))
 }
 
 // runSingle prints each sample as a permanent log line (matches the Bash
@@ -218,6 +342,8 @@ func (m *Monitor) runSingle(ctx context.Context, ip string) error {
 	st := &Stats{Samples: []int{}}
 	tick := time.NewTicker(m.Interval)
 	defer tick.Stop()
+	seq := 0
+	prev := RTT(-1)
 	for {
 		select {
 		case <-ctx.Done():
@@ -225,13 +351,26 @@ func (m *Monitor) runSingle(ctx context.Context, ip string) error {
 			m.publish(ip, st)
 			return nil
 		case <-tick.C:
-			rtt := PingOnce(ctx, ip, m.timeout())
+			// honour an interrupt without bouncing through another ping
+			select {
+			case <-ctx.Done():
+				m.singleSummary(ip, st)
+				m.publish(ip, st)
+				return nil
+			default:
+			}
+			rtt, ttl := PingOnce(ctx, ip, m.timeout())
+			seq++
 			m.exportCSV(ip, rtt)
 			st.Last = rtt
+			now := time.Now().Format("15:04:05")
 			if rtt < 0 {
 				st.Drops++
 				if !m.Quiet {
-					fmt.Printf("[%s] %-16s %s\n", time.Now().Format("15:04:05"), ip, badText("unreachable"))
+					fmt.Printf("  %s [%s] %s %-16s %10s  %s %s\n",
+						segColor(seq), now, tickMark(false), ip,
+						paint(cRed+cBold, "unreachable"), paint(cDim, "timeout"),
+						dim(fmt.Sprintf("(no reply in %ds)", int(m.timeout()/time.Second))))
 				}
 				if m.Sound {
 					sound.PingResult(0, false)
@@ -247,13 +386,23 @@ func (m *Monitor) runSingle(ctx context.Context, ip string) error {
 				}
 				st.Samples = append(st.Samples, rtt)
 				if !m.Quiet {
-					fmt.Printf("[%s] %-16s %5s  OK\n", time.Now().Format("15:04:05"), ip, rttColor(rtt))
+					ttlS := "—"
+					if ttl > 0 {
+						ttlS = strconv.Itoa(ttl)
+					}
+					line := fmt.Sprintf("  %s [%s] %s %-16s %10s  ttl=%s",
+						segColor(seq), now, tickMark(true), ip, rttColor(rtt), ttlS)
+					if tr := trendOf(prev, rtt); tr != "" {
+						line += " " + tr
+					}
+					fmt.Println(line)
 				}
 				if m.Sound {
 					sound.PingResult(rtt, true)
 				}
+				prev = rtt
 			}
-			if (st.Count+st.Drops)%10 == 0 {
+			if st.attempts()%10 == 0 {
 				m.singleSummary(ip, st)
 			}
 			if m.OnTick != nil {
@@ -267,13 +416,20 @@ func (m *Monitor) singleSummary(ip string, st *Stats) {
 	if m.Quiet {
 		return
 	}
-	attempts := st.Count + st.Drops
-	if attempts == 0 {
+	if st.attempts() == 0 {
 		return
 	}
+	seen := st.Count
 	loss := st.lossPct()
-	fmt.Printf("   — %s summary: samples=%d min=%dms max=%dms avg=%dms loss=%.1f%%\n",
-		ip, attempts, st.Min, st.Max, st.avg(), loss)
+	fmt.Println(dim("────────────────────────────── summary ──────────────────────────────"))
+	if seen > 0 {
+		fmt.Printf("  %s · ok %d/%d · avg %s · min %s · max %s · jitter ±%dms · loss %.0f%%\n",
+			ip, seen, st.attempts(), rttColor(int(st.avg())),
+			rttColor(int(st.Min)), rttColor(int(st.Max)), st.jitter(), loss)
+	} else {
+		fmt.Printf("  %s · ok 0/%d · no replies · loss %.0f%%\n", ip, st.attempts(), loss)
+	}
+	fmt.Println(dim("──────────────────────────────────────────────────────────────────────"))
 }
 
 // runMulti renders a live dashboard that is rewritten each second.
@@ -297,7 +453,12 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 				case <-ctx.Done():
 					return
 				case <-tick.C:
-					rtt := PingOnce(ctx, ip, m.timeout())
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
+					rtt, _ := PingOnce(ctx, ip, m.timeout())
 					m.exportCSV(ip, rtt)
 					ok := rtt >= 0
 					stats[i].Last = rtt
@@ -361,16 +522,18 @@ func sparkChar(v int) byte {
 	}
 }
 
-func statusDot(v RTT) byte {
+// statusIcon is the live per-target glyph: operating normally, degraded, or
+// offline.
+func statusIcon(v RTT) string {
 	switch {
 	case v < 0:
-		return 'x'
+		return paint(cRed, "✗")
 	case v <= 300:
-		return 'o'
+		return paint(cGreen, "✓")
 	case v <= 800:
-		return '~'
+		return paint(cYellow, "⚠")
 	default:
-		return '!'
+		return paint(cRed, "!!")
 	}
 }
 
@@ -390,13 +553,13 @@ func (m *Monitor) renderDashboard(stats []*Stats) {
 		if st.Count > 0 {
 			mn, mx = fmt.Sprintf("%dms", st.Min), fmt.Sprintf("%dms", st.Max)
 		}
-		fmt.Printf("  %-3d %c  %-16s  min=%-7s max=%-7s avg=%-5dms loss=%.1f%%  last=%s\n",
-			i+1, statusDot(st.Last), ip, mn, mx, st.avg(), st.lossPct(), last)
+		fmt.Printf("  %-3d %s %-16s last=%-8s avg=%-5dms min=%-7s max=%-7s loss=%.0f%%  jitter=±%dms\n",
+			i+1, statusIcon(st.Last), ip, last, st.avg(), mn, mx, st.lossPct(), st.jitter())
 
 		// Small sparkline of the last 40 samples.
 		n := len(st.Samples)
 		if n == 0 {
-			fmt.Printf("      %-16s  (awaiting samples…)\n", "")
+			fmt.Printf("      %-16s  %s\n", "", dim("(awaiting samples…)"))
 		} else {
 			start := 0
 			if n > 40 {

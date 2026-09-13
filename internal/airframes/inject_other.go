@@ -8,7 +8,7 @@
 
 //go:build !linux
 
-package deauth
+package airframes
 
 import "fmt"
 

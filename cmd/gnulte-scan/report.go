@@ -92,7 +92,15 @@ pre{background:#0d0d0d;border:1px solid #2a2a2a;padding:1em;overflow-x:auto;whit
 				} else if r.OS != "" {
 					extra = r.OS
 				}
-				b.WriteString("<td>" + htmlEsc(orDash(extra)) + "</td>")
+				if len(r.Banners) > 0 {
+					for _, b := range r.Banners {
+						extra += "<br><small>" + htmlEsc(b) + "</small>"
+					}
+				}
+				if r.ScanNote != "" {
+					extra += "<br><small>" + htmlEsc(r.ScanNote) + "</small>"
+				}
+				b.WriteString("<td>" + orDash(extra) + "</td>")
 			}
 			b.WriteString("</tr>\n")
 		}

@@ -138,17 +138,19 @@ func orDash(s string) string {
 // JSON writes an array of host objects.
 func JSON(w io.Writer, rows []discover.Row) error {
 	type host struct {
-		IP       string `json:"ip"`
-		MAC      string `json:"mac,omitempty"`
-		Vendor   string `json:"vendor,omitempty"`
-		Hostname string `json:"hostname,omitempty"`
-		Type     string `json:"type,omitempty"`
-		Ports    string `json:"ports,omitempty"`
-		OS       string `json:"os,omitempty"`
+		IP       string   `json:"ip"`
+		MAC      string   `json:"mac,omitempty"`
+		Vendor   string   `json:"vendor,omitempty"`
+		Hostname string   `json:"hostname,omitempty"`
+		Type     string   `json:"type,omitempty"`
+		Ports    string   `json:"ports,omitempty"`
+		OS       string   `json:"os,omitempty"`
+		Banners  []string `json:"banners,omitempty"`
+		ScanNote string   `json:"scan_note,omitempty"`
 	}
 	list := make([]host, 0, len(rows))
 	for _, r := range rows {
-		list = append(list, host{r.IP, r.MAC, r.Vendor, r.Hostname, r.Type, r.Ports, r.OS})
+		list = append(list, host{r.IP, r.MAC, r.Vendor, r.Hostname, r.Type, r.Ports, r.OS, r.Banners, r.ScanNote})
 	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
@@ -178,6 +180,12 @@ func YAML(w io.Writer, rows []discover.Row) error {
 		if r.OS != "" {
 			fmt.Fprintf(w, "    os: %q\n", r.OS)
 		}
+		for _, b := range r.Banners {
+			fmt.Fprintf(w, "    - banner: %q\n", b)
+		}
+		if r.ScanNote != "" {
+			fmt.Fprintf(w, "    scan_note: %q\n", r.ScanNote)
+		}
 	}
 	return nil
 }
@@ -185,11 +193,11 @@ func YAML(w io.Writer, rows []discover.Row) error {
 // CSV writes a header row followed by one row per host.
 func CSV(w io.Writer, rows []discover.Row) error {
 	cw := csv.NewWriter(w)
-	if err := cw.Write([]string{"ip", "mac", "vendor", "hostname", "type", "ports", "os"}); err != nil {
+	if err := cw.Write([]string{"ip", "mac", "vendor", "hostname", "type", "ports", "os", "banners", "scan_note"}); err != nil {
 		return err
 	}
 	for _, r := range rows {
-		if err := cw.Write([]string{r.IP, r.MAC, r.Vendor, r.Hostname, r.Type, r.Ports, r.OS}); err != nil {
+		if err := cw.Write([]string{r.IP, r.MAC, r.Vendor, r.Hostname, r.Type, r.Ports, r.OS, strings.Join(r.Banners, " | "), r.ScanNote}); err != nil {
 			return err
 		}
 	}

@@ -27,10 +27,12 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gnulte-go/internal/probe"
 	"gnulte-go/internal/sound"
+	"gnulte-go/internal/traffic"
 )
 
 // RTT is a single ping sample in milliseconds (-1 when the target did not
@@ -207,6 +209,16 @@ type Monitor struct {
 	// OnTick is invoked once per second while the monitor runs.
 	OnTick func()
 
+	// Traffic counts live per-host bytes/packets on Iface when the interface
+	// name is known and the raw socket can be opened (root). It upgrades the
+	// console with a down/up rate per target; without it, the console simply
+	// omits the traffic column.
+	Traffic *traffic.Counter
+
+	// sel is the arrow-key-selected target index (atomic) for multi-target
+	// monitoring: the host whose beeps are audible.
+	sel int32
+
 	// Results is filled once Run returns.
 	Results []Result
 
@@ -313,6 +325,16 @@ func (m *Monitor) Run(ctx context.Context) error {
 		return err
 	}
 	defer m.closeExport()
+	if m.Iface != "" {
+		if tc, err := traffic.New(m.Iface); err == nil && tc != nil {
+			m.Traffic = tc
+			defer func() {
+				if m.Traffic != nil {
+					m.Traffic.Close()
+				}
+			}()
+		}
+	}
 	m.printHeader()
 	if len(m.Targets) == 1 {
 		return m.runSingle(ctx, m.Targets[0])
@@ -356,6 +378,13 @@ func (m *Monitor) printHeader() {
 		line(fmt.Sprintf("  impairment  %s", m.Impairment), fmt.Sprintf("  impairment  %s", m.Impairment))
 	}
 	line(fmt.Sprintf("  session     %s", bits), fmt.Sprintf("  session     %s", bits))
+	if len(m.Targets) > 1 && !m.Quiet && stdinIsTTY() {
+		hint := "  ↑/↓ pick the target you hear · Ctrl+C stop"
+		line(dim(hint), strings.TrimSpace(hint))
+	}
+	if m.Traffic != nil {
+		line(paint(cCyan, "  ")+dim("live traffic: counting "+m.Iface), "  live traffic: counting "+m.Iface)
+	}
 	line(dim("══════════════════════════════════════════════════════════════"),
 		"══════════════════════════════════════════════════════════════")
 }
@@ -421,6 +450,10 @@ func (m *Monitor) runSingle(ctx context.Context, ip string) error {
 						note += dim("  (icmp silent)")
 					}
 					line, plainLine := m.singleLine(seq, now, ip, rtt, note, prev)
+					if tr := m.rateText(ip); tr != "" {
+						line += "  " + paint(cCyan, tr)
+						plainLine += "  " + tr
+					}
 					fmt.Println(line)
 					m.rec(plainLine)
 				}
@@ -502,15 +535,22 @@ func (m *Monitor) singleSummary(ip string, st *Stats) {
 	m.rec(delim2)
 }
 
-// runMulti renders a live dashboard that is rewritten each second.
+// runMulti renders a live dashboard that is rewritten each second. When the
+// terminal allows it, the up/down arrows (or j/k) pick which target's beeps
+// you hear; every sample of the selected host plays a tone pitched by its
+// round-trip time, as in single-host monitoring.
 func (m *Monitor) runMulti(ctx context.Context) error {
 	stats := make([]*Stats, len(m.Targets))
 	lastNote := make([]string, len(m.Targets))
 	for i := range stats {
 		stats[i] = &Stats{Samples: []int{}}
 	}
-	prevOK := make([]bool, len(m.Targets))
-	started := make([]bool, len(m.Targets))
+
+	// Arrow-key selection. The reader forces the selection to the first host
+	// when the terminal cannot be switched raw, so beeps always have a target.
+	keyboard := len(m.Targets) > 1 && !m.Quiet && stdinIsTTY()
+	restore := enableKeyboard(len(m.Targets), &m.sel)
+	defer restore()
 
 	var wg sync.WaitGroup
 	for i, ip := range m.Targets {
@@ -546,8 +586,10 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 					} else {
 						stats[i].Drops++
 					}
-					// Sound only on state transitions (avoids a beep per host/s).
-					if m.Sound && started[i] && prevOK[i] != ok {
+					// Beep every sample of the host the arrows have selected,
+					// pitched by its latency — the sound mirrors what the
+					// selected target's link is doing right now.
+					if m.Sound && int(atomic.LoadInt32(&m.sel)) == i {
 						sound.PingResult(rtt, ok)
 					}
 					if !m.Quiet {
@@ -569,11 +611,15 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 						m.rec(fmt.Sprintf("  [%s] %s %-16s %10s  %s",
 							time.Now().Format("15:04:05"), mark, ip, rttS, noteS))
 					}
-					started[i] = true
-					prevOK[i] = ok
 				}
 			}
 		}(i, ip)
+	}
+
+	// Take the traffic baseline so the first dashboard second shows a real
+	// rate rather than a giant first count.
+	if m.Traffic != nil {
+		m.Traffic.Snapshot()
 	}
 
 	tick := time.NewTicker(time.Second)
@@ -587,7 +633,7 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 			}
 			return nil
 		case <-tick.C:
-			m.renderDashboard(stats, lastNote)
+			m.renderDashboard(stats, lastNote, keyboard)
 			if m.OnTick != nil {
 				m.OnTick()
 			}
@@ -627,7 +673,8 @@ func statusIcon(v RTT) string {
 	}
 }
 
-func (m *Monitor) renderDashboard(stats []*Stats, lastNote []string) {
+func (m *Monitor) renderDashboard(stats []*Stats, lastNote []string, keyboard bool) {
+	sel := int(atomic.LoadInt32(&m.sel))
 	// Frame height: blank line + 2 rows per target + timestamp footer.
 	frames := 2 + 2*len(m.Targets)
 	fmt.Printf("\033[%dA\033[J", frames)
@@ -635,35 +682,65 @@ func (m *Monitor) renderDashboard(stats []*Stats, lastNote []string) {
 	fmt.Println()
 	for i, ip := range m.Targets {
 		st := stats[i]
-		last := "--"
+		mark := "   "
+		if keyboard && sel == i {
+			mark = paint(cCyan, "▶  ")
+		}
+		idx := fmt.Sprintf("%2d", i+1)
+		if keyboard && sel == i {
+			idx = paint(cCyan, idx)
+		} else {
+			idx = paint(cDim, idx)
+		}
+
+		// Line 1: status, address, current latency, average, loss, traffic.
+		last := paint(cDim, "--")
 		if st.Last >= 0 {
-			last = fmt.Sprintf("%dms", st.Last)
-			if n := lastNote[i]; strings.HasPrefix(n, "tcp:") {
-				last += dim(" (" + n + ")")
+			last = rttColor(int(st.Last))
+		}
+		tcpNote := ""
+		if n := lastNote[i]; strings.HasPrefix(n, "tcp:") {
+			if i2 := strings.Index(n, " "); i2 >= 0 {
+				tcpNote = dim(fmt.Sprintf(" (tcp %sms)", n[len("tcp:"):i2]))
+			} else {
+				tcpNote = dim(" (tcp)")
 			}
 		}
+		avg := paint(cDim, "--")
+		if st.Count > 0 {
+			avg = rttColor(int(st.avg()))
+		}
+		loss := paint(cGreen, fmt.Sprintf("%.0f%%", st.lossPct()))
+		if st.lossPct() > 0 {
+			loss = paint(cRed, fmt.Sprintf("%.0f%%", st.lossPct()))
+		}
+		tr := m.rateText(ip)
+		trS := dim("↓ - ↑ -")
+		if tr != "" {
+			trS = paint(cCyan, tr)
+		}
+		fmt.Printf("  %s%s %s  %s  last %s  avg %s  loss %s  %s\n",
+			mark, idx, statusIcon(st.Last), paint(cYellow, ip), last, avg, loss, trS)
+
+		// Line 2: span metrics and the tiny latency sparkline, dim.
 		mn, mx := "--", "--"
 		if st.Count > 0 {
 			mn, mx = fmt.Sprintf("%dms", st.Min), fmt.Sprintf("%dms", st.Max)
 		}
-		fmt.Printf("  %-3d %s %-16s last=%-8s avg=%-5dms min=%-7s max=%-7s loss=%.0f%%  jitter=±%dms\n",
-			i+1, statusIcon(st.Last), ip, last, st.avg(), mn, mx, st.lossPct(), st.jitter())
-
-		// Small sparkline of the last 40 samples.
-		n := len(st.Samples)
-		if n == 0 {
-			fmt.Printf("      %-16s  %s\n", "", dim("(awaiting samples…)"))
-		} else {
+		spark := "    "
+		if n := len(st.Samples); n > 0 {
 			start := 0
-			if n > 40 {
-				start = n - 40
+			if n > 30 {
+				start = n - 30
 			}
 			sp := make([]byte, 0, n-start)
 			for _, v := range st.Samples[start:] {
 				sp = append(sp, sparkChar(v))
 			}
-			fmt.Printf("      %-16s  %s\n", "", string(sp[:min(len(sp), 40)]))
+			spark = string(sp[:min(len(sp), 30)])
 		}
+		fmt.Printf("      %-16s min %s · max %s · jitter ±%dms %s %s\n",
+			"", mn, mx, st.jitter(), tcpNote, dim(spark))
 	}
 	fmt.Printf("  [%s]\n", time.Now().Format("15:04:05"))
 }
@@ -673,4 +750,40 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// rateText renders one host's live down/up rates from the traffic counter, or
+// an empty string when counters are off, e.g. "↓1.2KB/s ↑3.4KB/s".
+func (m *Monitor) rateText(ip string) string {
+	if m.Traffic == nil {
+		return ""
+	}
+	r := m.Traffic.Snapshot()[ip]
+	if r.RXBytes == 0 && r.TXBytes == 0 && r.RXPkts == 0 && r.TXPkts == 0 {
+		return "↓0 ↑0"
+	}
+	s := "↓" + humanRate(r.RXBytes)
+	if r.TXBytes > 0 {
+		s += " " + "↑" + humanRate(r.TXBytes)
+	}
+	return s
+}
+
+// humanRate renders a byte rate with a size suffix, per second.
+func humanRate(b int64) string {
+	switch {
+	case b < 1024:
+		return fmt.Sprintf("%dB/s", b)
+	case b < 1024*1024:
+		return fmt.Sprintf("%.1fKB/s", float64(b)/1024)
+	default:
+		return fmt.Sprintf("%.1fMB/s", float64(b)/(1024*1024))
+	}
+}
+
+// stdinIsTTY reports whether standard input is a real terminal (needed for the
+// arrow-key listener).
+func stdinIsTTY() bool {
+	fi, err := os.Stdin.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }

@@ -36,7 +36,7 @@ import (
 	"syscall"
 	"time"
 
-	"gnulte-go/internal/deauth"
+	"gnulte-go/internal/airframes"
 	"gnulte-go/internal/safety"
 	"gnulte-go/internal/ux"
 )
@@ -125,11 +125,11 @@ func main() {
 	if *staArg == "" {
 		fatal(fmt.Errorf("the station MAC to disconnect is required (-s)"))
 	}
-	bssid, err := deauth.ParseMAC(*bssidArg)
+	bssid, err := airframes.ParseMAC(*bssidArg)
 	if err != nil {
 		fatal(fmt.Errorf("-a: %v", err))
 	}
-	station, err := deauth.ParseMAC(*staArg)
+	station, err := airframes.ParseMAC(*staArg)
 	if err != nil {
 		fatal(fmt.Errorf("-s: %v", err))
 	}
@@ -145,10 +145,10 @@ func main() {
 
 	// Interface sanity before any frame is sent: must exist and be in monitor
 	// mode, otherwise the injector (or the network) is wrong.
-	if !deauth.InterfaceExists(*ifaceArg) {
+	if !airframes.InterfaceExists(*ifaceArg) {
 		fatal(fmt.Errorf("interface %s does not exist", *ifaceArg))
 	}
-	switch deauth.MonitorMode(*ifaceArg) {
+	switch airframes.MonitorMode(*ifaceArg) {
 	case "not-monitor":
 		fatal(fmt.Errorf("interface %s is not in monitor mode.\n"+
 			"  Put the adapter into monitor mode first, for example:\n"+
@@ -181,7 +181,7 @@ func main() {
 		defer cancel()
 	}
 
-	inj, err := deauth.NewInjector(*ifaceArg)
+	inj, err := airframes.NewInjector(*ifaceArg)
 	if err != nil {
 		fatal(err)
 	}
@@ -202,7 +202,7 @@ loop:
 		default:
 		}
 		for i := 0; i < *count; i++ {
-			f := deauth.Frame(bssid, station, uint16(*reason), seq)
+			f := airframes.DeauthFrame(bssid, station, uint16(*reason), seq)
 			seq = (seq + 1) & 0x0fff
 			if err := inj.Send(f); err != nil {
 				fatal(fmt.Errorf("frame %d: %v", sent+1, err))
@@ -232,7 +232,7 @@ loop:
 	fmt.Println("\nTest finished — connectivity is normal; the station associates again on its own.")
 }
 
-func stationLabel(s deauth.MAC) string {
+func stationLabel(s airframes.MAC) string {
 	if s.IsBroadcast() {
 		return "broadcast — every client on the BSSID"
 	}
@@ -240,7 +240,7 @@ func stationLabel(s deauth.MAC) string {
 }
 
 // Extra annotation shown beside the per-burst counter line.
-func stationLabelExtra(s deauth.MAC) string {
+func stationLabelExtra(s airframes.MAC) string {
 	if s.IsBroadcast() {
 		return "(all clients)"
 	}
@@ -248,7 +248,7 @@ func stationLabelExtra(s deauth.MAC) string {
 }
 
 // summary prints the pre-test confirmation box (mirrors gnulte's CONFIRM TEST).
-func summary(bssid, station deauth.MAC, iface string, count, delay int, once bool, duration, reason int) {
+func summary(bssid, station airframes.MAC, iface string, count, delay int, once bool, duration, reason int) {
 	repeat := fmt.Sprintf("every %d s until interrupted", delay)
 	if once {
 		repeat = "single burst"

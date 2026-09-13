@@ -18,7 +18,8 @@
 // Package discover performs LAN host discovery: a parallel ICMP sweep via the
 // system `ping`, neighbor resolution from /proc/net/arp (optionally boosted by
 // `arp-scan` when running as root), vendor identification, and hostname
-// resolution. `-d/--deep` additionally runs `nmap` against alive hosts.
+// resolution. `-d/--deep` additionally runs the in-Go port scanner against
+// alive hosts.
 package discover
 
 import (
@@ -29,9 +30,12 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"gnulte-go/internal/scanner"
 )
 
 // Row is one discovered host.
@@ -43,6 +47,8 @@ type Row struct {
 	Type     string
 	Ports    string
 	OS       string
+	Banners  []string
+	ScanNote string
 	IsSelf   bool
 	IsNew    bool
 }
@@ -265,26 +271,44 @@ func Classify(vendor, hostname string) string {
 	}
 }
 
-// DeepScan runs nmap against one IP and returns the port list and OS guess.
-// Errors are returned as a human-readable note instead of aborting the scan.
-func DeepScan(ctx context.Context, ip string) (ports, osName, note string) {
-	cmd := exec.CommandContext(ctx, "nmap", "-Pn", "-O", "--top-ports", "100", "-oG", "-", ip)
-	raw, err := cmd.Output()
-	if err != nil {
-		return "", "", fmt.Sprintf("deep scan unavailable: %v", err)
-	}
-	for _, line := range strings.Split(string(raw), "\n") {
-		if strings.Contains(line, "Ports:") {
-			if i := strings.Index(line, "Ports:"); i >= 0 {
-				ports = strings.TrimSpace(line[i+6:])
+// DeepScan runs the in-Go port scanner against one IP. The port list, TTL-based
+// OS guess, service banners, and any scan note replace what the old nmap
+// delegation produced — so the deep scan works with no external tool. Errors
+// come back as a human note instead of aborting the whole scan.
+func DeepScan(ctx context.Context, ip string) (ports, osName string, banners []string, note string) {
+	res := scanner.DeepScan(ctx, ip)
+	if len(res.Ports) == 0 {
+		ports = "(no open ports in common range)"
+	} else {
+		parts := make([]string, 0, len(res.Ports))
+		for _, p := range res.Ports {
+			s := fmt.Sprintf("%d/open/tcp", p.Port)
+			if p.Service != "" {
+				s += "/" + p.Service
 			}
-			if i := strings.Index(line, "OS:"); i >= 0 && osName == "" {
-				osName = strings.TrimSpace(strings.SplitN(line[i+3:], "/", 2)[0])
+			parts = append(parts, s)
+		}
+		ports = strings.Join(parts, ", ")
+		hostNames := make([]string, 0, len(res.Ports))
+		for _, p := range res.Ports {
+			name := fmt.Sprintf("%d (%s)", p.Port, serviceOrNumber(p))
+			if p.Banner != "" {
+				name += ": " + p.Banner
+				hostNames = append(hostNames, name)
 			}
 		}
+		banners = hostNames
 	}
-	if ports == "" {
-		ports = "(no open top-100 ports)"
+	osName = res.OS
+	note = res.Note
+	return ports, osName, banners, note
+}
+
+// serviceOrNumber names a port by its well-known service, falling back to the
+// bare port number, so banner lines stay readable.
+func serviceOrNumber(p scanner.Port) string {
+	if p.Service != "" {
+		return p.Service
 	}
-	return ports, osName, ""
+	return strconv.Itoa(p.Port)
 }

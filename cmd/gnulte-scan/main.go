@@ -70,7 +70,7 @@ func main() {
 		iface     = flag.String("i", "", "network interface (default: auto-detect)")
 		cidr      = flag.String("C", "", "CIDR to scan (default: from interface)")
 		threads   = flag.Int("t", 64, "parallel ping workers")
-		deep      = flag.Bool("d", false, "deep scan alive hosts with nmap")
+		deep      = flag.Bool("d", false, "deep scan alive hosts with the in-Go port scanner")
 		asJSON    = flag.Bool("j", false, "output JSON")
 		asYAML    = flag.Bool("y", false, "output YAML")
 		asCSV     = flag.Bool("c", false, "output CSV")
@@ -85,7 +85,7 @@ func main() {
 	flag.StringVar(iface, "interface", "", "network interface (default: auto-detect)")
 	flag.StringVar(cidr, "cidr", "", "CIDR to scan (default: from interface)")
 	flag.IntVar(threads, "threads", 64, "parallel ping workers")
-	flag.BoolVar(deep, "deep", false, "deep scan alive hosts with nmap")
+	flag.BoolVar(deep, "deep", false, "deep scan alive hosts with the in-Go port scanner")
 	flag.BoolVar(asJSON, "json", false, "output JSON")
 	flag.BoolVar(asYAML, "yaml", false, "output YAML")
 	flag.BoolVar(asCSV, "csv", false, "output CSV")
@@ -191,7 +191,7 @@ func main() {
 		rows = buildRows(ctx, live, discover.Neighbors(context.Background(), cfg.Interface), cfg)
 	}
 	if *deep {
-		deepBusy := ux.NewBusy(fmt.Sprintf("deep-scanning %d host(s) with nmap", len(rows)))
+		deepBusy := ux.NewBusy(fmt.Sprintf("deep-scanning %d host(s): common ports, services, banners", len(rows)))
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
@@ -347,10 +347,12 @@ func deepScan(ctx context.Context, rows []discover.Row, threads int) {
 		go func(r *discover.Row) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			ports, osName, _ := discover.DeepScan(ctx, r.IP)
+			ports, osName, banners, note := discover.DeepScan(ctx, r.IP)
 			mu.Lock()
 			r.Ports = ports
 			r.OS = osName
+			r.Banners = banners
+			r.ScanNote = note
 			mu.Unlock()
 		}(&rows[i])
 	}
@@ -410,7 +412,7 @@ Options:
   -i, --interface IFACE   network interface (default: auto-detect)
   -C, --cidr CIDR         subnet to scan (default: from interface)
   -t, --threads N         parallel ping workers (default: 64)
-  -d, --deep              run nmap against alive hosts
+  -d, --deep              deep scan alive hosts (in-Go port scanner)
   -j, --json              output JSON
   -y, --yaml              output YAML
   -c, --csv               output CSV

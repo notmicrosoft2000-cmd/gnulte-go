@@ -7,7 +7,7 @@
 // socket, which is how a monitor-mode wireless adapter is driven from user
 // space without libpcap.
 
-package deauth
+package airframes
 
 import (
 	"fmt"

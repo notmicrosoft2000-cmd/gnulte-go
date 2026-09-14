@@ -9,7 +9,7 @@ cd "$(dirname "$0")"
 echo "== building gnulte-scan (cmd/gnulte-scan) =="
 go build -o gnulte-scan ./cmd/gnulte-scan
 
-echo "== building gnulte traffic engine (cmd/gnulte) =="
+echo "== building gnulte (cmd/gnulte) =="
 go build -o gnulte ./cmd/gnulte
 
 echo "== building gnulte-wifi (cmd/gnulte-wifi) =="
@@ -18,8 +18,11 @@ go build -o gnulte-wifi ./cmd/gnulte-wifi
 echo "== building gnulte-traffic (cmd/gnulte-traffic) =="
 go build -o gnulte-traffic ./cmd/gnulte-traffic
 
+echo "== building gnulte-devices (cmd/gnulte-devices) =="
+go build -o gnulte-devices ./cmd/gnulte-devices
+
 echo "== running tests =="
 go test ./...
 go vet ./...
 
-echo "== done: ./gnulte-scan ./gnulte ./gnulte-wifi ./gnulte-traffic =="
+echo "== done: ./gnulte-scan ./gnulte ./gnulte-wifi ./gnulte-traffic ./gnulte-devices =="

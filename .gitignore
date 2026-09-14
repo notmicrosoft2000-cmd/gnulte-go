@@ -3,3 +3,6 @@
 /gnulte-scan
 /gnulte-wifi
 /gnulte-traffic
+/gnulte-devices
+# generated reports
+/gnulte-scan-report-*.html

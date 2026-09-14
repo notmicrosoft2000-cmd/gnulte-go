@@ -48,7 +48,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "10.0"
+const version = "11.0"
 
 // session collects the permanent console lines so the final HTML report can
 // reproduce the entire log history of the run.

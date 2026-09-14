@@ -35,6 +35,7 @@ import (
 	"sync"
 	"time"
 
+	"gnulte-go/internal/ident"
 	"gnulte-go/internal/scanner"
 )
 
@@ -164,116 +165,23 @@ func isMAC(s string) bool {
 	return strings.Count(s, ":") == 5 || strings.Count(s, "-") == 5
 }
 
-var vendorCache sync.Map // prefix -> vendor, loaded lazily
-
-// VendorFor maps a MAC (upper hex, any separator) to a vendor name. It loads
-// an OUI file if one exists, otherwise uses the built-in minimal database.
+// VendorFor maps a MAC (upper hex, any separator) to a vendor name, using the
+// embedded IEEE registry (with any local oui.txt layered on top).
 func VendorFor(mac string) string {
-	if mac == "" {
-		return ""
-	}
-	prefix := strings.ReplaceAll(strings.ReplaceAll(mac, ":", ""), "-", "")
-	if len(prefix) < 6 {
-		return ""
-	}
-	prefix = strings.ToUpper(prefix[:6])
-	if v, ok := vendorCache.Load(prefix); ok {
-		return v.(string)
-	}
-	v := loadVendors()[prefix]
-	vendorCache.Store(prefix, v)
-	return v
+	return ident.Vendor(mac)
 }
 
-func loadVendors() map[string]string {
-	db := map[string]string{}
-	for _, p := range []string{
-		os.Getenv("XDG_CONFIG_HOME") + "/gnulte-go/oui.txt",
-		os.Getenv("HOME") + "/.config/gnulte-go/oui.txt",
-		"/usr/share/gnulte/oui.txt",
-		"/usr/share/gnulte-go/oui.txt",
-	} {
-		raw, err := os.ReadFile(p)
-		if err != nil {
-			continue
-		}
-		for _, line := range strings.Split(string(raw), "\n") {
-			// Format: "00-00-00   (hex)		Apple, Inc." or "000000 (base 16) ..."
-			hexPart := line
-			if idx := strings.Index(line, "(hex)"); idx >= 0 {
-				hexPart = strings.TrimSpace(line[:idx])
-			} else if idx := strings.Index(line, "(base 16)"); idx >= 0 {
-				hexPart = strings.TrimSpace(line[:idx])
-			}
-			hex := strings.ReplaceAll(hexPart, "-", "")
-			if len(hex) != 6 {
-				continue
-			}
-			rest := strings.TrimSpace(line[strings.Index(line, ")")+1:])
-			if rest != "" {
-				db[hex] = rest
-			}
-		}
-		if len(db) > 0 {
-			break
-		}
-	}
-	builtins := map[string]string{
-		"000C29": "VMware", "005056": "VMware", "000569": "VMware",
-		"080027": "Oracle VirtualBox", "00155D": "Microsoft Hyper-V",
-		"525400": "QEMU/KVM", "F8B156": "ASUSTek/Raspberry Pi?",
-		"B827EB": "Raspberry Pi", "DCA632": "Raspberry Pi", "E45F01": "Raspberry Pi",
-		"D8F1F5": "Raspberry Pi", "28CDC1": "Raspberry Pi", "C2FF5E": "Raspberry Pi",
-		"DC46A6": "TP-LINK", "508A06": "TP-LINK", "FCB4E6": "TP-LINK",
-	}
-	for k, v := range builtins {
-		db[k] = v
-	}
-	return db
-}
-
-// ResolveHost does reverse DNS, bounded so a LAN without a reverse zone
-// cannot stall the scan (falls back gracefully).
+// ResolveHost finds a device's name: reverse DNS first, then a .local mDNS
+// lookup, both time-bounded so a LAN without a reverse zone cannot stall the
+// scan (falls back gracefully).
 func ResolveHost(ctx context.Context, ip string) string {
-	ctx, cancel := context.WithTimeout(ctx, 700*time.Millisecond)
-	defer cancel()
-	r, err := net.DefaultResolver.LookupAddr(ctx, ip)
-	if err != nil || len(r) == 0 {
-		return ""
-	}
-	return strings.TrimSuffix(r[0], ".")
+	return ident.Hostname(ctx, ip)
 }
 
-// Classify labels a device based on its vendor and hostname.
+// Classify labels a device based on its vendor and hostname. Port-aware
+// identification (deep-scan results) refines this via ident.DeviceType.
 func Classify(vendor, hostname string) string {
-	v := strings.ToLower(vendor)
-	n := strings.ToLower(hostname)
-	switch {
-	case strings.Contains(v, "apple") || strings.Contains(n, "ipad") || strings.Contains(n, "iphone"):
-		return "Apple device"
-	case strings.Contains(v, "samsung") || strings.Contains(v, "xiaomi") ||
-		strings.Contains(n, "android") || strings.Contains(n, "phone"):
-		return "Mobile"
-	case strings.Contains(v, "tp-link") || strings.Contains(v, "asus") ||
-		strings.Contains(v, "netgear") || strings.Contains(v, "linksys") ||
-		strings.Contains(v, "d-link") || strings.Contains(v, "huawei"):
-		return "Router/AP"
-	case strings.Contains(v, "raspberry"):
-		return "Raspberry Pi"
-	case strings.Contains(v, "microsoft") || strings.Contains(v, "intel") ||
-		strings.Contains(v, "dell") || strings.Contains(v, "lenovo") ||
-		strings.Contains(v, "hp "):
-		return "Computer"
-	case strings.Contains(v, "sony") || strings.Contains(v, "lg") ||
-		strings.Contains(v, "samsung") || strings.Contains(v, "chromecast") ||
-		strings.Contains(n, "tv"):
-		return "Media/IoT"
-	default:
-		if vendor != "" {
-			return "Device"
-		}
-		return ""
-	}
+	return ident.DeviceType(vendor, hostname, "", nil)
 }
 
 // DeepScan runs the in-Go port scanner against one IP. The port list, TTL-based

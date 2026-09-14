@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"gnulte-go/internal/discover"
+	"gnulte-go/internal/ident"
 	"gnulte-go/internal/netutil"
 	"gnulte-go/internal/out"
 	"gnulte-go/internal/safety"
@@ -128,6 +129,12 @@ func main() {
 	explicit := map[string]bool{}
 	flag.Visit(func(f *flag.Flag) {
 		explicit[f.Name] = true
+		if f.Name == "t" {
+			explicit["threads"] = true
+		}
+		if f.Name == "i" {
+			explicit["interface"] = true
+		}
 	})
 
 	prefs, err := settings.Load()
@@ -390,6 +397,9 @@ func deepScan(ctx context.Context, rows []discover.Row, threads int) {
 			r.OS = osName
 			r.Banners = banners
 			r.ScanNote = note
+			if t := ident.DeviceType(r.Vendor, r.Hostname, ports, banners); t != "" {
+				r.Type = t
+			}
 			mu.Unlock()
 		}(&rows[i])
 	}

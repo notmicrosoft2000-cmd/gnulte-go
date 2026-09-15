@@ -121,3 +121,115 @@ func TestDeviceType(t *testing.T) {
 		}
 	}
 }
+
+func TestDeviceTypeNewHints(t *testing.T) {
+	for _, tc := range []struct {
+		label, vendor, host string
+		want                string
+	}{
+		{"hikvision cam vendor", "Hangzhou Hikvision Digital Technology Co. Ltd.", "", "Camera/NVR"},
+		{"sonos tv/vendor", "Sonos Inc.", "", "Media/TV"},
+		{"amazon echo", "Amazon Technologies Inc.", "", "Media/TV"},
+		{"tuya iot vendor", "Shenzhen JEMIOT Digital Technology Co.,Ltd", "", "IoT (smart home)"},
+		{"esp wifi vendor", "Espressif Inc.", "", "IoT (smart home)"},
+		{"canon printer host", "Canon Inc.", "office-printer", "Printer"},
+		{"dahua cam", "Zhejiang Dahua Technology", "", "Camera/NVR"},
+		{"negreal mobile", "ALIBABA.COM LTD", "", "Device"},
+		{"camera hostname", "Acme Corp", "cam-front", "Camera/NVR"},
+		{"smartplug hostname", "Acme Corp", "smartplug-01", "IoT (smart home)"},
+	} {
+		if got := DeviceType(tc.vendor, tc.host, "", nil); got != tc.want {
+			t.Errorf("%s: DeviceType(%q,%q) = %q, want %q", tc.label, tc.vendor, tc.host, got, tc.want)
+		}
+	}
+}
+
+func TestARPAReverse(t *testing.T) {
+	for _, tc := range []struct {
+		owner, want string
+		ok          bool
+	}{
+		{"132.99.168.192.in-addr.arpa", "192.168.99.132", true},
+		{"132.99.168.192.in-addr.arpa.", "192.168.99.132", true},
+		{"foo.local", "", false},
+		{"7.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa", "", false},
+		{"x.y.1.2.in-addr.arpa", "", false},
+	} {
+		got, ok := arpaToIP(tc.owner)
+		if ok != tc.ok || got != tc.want {
+			t.Errorf("arpaToIP(%q) = %q,%v want %q,%v", tc.owner, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+func TestMDNSRRsParse(t *testing.T) {
+	qname := encodeName("132.99.168.192.in-addr.arpa")
+	hdr := make([]byte, 12)
+	binary.BigEndian.PutUint16(hdr[4:6], 1)
+	binary.BigEndian.PutUint16(hdr[6:8], 2)
+	pkt := append(hdr, qname...)
+	pkt = append(pkt, 0, 1, 0, 1)
+	// A record: 192.168.99.10 = fedora.local
+	pkt = append(pkt, 0xC0, 12)
+	pkt = append(pkt, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 192, 168, 99, 10)
+	// PTR record: reverse name -> fedora.local
+	target := encodeName("fedora.local.")
+	pkt = append(pkt, 0xC0, 12)
+	pkt = append(pkt, 0, 12, 0, 1, 0, 0, 0, 120, 0, byte(len(target)))
+	pkt = append(pkt, target...)
+
+	rrs := mdnsRRs(pkt)
+	if len(rrs) != 2 {
+		t.Fatalf("mdnsRRs len = %d, want 2", len(rrs))
+	}
+	if !(rrs[0].typ == 1 && rrs[0].ip.String() == "192.168.99.10") {
+		t.Errorf("A record parse wrong: %+v", rrs[0])
+	}
+	if !(rrs[1].typ == 12 && rrs[1].owner == "132.99.168.192.in-addr.arpa" && rrs[1].target == "fedora.local") {
+		t.Errorf("PTR record parse wrong: %+v", rrs[1])
+	}
+	// The A record's owner follows the packet's answer section, i.e. the
+	// question's reverse name; the browse path maps it via arpaToIP.
+	if ip, ok := arpaToIP(rrs[1].owner); !ok || ip != "192.168.99.132" {
+		t.Errorf("arpaToIP(%q) = %q,%v want 192.168.99.132,true", rrs[1].owner, ip, ok)
+	}
+}
+
+func TestNBSTATParse(t *testing.T) {
+	// Build a realistic NBSTAT reply body: 2 names, then 4 bytes adapter status.
+	sixteen := "FRONTIIR-PC" + "     " // 11 chars + 5 spaces = 16
+	rdata := []byte{2}
+	rdata = append(rdata, []byte(sixteen)...)
+	rdata = append(rdata, 0x00, 0x20) // type <20> file server
+	rdata = append(rdata, 0x04, 0x00) // flags
+	rdata = append(rdata, []byte(sixteen)...)
+	rdata = append(rdata, 0x00, 0x00) // type <00> workstation
+	rdata = append(rdata, 0x04, 0x00)
+	rdata = append(rdata, []byte("\x00\x00\x00\x00")...) // adapter status
+
+	names := parseNBSTAT(rdata)
+	if len(names) != 1 || names[0] != "FRONTIIR-PC" {
+		t.Errorf("parseNBSTAT = %q, want single [FRONTIIR-PC]", names)
+	}
+
+	// Wildcard/error names must be skipped.
+	bad := []byte{1}
+	bad = append(bad, []byte("*               ")...)
+	bad = append(bad, 0x00, 0xC0)
+	if names := parseNBSTAT(bad); len(names) != 0 {
+		t.Errorf("parseNBSTAT(bad) = %q, want empty", names)
+	}
+}
+
+func TestNBSTATQueryShape(t *testing.T) {
+	q := nbstatQuery()
+	if len(q) != 12+1+32+4 {
+		t.Fatalf("nbstatQuery length = %d, want %d", len(q), 12+1+32+4)
+	}
+	if q[12] != 0x20 || q[13] != '*'>>4+0x41 || q[14] != '*'&0x0F+0x41 {
+		t.Errorf("nbstatQuery name encoding wrong at start: % x", q[12:16])
+	}
+	if binary.BigEndian.Uint16(q[len(q)-4:len(q)-2]) != 0x0021 {
+		t.Errorf("nbstatQuery qtype != NBSTAT: % x", q[len(q)-4:])
+	}
+}

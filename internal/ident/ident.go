@@ -27,6 +27,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/binary"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -68,7 +69,21 @@ func ouiTable() map[string]string {
 	ouiOnce.Do(func() {
 		ouiCache = map[string]string{}
 		parseOUI(embeddedOUI, ouiCache)
-		for _, p := range externalUI() {
+		// System knowledge: fill gaps only, so a truncated nmap name never
+		// outranks the full IEEE one we already carry.
+		for _, p := range systemUI() {
+			if raw, err := os.ReadFile(p); err == nil {
+				patches := map[string]string{}
+				parseOUI(string(raw), patches)
+				for k, v := range patches {
+					if ouiCache[k] == "" {
+						ouiCache[k] = v
+					}
+				}
+			}
+		}
+		// Per-user files override (the operator's corrections always win).
+		for _, p := range userUI() {
 			if raw, err := os.ReadFile(p); err == nil {
 				parseOUI(string(raw), ouiCache)
 			}
@@ -78,11 +93,23 @@ func ouiTable() map[string]string {
 }
 
 // externalUI lists registry files checked after the embedded snapshot, in
-// increasing precedence. The arp-scan one ships complete on many systems and
-// the per-user file lets anyone maintain a corrected copy.
-func externalUI() []string {
+// increasing precedence: system knowledge files only fill prefixes the
+// embedded table lacks (their names are often truncated), while the per-user
+// files may override anything.
+func externalUI() []string { return append(systemUI(), userUI()...) }
+
+func systemUI() []string {
+	return []string{
+		"/usr/share/arp-scan/ieee-oui.txt",
+		"/usr/share/arp-scan/oui.txt",
+		"/usr/share/nmap/nmap-mac-prefixes",
+		"/usr/share/ieee-data/oui.txt",
+	}
+}
+
+func userUI() []string {
 	home, _ := os.UserHomeDir()
-	paths := []string{"/usr/share/arp-scan/ieee-oui.txt"}
+	paths := []string{}
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
 		paths = append(paths, filepath.Join(xdg, "gnulte-go", "oui.txt"))
 	}
@@ -119,6 +146,15 @@ func parseOUI(raw string, db map[string]string) {
 				if j := strings.Index(line, ")"); j >= 0 {
 					vendor = strings.TrimSpace(line[j+1:])
 				}
+			}
+		}
+		// nmap-mac-prefixes (and trimmed IEEE copies) put the prefix, some
+		// whitespace, then the vendor: "B827EB   Raspberry Pi Foundation".
+		if hex == "" {
+			f := strings.Fields(line)
+			if len(f) >= 2 && len(cleanPrefix(f[0])) == 6 {
+				hex = cleanPrefix(f[0])
+				vendor = strings.TrimSpace(line[strings.Index(line, f[0])+len(f[0]):])
 			}
 		}
 		if len(hex) != 6 || vendor == "" || vendor == "IEEE Registration Authority" {
@@ -247,6 +283,337 @@ func mdnsPTR(pkt []byte) (string, bool) {
 	return "", false
 }
 
+// BrowseMDNS works through the whole candidate list at once to name hosts that
+// ignored a one-by-one query: it fires a reverse-PTR probe at every address,
+// joins the multicast group, then listens briefly for PTR and A records. The
+// returned map is ip -> .local hostname (first name wins, only for addresses
+// the caller asked about). Nothing blocks longer than the context bound
+// (default <1s), and everything still works with no mDNS daemon installed.
+func BrowseMDNS(ctx context.Context, ips []string) map[string]string {
+	names := map[string]string{}
+	if len(ips) == 0 {
+		return names
+	}
+	group := net.IPv4(224, 0, 0, 251)
+	conn, err := net.ListenMulticastUDP("udp4", nil, &net.UDPAddr{IP: group, Port: 5353})
+	if err != nil {
+		// No group membership (no root / no interface): fall back to unicast
+		// responses by sending from an ephemeral socket, like reverseMDNS.
+		conn, err = net.DialUDP("udp4", nil, &net.UDPAddr{IP: group, Port: 5353})
+		if err != nil {
+			return names
+		}
+	}
+	defer conn.Close()
+
+	deadline, has := ctx.Deadline()
+	if !has {
+		deadline = time.Now().Add(700 * time.Millisecond)
+	}
+	_ = conn.SetDeadline(deadline)
+
+	for _, ip := range ips {
+		if names[ip] != "" {
+			continue
+		}
+		_, _ = conn.Write(reversePTRQuery(ip))
+	}
+
+	buf := make([]byte, 4096)
+	for {
+		n, _, err := conn.ReadFromUDP(buf)
+		if err != nil {
+			break
+		}
+		for _, rr := range mdnsRRs(buf[:n]) {
+			switch {
+			case rr.typ == 12 && rr.target != "" && isLocalname(rr.target):
+				if ip, ok := arpaToIP(rr.owner); ok {
+					if names[ip] == "" {
+						names[ip] = rr.target
+					}
+				}
+			case rr.typ == 1 && rr.ip != nil && isLocalname(rr.owner):
+				s := rr.ip.String()
+				for _, ip := range ips {
+					if ip == s && names[ip] == "" {
+						names[ip] = rr.owner
+					}
+				}
+			case rr.typ == 28 && rr.ip != nil && isLocalname(rr.owner):
+				// AAAA-only hosts are rare on v4 LANs but appear; skip mapping
+				// since gnulte sweeps IPv4 only.
+			}
+		}
+	}
+	// The question section carries the reverse names too; keep them out of
+	// the result set (callers asked for live addresses only, which is what
+	// mdnsPTR answers already handle). No further work needed.
+	return names
+}
+
+// reversePTRQuery builds a PTR probe for ip's .arpa name with the
+// UnicastResponse bit, mirroring what reverseMDNS sends.
+func reversePTRQuery(ip string) []byte {
+	ip4 := net.ParseIP(ip)
+	if ip4 == nil || ip4.To4() == nil {
+		return nil
+	}
+	o := ip4.To4()
+	b := &bytes.Buffer{}
+	b.Write([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0})
+	writeName(b, strings.Join([]string{
+		strconv.Itoa(int(o[3])), strconv.Itoa(int(o[2])),
+		strconv.Itoa(int(o[1])), strconv.Itoa(int(o[0])),
+		"in-addr", "arpa",
+	}, "."))
+	b.Write([]byte{0, 12, 0x80, 0x01}) // qtype PTR, qclass IN + UnicastResponse
+	return b.Bytes()
+}
+
+func isLocalname(s string) bool {
+	return strings.HasSuffix(strings.ToLower(strings.TrimSuffix(s, ".")), ".local")
+}
+
+func arpaToIP(owner string) (string, bool) {
+	p := strings.Split(strings.ToLower(strings.TrimSuffix(owner, ".")), ".")
+	if len(p) != 6 || p[4] != "in-addr" || p[5] != "arpa" {
+		return "", false
+	}
+	var oct [4]int
+	for i := 0; i < 4; i++ {
+		n, err := strconv.Atoi(p[3-i])
+		if err != nil || n < 0 || n > 255 {
+			return "", false
+		}
+		oct[i] = n
+	}
+	return fmt.Sprintf("%d.%d.%d.%d", oct[0], oct[1], oct[2], oct[3]), true
+}
+
+// mdnsRR is one parsed resource record from an mDNS packet.
+type mdnsRR struct {
+	owner  string
+	typ    uint16
+	target string // PTR/SRV target name (no trailing dot)
+	ip     net.IP // A/AAAA address
+}
+
+// mdnsRRs walks an mDNS/DNS reply, extracting PTR, SRV, A and AAAA records so
+// hostname collection works from any packet the group sends us.
+func mdnsRRs(pkt []byte) []mdnsRR {
+	if len(pkt) < 12 {
+		return nil
+	}
+	qd := int(binary.BigEndian.Uint16(pkt[4:6]))
+	an := int(binary.BigEndian.Uint16(pkt[6:8]))
+	ns := int(binary.BigEndian.Uint16(pkt[8:10]))
+	ar := int(binary.BigEndian.Uint16(pkt[10:12]))
+	pos := 12
+	var out []mdnsRR
+	for i := 0; i < qd; i++ {
+		_, n, ok := skipName(pkt, pos)
+		if !ok {
+			return nil
+		}
+		pos = n + 4
+	}
+	for i := 0; i < an+ns+ar; i++ {
+		owner, n, ok := skipName(pkt, pos)
+		if !ok {
+			return out
+		}
+		pos = n
+		if pos+10 > len(pkt) {
+			return out
+		}
+		rt := binary.BigEndian.Uint16(pkt[pos : pos+2])
+		rdlen := int(binary.BigEndian.Uint16(pkt[pos+8 : pos+10]))
+		pos += 10
+		rdStart := pos
+		if rdStart+rdlen > len(pkt) {
+			return out
+		}
+		rr := mdnsRR{owner: strings.TrimSuffix(owner, "."), typ: rt}
+		switch rt {
+		case 1: // A
+			if rdlen >= 4 {
+				rr.ip = net.IPv4(pkt[rdStart], pkt[rdStart+1], pkt[rdStart+2], pkt[rdStart+3]).To4()
+			}
+		case 28: // AAAA
+			if rdlen >= 16 {
+				rr.ip = net.IP(append([]byte(nil), pkt[rdStart:rdStart+16]...))
+			}
+		case 12: // PTR
+			if t, _, ok := skipName(pkt, rdStart); ok {
+				rr.target = strings.TrimSuffix(t, ".")
+			}
+		case 33: // SRV
+			if rdlen >= 6 {
+				if t, _, ok := skipName(pkt, rdStart+6); ok {
+					rr.target = strings.TrimSuffix(t, ".")
+				}
+			}
+		}
+		out = append(out, rr)
+		pos = rdStart + rdlen
+	}
+	return out
+}
+
+// NetBIOSName asks a host for its NetBIOS name via an NBSTAT query on UDP 137
+// (RFC 1002). Windows machines and many IoT devices that ignore DNS and
+// mDNS still answer this. Bound to a second when no reply arrives; nil result
+// is not an error.
+func NetBIOSName(ctx context.Context, ip string) string {
+	raddr, err := net.ResolveUDPAddr("udp4", net.JoinHostPort(ip, "137"))
+	if err != nil {
+		return ""
+	}
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{Port: 137})
+	if err != nil {
+		// Port 137 needs root (or is taken): answer on any local port.
+		conn, err = net.ListenUDP("udp4", nil)
+		if err != nil {
+			return ""
+		}
+	}
+	defer conn.Close()
+	deadline, has := ctx.Deadline()
+	if !has {
+		deadline = time.Now().Add(900 * time.Millisecond)
+	}
+	_ = conn.SetDeadline(deadline)
+	if _, err := conn.WriteToUDP(nbstatQuery(), raddr); err != nil {
+		return ""
+	}
+	buf := make([]byte, 1024)
+	for {
+		n, _, err := conn.ReadFromUDP(buf)
+		if err != nil {
+			return ""
+		}
+		if name, ok := nbstatReply(buf[:n]); ok {
+			return name
+		}
+	}
+}
+
+// nbstatQuery builds a Name-Service Status ("NBSTAT", opcode 0x21) query for
+// the wildcard name, which asks the host to report all its registered names.
+func nbstatQuery() []byte {
+	tid := uint16(time.Now().UnixNano())
+	b := &bytes.Buffer{}
+	b.Write([]byte{byte(tid >> 8), byte(tid), 0, 0x10, 0, 1, 0, 0, 0, 0, 0, 0})
+	// First-level encoded "*" + 14 spaces + suffix 0x00 (returns NBSTAT rdata).
+	raw := make([]byte, 16)
+	raw[0] = '*'
+	for i := 1; i < 15; i++ {
+		raw[i] = ' '
+	}
+	b.WriteByte(0x20)
+	for _, c := range raw {
+		b.WriteByte(c>>4 + 0x41)
+		b.WriteByte(c&0x0F + 0x41)
+	}
+	b.Write([]byte{0, 0x21, 0, 1}) // qtype NBSTAT, qclass IN
+	return b.Bytes()
+}
+
+// nbstatReply extracts a computer name from an NBSTAT response. Tricky
+// records (ADRESS_NOT_FOUND, error suffixes) are ignored.
+func nbstatReply(pkt []byte) (string, bool) {
+	if len(pkt) < 12 {
+		return "", false
+	}
+	qd := int(binary.BigEndian.Uint16(pkt[4:6]))
+	an := int(binary.BigEndian.Uint16(pkt[6:8]))
+	pos := 12
+	for i := 0; i < qd; i++ {
+		_, n, ok := skipName(pkt, pos)
+		if !ok {
+			return "", false
+		}
+		pos = n + 4
+	}
+	for i := 0; i < an; i++ {
+		_, n, ok := skipName(pkt, pos)
+		if !ok {
+			return "", false
+		}
+		pos = n
+		if pos+10 > len(pkt) {
+			return "", false
+		}
+		rt := binary.BigEndian.Uint16(pkt[pos : pos+2])
+		rdlen := int(binary.BigEndian.Uint16(pkt[pos+8 : pos+10]))
+		pos += 10
+		if rdlen < 1 || pos+rdlen > len(pkt) {
+			return "", false
+		}
+		if rt != 0x21 { // NBSTAT
+			pos += rdlen
+			continue
+		}
+		names := parseNBSTAT(pkt[pos : pos+rdlen])
+		if len(names) == 0 {
+			return "", false
+		}
+		return names[0], true
+	}
+	return "", false
+}
+
+func parseNBSTAT(rdata []byte) []string {
+	if len(rdata) < 1 {
+		return nil
+	}
+	num := int(rdata[0])
+	pos := 1
+	var bySuffix []struct {
+		name string
+		suf  uint16
+	}
+	for i := 0; i < num; i++ {
+		if pos+20 > len(rdata) {
+			break
+		}
+		name := strings.TrimRight(string(rdata[pos:pos+16]), " \x00")
+		suf := binary.BigEndian.Uint16(rdata[pos+16 : pos+18])
+		pos += 20
+		// Skip "*" and error/control names; keep workstation/server entries
+		// and prefer the file-server (<20>) registration over the plain
+		// workstation (<00>) one, as most stacks register both.
+		if name == "" || name == "*" || suffixGroup(suf) != 0 {
+			continue
+		}
+		bySuffix = append(bySuffix, struct {
+			name string
+			suf  uint16
+		}{name, suf})
+	}
+	for _, key := range []uint16{0x20, 0x00} {
+		for _, e := range bySuffix {
+			if e.suf == key {
+				return []string{e.name}
+			}
+		}
+	}
+	return nil
+}
+
+func suffixGroup(sf uint16) int {
+	switch sf {
+	case 0x00, 0x20: // workstation, file server
+		return 0
+	case 0x1C, 0x1D: // domain controller, master browser
+		return 2
+	case 0x03: // messenger
+		return 0
+	}
+	return 1
+}
+
 // skipName walks a (possibly compressed) DNS name. It returns the fully
 // expanded name, the byte offset just past the name as written at the top
 // level (after the first pointer, or after the terminating zero), and whether
@@ -310,28 +677,70 @@ func DeviceType(vendor, hostname, ports string, banners []string) string {
 	switch {
 	case strings.Contains(v, "apple") ||
 		strings.Contains(n, "ipad") || strings.Contains(n, "iphone") ||
-		strings.Contains(n, "imac") || strings.Contains(n, "macbook"):
+		strings.Contains(n, "imac") || strings.Contains(n, "macbook") ||
+		strings.Contains(n, "homepod") || strings.Contains(n, "apple tv"):
 		return "Apple device"
 	case strings.Contains(v, "samsung") || strings.Contains(v, "xiaomi") ||
 		strings.Contains(v, "oneplus") || strings.Contains(v, "motorola") ||
-		strings.Contains(v, "huawei") || strings.Contains(n, "android") ||
-		strings.Contains(n, "galaxy") || strings.Contains(n, " phone"):
+		strings.Contains(v, "huawei") || strings.Contains(v, "google") ||
+		strings.Contains(v, "oppo") || strings.Contains(v, "vivo") ||
+		strings.Contains(v, "realme") || strings.Contains(n, "android") ||
+		strings.Contains(n, "galaxy") || strings.Contains(n, " phone") ||
+		strings.Contains(n, "pixel"):
 		return "Mobile"
+	case strings.Contains(v, "lg") || strings.Contains(v, "sony") ||
+		strings.Contains(v, "tcl") || strings.Contains(v, "hisense") ||
+		strings.Contains(v, "philips") || strings.Contains(v, "vizio") ||
+		strings.Contains(v, "amazon") || strings.Contains(v, "sonos") ||
+		strings.Contains(v, "roku") || strings.Contains(v, "harman") ||
+		strings.Contains(n, "tv") || strings.Contains(n, "smarttv") ||
+		strings.Contains(n, "roku") || strings.Contains(n, "echo") ||
+		strings.Contains(n, "alexa") || strings.Contains(n, "nest") ||
+		strings.Contains(n, "chromecast") || strings.Contains(n, "firetv") ||
+		strings.Contains(n, "homepod"):
+		return "Media/TV"
+	case strings.Contains(v, "espressif") || strings.Contains(v, "turbo-x") ||
+		strings.Contains(v, "securifi") || strings.Contains(v, "tuya") ||
+		strings.Contains(v, "jemiot") || strings.Contains(v, "silicon labs") ||
+		strings.Contains(v, "nordic") ||
+		strings.Contains(n, "wemo") || strings.Contains(n, "smartbulb") ||
+		strings.Contains(n, "smartplug") || strings.Contains(n, "smart socket") ||
+		strings.Contains(n, "plug-") || strings.Contains(n, "bulb"):
+		return "IoT (smart home)"
+	case strings.Contains(v, "hikvision") || strings.Contains(v, "dahua") ||
+		strings.Contains(v, "reolink") || strings.Contains(v, "ezviz") ||
+		strings.Contains(v, "amcrest") || strings.Contains(v, "axis communications") ||
+		strings.Contains(n, "cam-") || strings.Contains(n, "camera") ||
+		strings.Contains(n, "nvr") || strings.Contains(n, "dvr"):
+		return "Camera/NVR"
+	case strings.Contains(v, "canon") || strings.Contains(v, "epson") ||
+		strings.Contains(v, "brother") || strings.Contains(v, "xerox") ||
+		strings.Contains(v, "ricoh") || strings.Contains(v, "zebra") ||
+		strings.Contains(v, "hewlett-packard") || strings.Contains(v, " hp") ||
+		strings.Contains(n, "printer") || strings.Contains(n, "print") ||
+		strings.Contains(n, "scanner"):
+		return "Printer"
 	case strings.Contains(v, "tp-link") || strings.Contains(v, "asus") ||
 		strings.Contains(v, "netgear") || strings.Contains(v, "linksys") ||
 		strings.Contains(v, "d-link") || strings.Contains(v, "dlink") ||
 		strings.Contains(v, "totolink") || strings.Contains(v, "belkin") ||
-		strings.Contains(v, "zyxel"):
+		strings.Contains(v, "zyxel") || strings.Contains(v, "ubiquiti") ||
+		strings.Contains(v, "mikrotik") || strings.Contains(v, "cisco") ||
+		strings.Contains(v, "aruba") || strings.Contains(v, "ubnt"):
 		return "Router/AP"
 	case strings.Contains(n, "router") || strings.Contains(n, "openwrt") ||
-		strings.Contains(n, "gateway") || strings.Contains(n, "ap-"):
+		strings.Contains(n, "gateway") || strings.Contains(n, "ap-") ||
+		strings.Contains(n, "accesspoint") || strings.Contains(n, "routeur"):
 		return "Router/AP"
-	case strings.Contains(v, "raspberry"):
+	case strings.Contains(v, "raspberry") || strings.Contains(v, "arduino"):
 		return "Raspberry Pi"
 	case strings.Contains(v, "microsoft") || strings.Contains(v, "intel") ||
 		strings.Contains(v, "dell") || strings.Contains(v, "lenovo") ||
-		strings.Contains(v, "hewlett") || strings.Contains(n, "windows") ||
-		strings.Contains(n, "desktop") || strings.Contains(n, "laptop"):
+		strings.Contains(v, "hewlett") || strings.Contains(v, "acer") ||
+		strings.Contains(v, "aopen") || strings.Contains(v, "gigabyte") ||
+		strings.Contains(v, "msi") || strings.Contains(n, "windows") ||
+		strings.Contains(n, "desktop") || strings.Contains(n, "laptop") ||
+		strings.Contains(n, "workstation") || strings.Contains(n, "nas"):
 		return "Computer"
 	}
 
@@ -380,7 +789,9 @@ func guessByPorts(pl, b string) string {
 		return "Roku"
 	case isOpen(8009):
 		return "Google Cast"
-	case isOpen(554) || isOpen(8554):
+	case isOpen(1883) || isOpen(8883) || isOpen(4840):
+		return "IoT"
+	case isOpen(554) || isOpen(8554) || isOpen(8555):
 		return "Media/IoT (camera?)"
 	case isOpen(9100) || isOpen(515) || isOpen(631):
 		return "Printer"

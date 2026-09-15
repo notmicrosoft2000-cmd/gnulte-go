@@ -234,6 +234,7 @@ func main() {
 	} else {
 		rows = buildRows(ctx, live, discover.Neighbors(context.Background(), cfg.Interface), cfg)
 	}
+	discover.EnrichHostnames(ctx, rows)
 	if *deep {
 		deepBusy := ux.NewBusy(fmt.Sprintf("deep-scanning %d host(s): common ports, services, banners", len(rows)))
 		done := make(chan struct{})

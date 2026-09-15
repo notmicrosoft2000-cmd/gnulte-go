@@ -184,6 +184,45 @@ func Classify(vendor, hostname string) string {
 	return ident.DeviceType(vendor, hostname, "", nil)
 }
 
+// EnrichHostnames is the last-hurdle identification pass: hosts whose fast
+// lookup (reverse DNS + single mDNS probe) found no name get asked all at once
+// through the multicast group, then individually by NetBIOS status query — so
+// Windows and quiet IoT devices that ignore DNS/mDNS still surface a name and
+// a better device type. Everything is time-bounded and returns silently when
+// a host simply has nothing to say.
+func EnrichHostnames(ctx context.Context, rows []Row) {
+	var need []string
+	for i := range rows {
+		if rows[i].Hostname == "" {
+			need = append(need, rows[i].IP)
+		}
+	}
+	if len(need) == 0 {
+		return
+	}
+	names := ident.BrowseMDNS(ctx, need)
+	for i := range rows {
+		if rows[i].Hostname == "" && names[rows[i].IP] != "" {
+			rows[i].Hostname = names[rows[i].IP]
+		}
+	}
+	for i := range rows {
+		if rows[i].Hostname != "" {
+			continue
+		}
+		if n := ident.NetBIOSName(ctx, rows[i].IP); n != "" {
+			rows[i].Hostname = n
+		}
+	}
+	// A freshly found name may unlock a device-type hint that the initial
+	// guess missed (only when no classification was made yet).
+	for i := range rows {
+		if rows[i].Type == "" && rows[i].Hostname != "" {
+			rows[i].Type = ident.DeviceType(rows[i].Vendor, rows[i].Hostname, "", nil)
+		}
+	}
+}
+
 // DeepScan runs the in-Go port scanner against one IP. The port list, TTL-based
 // OS guess, service banners, and any scan note replace what the old nmap
 // delegation produced — so the deep scan works with no external tool. Errors

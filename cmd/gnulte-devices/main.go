@@ -209,6 +209,7 @@ func buildRows(ctx context.Context, live []string, neighbors map[string]string, 
 		}(ip)
 	}
 	wg.Wait()
+	discover.EnrichHostnames(ctx, rows)
 	return rows
 }
 

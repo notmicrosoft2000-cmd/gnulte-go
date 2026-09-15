@@ -208,6 +208,9 @@ func quickRef() {
 	fmt.Println(c(cDim, "  ─────────────────────────────────────────────────"))
 	fmt.Println("  " + c(cBold+cHeader, "QUICK REFERENCE") + "  " + c(cDim, "(full list: -h)"))
 	fmt.Println("    gnulte -t 192.168.1.20 --profile voip --duration 300")
+	fmt.Println("    gnulte -t android-3 --interval 1                  target by hostname")
+	fmt.Println("    gnulte --device-type phone --profile gaming        target every phone")
+	fmt.Println("    gnulte --vendor Xiaomi                            target by maker")
 	fmt.Println("    gnulte -r 192.168.1.0/24 -w 192.168.1.100        range attack")
 	fmt.Println("    gnulte -t 192.168.1.20 --block                    100% block")
 	fmt.Println("    gnulte -t 192.168.1.20 --random                     beeps + random walk")
@@ -290,18 +293,22 @@ func scanAndSelect(ctx context.Context, cfg netutil.Config) []string {
 	fmt.Println("  ──────────────────────────────────────────────────────────────────")
 	for i, r := range rows {
 		mark := " "
+		numCol := cYellow
 		if r.IsSelf {
 			mark = "S"
+			numCol = cHeader
 		} else if r.IP == cfg.Gateway {
 			mark = "G"
+			numCol = cTarget
 		}
-		num := c(cYellow, fmt.Sprintf("%-2d%s", i+1, mark))
-		ipc := c(cTarget, fmt.Sprintf("%-16s", r.IP))
+		num := c(numCol, fmt.Sprintf("%-2d%s", i+1, mark))
+		ipc := c(ux.DeviceIPCode(r.IsSelf, r.Type), fmt.Sprintf("%-16s", r.IP))
 		hostc := c(cDim, fmt.Sprintf("%-16s", truncate(r.Hostname, 16)))
-		fmt.Printf("  %s %s %s %-12s %s\n", num, ipc, hostc, truncate(r.Type, 12), truncate(r.Vendor, 18))
+		typc := c(ux.TypeColor(r.Type), fmt.Sprintf("%-12s", truncate(r.Type, 12)))
+		fmt.Printf("  %s %s %s %s %s\n", num, ipc, hostc, typc, truncate(r.Vendor, 18))
 	}
 	fmt.Println("  ──────────────────────────────────────────────────────────────────")
-	fmt.Println("  " + c(cDim, "G = gateway | S = this host | r/a = all devices | 0 = exit | Example: '1,2,3'"))
+	fmt.Println("  " + c(cDim, "colours by type · bright = this host · yellow = gateway | 'r' = all · 0 = exit"))
 	fmt.Println()
 
 	for {
@@ -387,6 +394,7 @@ func rowsFromScan(cfg netutil.Config, live []string) []discover.Row {
 	for ip, mac := range neighbors {
 		add(ip, mac)
 	}
+	discover.EnrichHostnames(context.Background(), rows)
 	return rows
 }
 

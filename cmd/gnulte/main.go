@@ -33,6 +33,7 @@ import (
 	"os/signal"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -73,10 +74,12 @@ func clamp(v, lo, hi int) int {
 func main() {
 	var (
 		ifaceArg  = flag.String("i", "", "network interface (default: auto-detect)")
-		targets   = flag.String("t", "", "target IP(s), comma-separated")
+		targets   = flag.String("t", "", "target IP(s), comma-separated (hostnames and .local names resolve automatically)")
 		macArg    = flag.String("m", "", "target by MAC address (resolved via ARP)")
 		rangeCIDR = flag.String("r", "", "target an entire subnet CIDR (e.g. 192.168.1.0/24)")
 		whitelist = flag.String("w", "", "exclude IP(s) from a range attack (comma-separated)")
+		devTypes  = flag.String("device-type", "", "target every LAN device of these kinds (comma-separated, e.g. phone,router)")
+		vendors   = flag.String("vendor", "", "target every LAN device with a matching vendor name (substring, e.g. Xiaomi)")
 
 		latency   = flag.Int("l", 0, "base delay in ms")
 		jitter    = flag.Int("j", 0, "random variation in ms")
@@ -281,9 +284,16 @@ func main() {
 
 	scanCtx := sigCtx
 	var targetsList []string
-	if interactive && *targets == "" && *macArg == "" && *rangeCIDR == "" {
+	switch {
+	case *devTypes != "" || *vendors != "":
+		var err error
+		targetsList, err = matchDevices(scanCtx, cfg, *devTypes, *vendors, *quiet)
+		if err != nil {
+			fatal(err)
+		}
+	case interactive && *targets == "" && *macArg == "" && *rangeCIDR == "":
 		targetsList = scanAndSelect(scanCtx, cfg)
-	} else {
+	default:
 		var err error
 		targetsList, err = resolveTargets(sigCtx, *targets, *macArg, *rangeCIDR, *whitelist, cfg)
 		if err != nil {
@@ -483,7 +493,11 @@ func resolveTargets(ctx context.Context, tAmt, tMac, rCIDR, wl string, cfg netut
 				continue
 			}
 			if net.ParseIP(t) == nil {
-				return nil, fmt.Errorf("invalid target IP %q", t)
+				ip, err := resolveTargetName(ctx, cfg, t)
+				if err != nil {
+					return nil, err
+				}
+				t = ip
 			}
 			list = append(list, t)
 		}
@@ -525,6 +539,162 @@ func resolveTargets(ctx context.Context, tAmt, tMac, rCIDR, wl string, cfg netut
 		}
 	}
 	return uniq, nil
+}
+
+// resolveTargetName resolves a friendly name — an mDNS ".local" record, a DNS
+// name, a bare hostname, or the display name of a live device (the same names
+// the device scanner shows) — to a LAN IPv4 address. The system resolver and
+// avahi are tried first (bounded); if neither answers, the device table is
+// matched by hostname, so name targeting works even without a mDNS daemon.
+func resolveTargetName(ctx context.Context, cfg netutil.Config, name string) (string, error) {
+	name = strings.TrimSuffix(strings.TrimSpace(name), ".")
+	if net.ParseIP(name) != nil {
+		return name, nil
+	}
+	try := func(n string) string {
+		rctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		addrs, err := net.DefaultResolver.LookupHost(rctx, n)
+		if err != nil {
+			return ""
+		}
+		for _, a := range addrs {
+			if ip := net.ParseIP(a); ip != nil && ip.To4() != nil {
+				return ip.String()
+			}
+		}
+		return ""
+	}
+	candidates := []string{name}
+	if !strings.HasSuffix(name, ".local") {
+		candidates = append(candidates, name+".local")
+	}
+	for _, c := range candidates {
+		if ip := try(c); ip != "" {
+			return ip, nil
+		}
+	}
+	for _, c := range candidates {
+		if !strings.HasSuffix(c, ".local") {
+			continue
+		}
+		rctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(rctx, "avahi-resolve", "-4", "-n", c).Output()
+		if err != nil {
+			continue
+		}
+		f := strings.Fields(string(out))
+		if len(f) >= 2 && net.ParseIP(f[1]) != nil {
+			return f[1], nil
+		}
+	}
+	if ip := nameOnLAN(ctx, cfg, name); ip != "" {
+		return ip, nil
+	}
+	return "", fmt.Errorf("could not resolve target %q to a LAN address (tried DNS, %q, avahi mDNS and the device list)", name, name+".local")
+}
+
+// nameOnLAN finds the IP of a live device whose hostname — the same name the
+// device scanner displays, e.g. "Android-3.local" — matches name. Neighbor
+// hostnames are resolved in parallel, each bounded, so no mDNS daemon is
+// required and nothing waits longer than the overall budget.
+func nameOnLAN(ctx context.Context, cfg netutil.Config, name string) string {
+	rctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	neighbors := discover.Neighbors(rctx, cfg.Interface)
+	want := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(name), ".local"))
+	var (
+		mu    sync.Mutex
+		found string
+		wg    sync.WaitGroup
+		sem   = make(chan struct{}, 12)
+	)
+	for ip := range neighbors {
+		ip := ip
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-rctx.Done():
+				return
+			}
+			defer func() { <-sem }()
+			host := discover.ResolveHost(rctx, ip)
+			h := strings.ToLower(strings.TrimSuffix(strings.TrimSuffix(host, "."), ".local"))
+			if h == want {
+				mu.Lock()
+				if found == "" {
+					found = ip
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	return found
+}
+
+// matchDevices targets every live device on the subnet whose enriched type and
+// vendor name match the filters. Type/vendor values are case-insensitive
+// substrings accepting comma-separated alternatives; both filters combine as
+// AND. The gateway and this host are never added (the engine never shapes its
+// own link or the router).
+func matchDevices(ctx context.Context, cfg netutil.Config, wantTypes, wantVendors string, quiet bool) ([]string, error) {
+	subnet := subnetCIDR(cfg.SelfIP, cfg.Netmask)
+	hosts, err := netutil.HostsInCIDR(subnet)
+	if err != nil || len(hosts) == 0 {
+		return nil, fmt.Errorf("could not enumerate %s (%v)", subnet, err)
+	}
+	live := discover.PingSweep(ctx, hosts, 96)
+	if len(live) == 0 {
+		return nil, fmt.Errorf("no live devices found on %s", subnet)
+	}
+	rows := rowsFromScan(cfg, live)
+	types := splitCSV(wantTypes)
+	vendors := splitCSV(wantVendors)
+
+	var out []string
+	for _, r := range rows {
+		if r.IsSelf || r.IP == cfg.Gateway {
+			continue
+		}
+		if matchAny(r.Type, types) && matchAny(r.Vendor, vendors) {
+			out = append(out, r.IP)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no device matches --device-type %q / --vendor %q on %s", wantTypes, wantVendors, subnet)
+	}
+	if !quiet {
+		fmt.Println("  " + okText(fmt.Sprintf("Targeting %d device(s):", len(out))))
+		for _, r := range rows {
+			for _, ip := range out {
+				if r.IP == ip {
+					ipc := c(ux.DeviceIPCode(r.IsSelf, r.Type), fmt.Sprintf("%-15s", r.IP))
+					typc := c(ux.TypeColor(r.Type), fmt.Sprintf("%-12s", truncate(r.Type, 12)))
+					fmt.Printf("    %s %-16s %s %s\n", ipc, truncate(r.Hostname, 16), typc, truncate(r.Vendor, 20))
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+// matchAny reports whether actual contains any of the case-insensitive
+// substring filters. An empty filter list matches everything.
+func matchAny(actual string, want []string) bool {
+	if len(want) == 0 {
+		return true
+	}
+	a := strings.ToLower(actual)
+	for _, w := range want {
+		if w != "" && strings.Contains(a, strings.ToLower(w)) {
+			return true
+		}
+	}
+	return false
 }
 
 // ipForMAC finds the IP that currently has the given MAC.
@@ -646,10 +816,14 @@ Usage:
   sudo gnulte [options]
 
 Targeting:
-  -t, --target IP       target IP(s), comma-separated
+  -t, --target IP       target IP(s), comma-separated (hostnames and .local
+                        names resolve automatically)
   -m, --mac MAC         target by MAC address
   -r, --range CIDR      target an entire subnet (e.g. 192.168.1.0/24)
   -w, --whitelist IP    exclude IP(s) from a range (comma-separated)
+      --device-type KINDS  target every LAN device of these kinds
+                        (comma-separated, e.g. phone,router,printer)
+      --vendor NAMES    target every LAN device by vendor name (substring)
 
 Parameters:
   -l, --latency MS      base delay in ms

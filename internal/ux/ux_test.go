@@ -62,3 +62,43 @@ func TestTrunc(t *testing.T) {
 		t.Errorf("long string should be ellipsized, got %q", Trunc("helloworld", 3))
 	}
 }
+
+func TestTypeColorHues(t *testing.T) {
+	for _, tc := range []struct {
+		typ, code string
+	}{
+		{"Mobile", Magenta},
+		{"Apple device", Cyan},
+		{"Computer", Blue},
+		{"Router/AP", Yellow},
+		{"Router/Gateway", Yellow},
+		{"Printer", Green},
+		{"Roku", Red},
+		{"Google Cast", Red},
+		{"Camera/NVR", Red},
+		{"Media/TV", Red},
+		{"IoT (smart home)", Red},
+		{"Raspberry Pi", Green},
+		{"Device", Dim},
+		{"", Dim},
+	} {
+		if got := TypeColor(tc.typ); got != tc.code {
+			t.Errorf("TypeColor(%q) = %q, want %q", tc.typ, got, tc.code)
+		}
+	}
+}
+
+func TestDeviceIPCode(t *testing.T) {
+	if got := DeviceIPCode(true, "Phone"); got != Header {
+		t.Errorf("self host should be Header, got %q", got)
+	}
+	if got := DeviceIPCode(false, "Router/Gateway"); got != Target {
+		t.Errorf("gateway should be Target, got %q", got)
+	}
+	if got := DeviceIPCode(false, "Mobile"); got != Magenta {
+		t.Errorf("mobile should be Magenta, got %q", got)
+	}
+	if got := DeviceIPCode(false, "Computer"); got != Blue {
+		t.Errorf("computer should be Blue, got %q", got)
+	}
+}

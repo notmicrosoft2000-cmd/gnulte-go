@@ -30,15 +30,17 @@ import (
 
 // ANSI palettes shared across the tools.
 const (
-	Reset  = "\033[0m"
-	Bold   = "\033[1m"
-	Dim    = "\033[2m"
-	Red    = "\033[0;31m"
-	Green  = "\033[0;32m"
-	Yellow = "\033[1;33m"
-	Cyan   = "\033[0;36m"
-	Header = "\033[1;36m"
-	Target = "\033[1;33m"
+	Reset   = "\033[0m"
+	Bold    = "\033[1m"
+	Dim     = "\033[2m"
+	Red     = "\033[0;31m"
+	Green   = "\033[0;32m"
+	Yellow  = "\033[1;33m"
+	Blue    = "\033[0;34m"
+	Magenta = "\033[0;35m"
+	Cyan    = "\033[0;36m"
+	Header  = "\033[1;36m"
+	Target  = "\033[1;33m"
 )
 
 // Out is the console writer used by Bar and Busy. Export commands point it at
@@ -124,6 +126,49 @@ func TruncPad(s string, width int) string {
 		b.WriteByte(' ')
 	}
 	return b.String()
+}
+
+// TypeColor returns the ANSI hue a device type is rendered in, so a given kind
+// is recognisable by colour in every table. Unknown kinds stay dim.
+func TypeColor(typ string) string {
+	t := strings.ToLower(typ)
+	switch {
+	case strings.Contains(t, "router"), strings.Contains(t, "gateway"):
+		return Yellow
+	case strings.Contains(t, "mobile"), strings.Contains(t, "phone"), strings.Contains(t, "tablet"):
+		return Magenta
+	case strings.Contains(t, "computer"), strings.Contains(t, "desktop"), strings.Contains(t, "laptop"),
+		strings.Contains(t, "workstation"), strings.Contains(t, "server"), strings.Contains(t, "nas"):
+		return Blue
+	case strings.Contains(t, "printer"), strings.Contains(t, "scanner"):
+		return Green
+	case strings.Contains(t, "apple"), strings.Contains(t, "iphone"), strings.Contains(t, "mac"),
+		strings.Contains(t, "ipad"), strings.Contains(t, "homepod"), strings.Contains(t, "airplay"):
+		return Cyan
+	case strings.Contains(t, "pi"), strings.Contains(t, "raspberry"), strings.Contains(t, "maker"):
+		return Green
+	case strings.Contains(t, "cast"), strings.Contains(t, "roku"), strings.Contains(t, "tv"),
+		strings.Contains(t, "sound"), strings.Contains(t, "media"), strings.Contains(t, "iot"),
+		strings.Contains(t, "cam"), strings.Contains(t, "echo"), strings.Contains(t, "speaker"):
+		return Red
+	case strings.Contains(t, "unknown"), strings.Contains(t, "device"):
+		return Dim
+	}
+	return Dim
+}
+
+// DeviceIPCode picks the colour for a host's IP address in a device table:
+// the machine running the scan gets its own bright hue, the gateway another
+// (matches the G marker), and everything else follows its device type.
+func DeviceIPCode(isSelf bool, typ string) string {
+	if isSelf {
+		return Header
+	}
+	if strings.Contains(strings.ToLower(typ), "router") ||
+		strings.Contains(strings.ToLower(typ), "gateway") {
+		return Target
+	}
+	return TypeColor(typ)
 }
 
 // Trunc ellipsizes s at n runes.

@@ -31,12 +31,12 @@ type cdef struct {
 	header string
 	min    int
 	get    func(r discover.Row) string
-	color  func(d string) string
+	color  func(r discover.Row, d string) string
 }
 
-func noColor(d string) string { return d }
+func noColor(r discover.Row, d string) string { return d }
 
-func dimc(d string) string { return ux.C(ux.Dim, d) }
+func dimc(r discover.Row, d string) string { return ux.C(ux.Dim, d) }
 
 func statusValue(r discover.Row) string {
 	switch {
@@ -49,24 +49,31 @@ func statusValue(r discover.Row) string {
 	}
 }
 
-func statusColor(d string) string {
-	switch strings.TrimSpace(d) {
+func statusColor(r discover.Row, d string) string {
+	marker := strings.TrimSpace(strings.TrimLeft(d, "0123456789"))
+	if len(marker) == 0 {
+		return ux.C(ux.Green, d)
+	}
+	switch string([]rune(marker)[len([]rune(marker))-1]) {
 	case "G":
 		return ux.C(ux.Yellow, d)
 	case "S":
-		return ux.C(ux.Cyan, d)
+		return ux.C(ux.Header, d)
 	default:
 		return ux.C(ux.Green, d)
 	}
 }
 
-func ipColor(d string) string {
-	switch {
-	case strings.HasSuffix(strings.TrimSpace(d), "S"):
-		return ux.C(ux.Cyan, d)
-	default:
-		return ux.C(ux.Target, d)
-	}
+// ipColor tintes the address by what the device is: the running host and the
+// gateway get their own hues, everything else follows its device type (so the
+// shot of a phone is magenta, a computer blue, and so on).
+func ipColor(r discover.Row, d string) string {
+	return ux.C(ux.DeviceIPCode(r.IsSelf, r.Type), d)
+}
+
+// typeColor renders the type label in the same hue its address wears.
+func typeColor(r discover.Row, d string) string {
+	return ux.C(ux.TypeColor(d), d)
 }
 
 // hasColumn reports whether any row carries data for a field.
@@ -127,7 +134,7 @@ func renderTable(s *session, rows []discover.Row, width int) {
 		defs = append(defs, cdef{"HOSTNAME", 8, func(r discover.Row) string { return r.Hostname }, dimc})
 	}
 	if hasColumn(rows, 3) {
-		defs = append(defs, cdef{"TYPE", 10, func(r discover.Row) string { return r.Type }, noColor})
+		defs = append(defs, cdef{"TYPE", 10, func(r discover.Row) string { return r.Type }, typeColor})
 	}
 	if hasColumn(rows, 4) {
 		defs = append(defs, cdef{"PORTS", 10, func(r discover.Row) string { return r.Ports }, dimc})
@@ -194,14 +201,14 @@ func renderTable(s *session, rows []discover.Row, width int) {
 				drow.WriteString("  ")
 				prow.WriteString("  ")
 			}
-			drow.WriteString(d.color(padTo(val, widths[i])))
+			drow.WriteString(d.color(r, padTo(val, widths[i])))
 			prow.WriteString(padTo(val, widths[i]))
 		}
 		s.pl(drow.String(), prow.String())
 	}
 	s.pl(sepLine(defs, widths, width), sepLine(defs, widths, width))
-	legend := "  " + ux.C(ux.Dim, "G = gateway · S = this host · • = answering device")
-	legPlain := "  G = gateway · S = this host · • = answering device"
+	legend := "  " + ux.C(ux.Dim, "colours by device type · bright = this host · yellow = gateway")
+	legPlain := "  colours by device type · bright = this host · yellow = gateway"
 	s.pl(legend, legPlain)
 	fmt.Fprintln(ux.Out)
 }

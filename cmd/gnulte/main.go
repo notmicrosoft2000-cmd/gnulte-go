@@ -47,7 +47,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "11.0"
+const version = "11.1"
 
 // profiles mirrors the Bash toolkit's presets: latency|jitter|loss|dup|reorder|bandwidth.
 var profiles = map[string][6]int{

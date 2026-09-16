@@ -325,3 +325,212 @@ func guessOS(ttl int) string {
 	}
 	return ""
 }
+
+// FingerprintOS refines the coarse TTL-based guess using the deep scan results
+// (open ports, service banners), the OUI vendor and device type. It returns a
+// human-readable label such as "Linux", "Windows", "macOS", "Android",
+// "Synology NAS", "Printer firmware", "Router firmware", "Cisco IOS", etc.
+func FingerprintOS(ttl int, ports []Port, vendor, typ string) string {
+	vl := strings.ToLower(vendor)
+	tl := strings.ToLower(typ)
+
+	// Collect open port numbers and lowercased banners for fast scanning.
+	open := make(map[int]bool, len(ports))
+	var banners []string
+	for _, p := range ports {
+		open[p.Port] = true
+		if p.Banner != "" {
+			banners = append(banners, strings.ToLower(p.Banner))
+		}
+	}
+	bannerAll := strings.Join(banners, " ")
+
+	// --- Step 1: TTL-based initial bucket.
+	bucket := guessOS(ttl)
+
+	// --- Step 2: strong banner-based overrides (these are near-certain).
+	if strings.Contains(bannerAll, "openssh_for_windows") {
+		return "Windows"
+	}
+	if strings.Contains(bannerAll, "ssh-2.0-openssh") {
+		if strings.Contains(vl, "apple") {
+			return "macOS"
+		}
+		if strings.Contains(vl, "microsoft") || strings.Contains(vl, "windows") {
+			return "Windows"
+		}
+		if strings.Contains(vl, "synology") {
+			return "Synology DSM"
+		}
+		if strings.Contains(vl, "qnap") {
+			return "QNAP QTS"
+		}
+		if strings.Contains(vl, "raspberry") {
+			return "Linux (Raspberry Pi)"
+		}
+		return "Linux"
+	}
+	if strings.Contains(bannerAll, "dropbear") && (strings.Contains(vl, "tp-link") || strings.Contains(vl, "router") || strings.Contains(vl, "netgear") || strings.Contains(vl, "tenda") || strings.Contains(vl, "asus") || strings.Contains(vl, "openwrt")) {
+		return "Router firmware"
+	}
+	if strings.Contains(bannerAll, "dropbear") {
+		return "Embedded Linux"
+	}
+	if strings.Contains(bannerAll, "ssh-2.0-rou") || strings.Contains(bannerAll, "dropbear") {
+		return "Router firmware"
+	}
+	if strings.Contains(bannerAll, "openwrt") || strings.Contains(bannerAll, "openwrt") {
+		return "Linux (OpenWrt)"
+	}
+	if strings.Contains(bannerAll, "microsoft ftp service") || strings.Contains(bannerAll, "microsoft windows") {
+		return "Windows"
+	}
+	if strings.Contains(bannerAll, "microsoft iis") || strings.Contains(bannerAll, "microsoft-iis") {
+		return "Windows Server"
+	}
+	if strings.Contains(bannerAll, "nginx") {
+		for _, rv := range []string{"router", "openwrt", "tenda", "tp-link", "netgear", "d-link", "asus"} {
+			if strings.Contains(vl, rv) {
+				return "Router firmware"
+			}
+		}
+		return "Linux"
+	}
+	if strings.Contains(bannerAll, "apache") && !strings.Contains(bannerAll, "apache-coyote") {
+		if strings.Contains(vl, "synology") || strings.Contains(vl, "qnap") {
+			return "NAS firmware"
+		}
+		return "Linux"
+	}
+	if strings.Contains(bannerAll, "lighttpd") {
+		return "Linux"
+	}
+	if strings.Contains(bannerAll, "samba") {
+		return "Linux"
+	}
+	if strings.Contains(bannerAll, "proftpd") || strings.Contains(bannerAll, "vsftpd") {
+		return "Linux"
+	}
+	if strings.Contains(bannerAll, "filezilla") {
+		return "Windows"
+	}
+	if strings.Contains(bannerAll, "synology") || strings.Contains(bannerAll, "dsm") {
+		return "Synology DSM"
+	}
+	if strings.Contains(bannerAll, "qts") && strings.Contains(vl, "qnap") {
+		return "QNAP QTS"
+	}
+	if strings.Contains(bannerAll, "cisco") {
+		return "Cisco IOS"
+	}
+	if strings.Contains(bannerAll, "juniper") {
+		return "JunOS"
+	}
+	if strings.Contains(bannerAll, "mikrotik") || strings.Contains(bannerAll, "routeros") {
+		return "RouterOS"
+	}
+	if strings.Contains(bannerAll, "epson") || strings.Contains(bannerAll, "canon") || strings.Contains(bannerAll, "brother") || strings.Contains(bannerAll, "hp laserjet") || strings.Contains(bannerAll, "xerox") {
+		return "Printer firmware"
+	}
+	if strings.Contains(bannerAll, "3com") || strings.Contains(bannerAll, "netgear") {
+		return "Router firmware"
+	}
+
+	// --- Step 3: port-based signals.
+	if open[445] || open[139] {
+		// SMB open — strong Windows signal unless it's a known Linux NAS.
+		if strings.Contains(vl, "synology") || strings.Contains(vl, "qnap") || strings.Contains(vl, "western digital") || strings.Contains(vl, "buffalo") || strings.Contains(vl, "asustor") {
+			return "NAS firmware"
+		}
+		if strings.Contains(vl, "raspberry") {
+			return "Linux (Raspberry Pi)"
+		}
+		// Could be Samba on Linux, but Windows is more common with SMB.
+		if bucket == "Windows" {
+			return "Windows"
+		}
+	}
+	if open[3389] {
+		// RDP — almost certainly Windows.
+		return "Windows"
+	}
+	if open[22] && !open[445] {
+		// SSH present but no SMB: lean Unix.
+		if strings.Contains(vl, "apple") {
+			return "macOS"
+		}
+		if strings.Contains(vl, "synology") {
+			return "Synology DSM"
+		}
+		if bucket == "Linux/Unix" || bucket == "" {
+			return "Linux"
+		}
+	}
+	if open[5900] || open[5901] {
+		// VNC — common on macOS and Linux.
+		if strings.Contains(vl, "apple") {
+			return "macOS"
+		}
+		if bucket == "Windows" {
+			return "Windows"
+		}
+	}
+	if open[631] {
+		// CUPS — Linux or macOS.
+		if strings.Contains(vl, "apple") {
+			return "macOS"
+		}
+		return "Linux"
+	}
+	if open[161] && !open[22] && !open[445] {
+		// SNMP-only — likely a managed network device.
+		return "Router firmware"
+	}
+
+	// --- Step 4: vendor + type signals (lower confidence, but better than bucket).
+	if strings.Contains(vl, "apple") {
+		if strings.Contains(tl, "mobile") || strings.Contains(tl, "phone") || strings.Contains(tl, "tablet") {
+			return "iOS"
+		}
+		return "macOS"
+	}
+	if strings.Contains(vl, "samsung") || strings.Contains(vl, "xiaomi") || strings.Contains(vl, "huawei") || strings.Contains(vl, "oppo") || strings.Contains(vl, "vivo") || strings.Contains(vl, "realme") || strings.Contains(vl, "google") || strings.Contains(vl, "oneplus") || strings.Contains(vl, "nothing") || strings.Contains(vl, "iqoo") {
+		return "Android"
+	}
+	if strings.Contains(vl, "microsoft") {
+		return "Windows"
+	}
+	if strings.Contains(vl, "synology") {
+		return "Synology DSM"
+	}
+	if strings.Contains(vl, "qnap") {
+		return "QNAP QTS"
+	}
+	if strings.Contains(vl, "raspberry") || strings.Contains(vl, "arduino") || strings.Contains(vl, "espressif") {
+		return "Embedded Linux"
+	}
+	if strings.Contains(vl, "canon") || strings.Contains(vl, "epson") || strings.Contains(vl, "brother") || strings.Contains(vl, "hewlett-packard") || strings.Contains(vl, "zebra") || strings.Contains(vl, "xerox") || strings.Contains(vl, "ricoh") {
+		return "Printer firmware"
+	}
+	if strings.Contains(vl, "cisco") || strings.Contains(vl, "juniper") || strings.Contains(vl, "ubiquiti") || strings.Contains(vl, "mikrotik") || strings.Contains(vl, "aruba") || strings.Contains(vl, "fortinet") || strings.Contains(vl, "sonicwall") {
+		return "Router firmware"
+	}
+	if strings.Contains(tl, "printer") || strings.Contains(tl, "scanner") {
+		return "Printer firmware"
+	}
+	if strings.Contains(tl, "router") || strings.Contains(tl, "gateway") {
+		return "Router firmware"
+	}
+	if strings.Contains(tl, "camera") || strings.Contains(tl, "nvr") || strings.Contains(tl, "dvr") {
+		return "Camera firmware"
+	}
+	if strings.Contains(tl, "media") || strings.Contains(tl, "tv") {
+		return "Smart TV firmware"
+	}
+	if strings.Contains(tl, "nas") {
+		return "NAS firmware"
+	}
+
+	// --- Step 5: fall back to TTL bucket.
+	return bucket
+}

@@ -63,6 +63,30 @@ func TestTrunc(t *testing.T) {
 	}
 }
 
+// TestTruncPadAnsi verifies CSI colour sequences are treated as invisible when
+// measuring and padding, so full-frame table redraws keep their alignment.
+// Tests normally run with tty=false (piped stdout), so the colour path is
+// forced on and restored around the assertions.
+func TestTruncPadAnsi(t *testing.T) {
+	old := tty
+	tty = true
+	defer func() { tty = old }()
+	cases := []struct {
+		in, want string
+		width    int
+	}{
+		{"\033[1;36m#\033[0m", "\033[1;36m#\033[0m   ", 4},
+		{"\033[1;36mIP\033[0m", "\033[1;36mIP\033[0m             ", 15},
+		{"\033[2mabcdef\033[0m", "\033[2mabcd\033[0m", 4},     // truncation re-applies reset
+		{"\033[0;32m✓\033[0m ok", "\033[0;32m✓\033[0m ok", 4}, // multibyte + colour counting
+	}
+	for _, tc := range cases {
+		if got := TruncPad(tc.in, tc.width); got != tc.want {
+			t.Errorf("TruncPad(%q, %d) = %q, want %q", tc.in, tc.width, got, tc.want)
+		}
+	}
+}
+
 func TestTypeColorHues(t *testing.T) {
 	for _, tc := range []struct {
 		typ, code string

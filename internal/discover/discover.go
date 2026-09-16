@@ -25,18 +25,15 @@ package discover
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"gnulte-go/internal/ident"
-	"gnulte-go/internal/scanner"
 )
 
 // Row is one discovered host.
@@ -221,46 +218,4 @@ func EnrichHostnames(ctx context.Context, rows []Row) {
 			rows[i].Type = ident.DeviceType(rows[i].Vendor, rows[i].Hostname, "", nil)
 		}
 	}
-}
-
-// DeepScan runs the in-Go port scanner against one IP. The port list, TTL-based
-// OS guess, service banners, and any scan note replace what the old nmap
-// delegation produced — so the deep scan works with no external tool. Errors
-// come back as a human note instead of aborting the whole scan.
-func DeepScan(ctx context.Context, ip string) (ports, osName string, banners []string, note string) {
-	res := scanner.DeepScan(ctx, ip)
-	if len(res.Ports) == 0 {
-		ports = "(no open ports in common range)"
-	} else {
-		parts := make([]string, 0, len(res.Ports))
-		for _, p := range res.Ports {
-			s := fmt.Sprintf("%d/open/tcp", p.Port)
-			if p.Service != "" {
-				s += "/" + p.Service
-			}
-			parts = append(parts, s)
-		}
-		ports = strings.Join(parts, ", ")
-		hostNames := make([]string, 0, len(res.Ports))
-		for _, p := range res.Ports {
-			name := fmt.Sprintf("%d (%s)", p.Port, serviceOrNumber(p))
-			if p.Banner != "" {
-				name += ": " + p.Banner
-				hostNames = append(hostNames, name)
-			}
-		}
-		banners = hostNames
-	}
-	osName = res.OS
-	note = res.Note
-	return ports, osName, banners, note
-}
-
-// serviceOrNumber names a port by its well-known service, falling back to the
-// bare port number, so banner lines stay readable.
-func serviceOrNumber(p scanner.Port) string {
-	if p.Service != "" {
-		return p.Service
-	}
-	return strconv.Itoa(p.Port)
 }

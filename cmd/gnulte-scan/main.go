@@ -42,6 +42,7 @@ import (
 	"gnulte-go/internal/netutil"
 	"gnulte-go/internal/out"
 	"gnulte-go/internal/safety"
+	"gnulte-go/internal/scanner"
 	"gnulte-go/internal/settings"
 	"gnulte-go/internal/sound"
 	"gnulte-go/internal/tui"
@@ -74,6 +75,7 @@ func main() {
 		cidr        = flag.String("C", "", "CIDR to scan (default: from interface)")
 		threads     = flag.Int("t", 64, "parallel ping workers")
 		deep        = flag.Bool("d", false, "deep scan alive hosts with the in-Go port scanner")
+		interactive = flag.Bool("T", false, "interactive full-screen device table (needs a terminal)")
 		asJSON      = flag.Bool("j", false, "output JSON")
 		asYAML      = flag.Bool("y", false, "output YAML")
 		asCSV       = flag.Bool("c", false, "output CSV")
@@ -90,6 +92,7 @@ func main() {
 	flag.StringVar(cidr, "cidr", "", "CIDR to scan (default: from interface)")
 	flag.IntVar(threads, "threads", 64, "parallel ping workers")
 	flag.BoolVar(deep, "deep", false, "deep scan alive hosts with the in-Go port scanner")
+	flag.BoolVar(interactive, "interactive", false, "interactive full-screen device table (needs a terminal)")
 	flag.BoolVar(asJSON, "json", false, "output JSON")
 	flag.BoolVar(asYAML, "yaml", false, "output YAML")
 	flag.BoolVar(asCSV, "csv", false, "output CSV")
@@ -255,6 +258,23 @@ func main() {
 	}
 	out.SortByIP(rows)
 
+	// Interactive full-screen device table: replaces the classic table on a
+	// live terminal. On exit its (filtered, sorted) snapshot is logged for the
+	// report, and the plain table below is skipped to avoid a duplicate.
+	interactiveQuit := false
+	if *interactive && !exporting {
+		if ux.TTY() && tui.StdinTTY() {
+			final, quit := interactiveTable(rows)
+			interactiveQuit = quit
+			rows = final
+			for _, line := range rawTableLines(rows) {
+				sess.log = append(sess.log, line)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "gnulte-scan: -T needs a real terminal; falling back to the plain table\n")
+		}
+	}
+
 	exported := false
 	switch {
 	case *asJSON:
@@ -267,7 +287,9 @@ func main() {
 		err = out.CSV(os.Stdout, rows)
 		exported = true
 	default:
-		renderTable(&sess, rows, cols)
+		if !interactiveQuit {
+			renderTable(&sess, rows, cols)
+		}
 	}
 	if err != nil {
 		fatal(err)
@@ -392,15 +414,39 @@ func deepScan(ctx context.Context, rows []discover.Row, threads int) {
 		go func(r *discover.Row) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			ports, osName, banners, note := discover.DeepScan(ctx, r.IP)
+			res := scanner.DeepScan(ctx, r.IP)
+			var ports string
+			if len(res.Ports) == 0 {
+				ports = "(no open ports in common range)"
+			} else {
+				parts := make([]string, 0, len(res.Ports))
+				for _, p := range res.Ports {
+					s := fmt.Sprintf("%d/open/tcp", p.Port)
+					if p.Service != "" {
+						s += "/" + p.Service
+					}
+					parts = append(parts, s)
+				}
+				ports = strings.Join(parts, ", ")
+			}
+			var banners []string
+			for _, p := range res.Ports {
+				if p.Banner != "" {
+					svc := p.Service
+					if svc == "" {
+						svc = fmt.Sprintf("%d", p.Port)
+					}
+					banners = append(banners, fmt.Sprintf("%d (%s): %s", p.Port, svc, p.Banner))
+				}
+			}
 			mu.Lock()
 			r.Ports = ports
-			r.OS = osName
 			r.Banners = banners
-			r.ScanNote = note
+			r.ScanNote = res.Note
 			if t := ident.DeviceType(r.Vendor, r.Hostname, ports, banners); t != "" {
 				r.Type = t
 			}
+			r.OS = scanner.FingerprintOS(res.TTL, res.Ports, r.Vendor, r.Type)
 			mu.Unlock()
 		}(&rows[i])
 	}
@@ -461,6 +507,7 @@ Options:
   -C, --cidr CIDR         subnet to scan (default: from interface)
   -t, --threads N         parallel ping workers (default: 64)
   -d, --deep              deep scan alive hosts (in-Go port scanner)
+  -T, --interactive       interactive full-screen device table (live terminal)
   -j, --json              output JSON
   -y, --yaml              output YAML
   -c, --csv               output CSV

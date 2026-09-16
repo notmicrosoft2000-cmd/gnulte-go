@@ -102,11 +102,22 @@ func TruncPad(s string, width int) string {
 		if runes[i] == 0x1b {
 			start := i
 			i++
-			for i < len(runes) && !('@' <= runes[i] && runes[i] <= '~') {
-				i++
-			}
 			if i < len(runes) {
-				i++ // final byte of the CSI/OSC sequence
+				// A byte right after ESC in the final range is a two-byte
+				// escape (ESC 7, ESC 8, ESC M, …). Everything else — CSI,
+				// OSC, charset — runs until the next final byte and includes
+				// it, correctly swallowing the whole of "\x1b[1;36m".
+				if '@' <= runes[i] && runes[i] <= '~' && runes[i] != '[' {
+					i++
+				} else {
+					i++
+					for i < len(runes) && !('@' <= runes[i] && runes[i] <= '~') {
+						i++
+					}
+					if i < len(runes) {
+						i++
+					}
+				}
 			}
 			b.WriteString(string(runes[start:i]))
 			sawESC = true
@@ -181,6 +192,15 @@ func Trunc(s string, n int) string {
 		return "…"
 	}
 	return string(r[:n-1]) + "…"
+}
+
+// Invert wraps s in reverse-video when the output is a live terminal; piped
+// output is left alone so redirected logs keep the plain text.
+func Invert(s string) string {
+	if !tty {
+		return s
+	}
+	return "\033[7m" + s + Reset
 }
 
 // HumanRate renders a byte count as a size-suffixed rate per second, e.g.

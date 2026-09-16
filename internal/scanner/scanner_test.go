@@ -28,6 +28,58 @@ func TestGuessOS(t *testing.T) {
 	}
 }
 
+func TestFingerprintOSSsmbAndRDP(t *testing.T) {
+	// SMB-only host with Windows-leaning TTL stays Windows.
+	if got := FingerprintOS(128, []Port{{Port: 445}}, "Broadcom", ""); got != "Windows" {
+		t.Errorf("SMB fingerprint = %q, want Windows", got)
+	}
+	// RDP alone is Windows even on a Unix TTL.
+	if got := FingerprintOS(64, []Port{{Port: 3389}}, "Intel", ""); got != "Windows" {
+		t.Errorf("RDP fingerprint = %q, want Windows", got)
+	}
+	// SMB on a known NAS vendor must not report Windows.
+	if got := FingerprintOS(64, []Port{{Port: 445}}, "Synology Inc.", "NAS"); got != "NAS firmware" {
+		t.Errorf("NAS SMB fingerprint = %q, want NAS firmware", got)
+	}
+}
+
+func TestFingerprintOSBannerSignals(t *testing.T) {
+	cases := []struct {
+		name   string
+		ttl    int
+		ports  []Port
+		vendor string
+		typ    string
+		want   string
+	}{
+		{"ssh openssh", 64, []Port{{Port: 22, Service: "ssh", Banner: "SSH-2.0-OpenSSH_9.6"}, {Port: 80, Banner: "nginx/1.24"}}, "Raspberry Pi Foundation", "Computer", "Linux (Raspberry Pi)"},
+		{"ssh openssh synology", 128, []Port{{Port: 22, Banner: "SSH-2.0-OpenSSH_8.2"}}, "Synology Inc.", "NAS", "Synology DSM"},
+		{"apple ssh", 64, []Port{{Port: 22, Banner: "SSH-2.0-OpenSSH_9.0"}}, "Apple Inc.", "Computer", "macOS"},
+		{"microsoft ftp", 128, []Port{{Port: 21, Banner: "Microsoft FTP Service"}}, "Dell Inc.", "Computer", "Windows"},
+		{"windows openssh", 128, []Port{{Port: 22, Banner: "SSH-2.0-OpenSSH_for_Windows_8"}}, "Dell Inc.", "Computer", "Windows"},
+		{"iis", 128, []Port{{Port: 80, Banner: "Server: Microsoft-IIS/10.0"}}, "Dell Inc.", "Computer", "Windows Server"},
+		{"openwrt", 64, []Port{{Port: 80, Banner: "nginx/1.18"}, {Port: 22, Banner: "SSH-2.0-dropbear_2020.81"}}, "TP-Link", "Router/Gateway", "Router firmware"},
+		{"cisco", 255, []Port{{Port: 443}}, "Cisco Systems", "Router/Gateway", "Router firmware"},
+		{"printer canon", 64, []Port{{Port: 80, Banner: "CANON"}}, "Canon Inc.", "Printer", "Printer firmware"},
+		{"android vendor", 64, []Port{{Port: 5555}}, "Xiaomi Communications", "Mobile", "Android"},
+		{"apple phone", 48, []Port{{}}, "Apple Inc.", "Mobile", "iOS"},
+	}
+	for _, c := range cases {
+		if got := FingerprintOS(c.ttl, c.ports, c.vendor, c.typ); got != c.want {
+			t.Errorf("%s: FingerprintOS = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestFingerprintOSFallbackBucket(t *testing.T) {
+	if got := FingerprintOS(64, nil, "", ""); got != "Linux/Unix" {
+		t.Errorf("fallback TTL bucket = %q, want Linux/Unix", got)
+	}
+	if got := FingerprintOS(128, nil, "Generic", "Device"); got != "Windows" {
+		t.Errorf("fallback TTL bucket = %q, want Windows", got)
+	}
+}
+
 func TestSanitize(t *testing.T) {
 	if got := sanitize("220 ftp\r\n220 second"); got != "220 ftp 220 second" {
 		t.Errorf("sanitize = %q", got)

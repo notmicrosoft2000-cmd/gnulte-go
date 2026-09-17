@@ -49,7 +49,11 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "11.2"
+const version = "12.0"
+
+// scanPrefs holds the technical-tuning settings so deepScan and buildRows can
+// honor the SCANLTE v12 knobs (probe retries, uptime, rogue flag, confidence).
+var scanPrefs settings.Config = settings.Default()
 
 // session collects the permanent console lines so the final HTML report can
 // reproduce the entire log history of the run.
@@ -144,6 +148,7 @@ func main() {
 	if err != nil {
 		fatal(fmt.Errorf("settings: %v", err))
 	}
+	scanPrefs = prefs
 	if *settingsArg {
 		if !ux.TTY() || !tui.StdinTTY() {
 			fatal(fmt.Errorf("the settings editor needs a real terminal"))
@@ -393,6 +398,11 @@ func buildRows(ctx context.Context, live []string, neighbors map[string]string, 
 				row.Type = "This host"
 			}
 		}
+		// Rogue-host flag (v12): the host answers ICMP but has no ARP record, so
+		// it is not a normal member of this L2 segment and may be spoofing.
+		if scanPrefs.RogueFlag && mac == "" && !row.IsSelf {
+			row.ScanNote = "rogue? alive but no ARP record"
+		}
 		rows = append(rows, row)
 	}
 	return rows
@@ -414,7 +424,10 @@ func deepScan(ctx context.Context, rows []discover.Row, threads int) {
 		go func(r *discover.Row) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			res := scanner.DeepScan(ctx, r.IP)
+			res := scanner.DeepScanConfig(ctx, r.IP, scanner.Config{
+				Retries: scanPrefs.ProbeRetries,
+				Uptime:  scanPrefs.UptimeGuess,
+			})
 			var ports string
 			if len(res.Ports) == 0 {
 				ports = "(no open ports in common range)"
@@ -442,11 +455,19 @@ func deepScan(ctx context.Context, rows []discover.Row, threads int) {
 			mu.Lock()
 			r.Ports = ports
 			r.Banners = banners
-			r.ScanNote = res.Note
+			if r.ScanNote != "" && res.Note != "" {
+				r.ScanNote += " · " + res.Note
+			} else if res.Note != "" {
+				r.ScanNote = res.Note
+			}
 			if t := ident.DeviceType(r.Vendor, r.Hostname, ports, banners); t != "" {
 				r.Type = t
 			}
-			r.OS = scanner.FingerprintOS(res.TTL, res.Ports, r.Vendor, r.Type)
+			r.OS, r.OSConf = scanner.FingerprintOSConf(res.TTL, res.Ports, r.Vendor, r.Type)
+			if scanPrefs.OSConfidence && r.OSConf > 0 && r.OS != "" {
+				r.OS = fmt.Sprintf("%s (%d%%)", r.OS, r.OSConf)
+			}
+			r.Uptime = res.Uptime
 			mu.Unlock()
 		}(&rows[i])
 	}

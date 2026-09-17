@@ -45,6 +45,8 @@ type Row struct {
 	Type     string
 	Ports    string
 	OS       string
+	OSConf   int // confidence 0-100 from deep scan
+	Uptime   string
 	Banners  []string
 	ScanNote string
 	IsSelf   bool

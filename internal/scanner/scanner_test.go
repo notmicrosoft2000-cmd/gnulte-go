@@ -147,3 +147,87 @@ func TestServiceTableCoversScanPorts(t *testing.T) {
 		}
 	}
 }
+
+func TestRedisVersion(t *testing.T) {
+	raw := "$147\r\nredis_version:7.2.4\r\nos:Linux 6.1.0\r\n"
+	if v := redisVersion(raw); v != "7.2.4" {
+		t.Errorf("redisVersion = %q, want 7.2.4", v)
+	}
+	if v := redisVersion("+PONG\r\n"); v != "" {
+		t.Errorf("redisVersion(+PONG) = %q, want empty", v)
+	}
+}
+
+func TestFormatUptime(t *testing.T) {
+	cases := map[int]string{
+		90:     "1m",
+		3600:   "1h0m",
+		3660:   "1h1m",
+		500000: "5d18h",
+	}
+	for in, want := range cases {
+		if got := formatUptime(in); got != want {
+			t.Errorf("formatUptime(%d) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestFingerprintOSConf(t *testing.T) {
+	// No evidence beyond TTL → low-confidence TTL bucket.
+	os, conf := FingerprintOSConf(100, nil, "", "")
+	if os != "Windows" || conf != 65 {
+		t.Errorf("ttl-only = %q conf %d, want Windows 65", os, conf)
+	}
+	// RDP open dominates.
+	os, conf = FingerprintOSConf(64, []Port{{Port: 3389}}, "", "")
+	if os != "Windows" || conf != 92 {
+		t.Errorf("rdp = %q conf %d, want Windows 92", os, conf)
+	}
+	// OpenSSH banner on Apple → macOS, high confidence.
+	os, conf = FingerprintOSConf(64, []Port{{Port: 22, Banner: "SSH-2.0-OpenSSH_9.6"}}, "Apple, Inc.", "")
+	if os != "macOS" || conf != 95 {
+		t.Errorf("apple-ssh = %q conf %d, want macOS 95", os, conf)
+	}
+	// Unknown phone vendor → Android, mid confidence.
+	os, conf = FingerprintOSConf(64, nil, "Vivo Mobile Communication Co", "Wireless Telephone")
+	if os != "Android" || conf != 70 {
+		t.Errorf("phone vendor = %q conf %d, want Android 70", os, conf)
+	}
+}
+
+func TestGuessOSConfZero(t *testing.T) {
+	os, conf := guessOSConf(0)
+	if os != "" || conf != 0 {
+		t.Errorf("guessOSConf(0) = %q conf %d, want empty 0", os, conf)
+	}
+}
+
+func TestParseSynAckTimestamp(t *testing.T) {
+	// IPv4 header (IHL=5) + TCP header (data offset 8 → has options).
+	// The timestamp kind lives at TCP offset 20.
+	pkt := make([]byte, 20+32)
+	pkt[0] = 0x45
+	pkt[9] = 6
+	pkt[20+13] = 0x12 // SYN+ACK (flags live in the low byte of the 16-bit field)
+	hdr := (8) << 4   // data offset = 8 words
+	pkt[20+12] = byte(hdr)
+	pkt[20+20] = 8    // kind: timestamp
+	pkt[20+21] = 10   // length
+	pkt[20+22] = 0xde
+	pkt[20+23] = 0xad
+	pkt[20+24] = 0xbe
+	pkt[20+25] = 0xef
+	ts, ok := parseSynAckTimestamp(pkt)
+	if !ok || ts != 0xdeadbeef {
+		t.Errorf("parseSynAckTimestamp = %#x,%v want 0xdeadbeef,true", ts, ok)
+	}
+	// No timestamp option → not ok.
+	pkt[20+20] = 1 // NOP
+	ts, ok = parseSynAckTimestamp(pkt)
+	if ok {
+		t.Errorf("parseSynAckTimestamp(nop) = %#x,%v want 0,false", ts, ok)
+	}
+	if _, ok := parseSynAckTimestamp([]byte{1}); ok {
+		t.Error("parseSynAckTimestamp(short) should fail")
+	}
+}

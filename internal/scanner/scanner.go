@@ -51,6 +51,10 @@ type Result struct {
 	OS    string `json:"os,omitempty"`
 	TTL   int    `json:"ttl"`
 	Note  string `json:"note,omitempty"`
+	// OSConf is the confidence 0-100 of OS, 0 when unavailable.
+	OSConf    int    `json:"os_conf,omitempty"`
+	UptimeSec int    `json:"uptime_sec,omitempty"`
+	Uptime    string `json:"uptime,omitempty"`
 }
 
 // dialTimeout bounds each TCP connect and banner read.
@@ -117,12 +121,26 @@ const scanConcurrency = 96
 // feeds the TTL used for the OS guess. The result lists every open port with
 // its service and banner, plus the OS estimate.
 func DeepScan(ctx context.Context, ip string) Result {
+	return DeepScanConfig(ctx, ip, Config{})
+}
+
+// Config tunes a deep scan (probe retries, optional TCP-timestamp uptime).
+type Config struct {
+	// Retries re-probes each open port when set (0 = single attempt).
+	Retries int
+	// Uptime runs the raw-socket TCP-timestamp host-uptime estimate (needs
+	// privilege / raw sockets; failures degrade to "unknown").
+	Uptime bool
+}
+
+// DeepScanConfig is DeepScan with tuning knobs (v12).
+func DeepScanConfig(ctx context.Context, ip string, cfg Config) Result {
 	var res Result
 	ttl := osTTL(ctx, ip)
 	res.TTL = ttl
-	res.OS = guessOS(ttl)
+	res.OS, res.OSConf = guessOSConf(ttl)
 
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
 	sem := make(chan struct{}, scanConcurrency)
@@ -139,6 +157,16 @@ func DeepScan(ctx context.Context, ip string) Result {
 			defer func() { <-sem }()
 			if portOpen(ctx, ip, port) {
 				b := bannerFor(ctx, ip, port)
+				if cfg.Retries > 1 && b == "" {
+					for i := 1; i < cfg.Retries && b == ""; i++ {
+						select {
+						case <-ctx.Done():
+							return
+						default:
+						}
+						b = bannerFor(ctx, ip, port)
+					}
+				}
 				mu.Lock()
 				opens = append(opens, Port{Port: port, Service: services[port], Banner: b})
 				mu.Unlock()
@@ -147,11 +175,26 @@ func DeepScan(ctx context.Context, ip string) Result {
 	}
 	wg.Wait()
 
+	// Uptime needs an open port to exchange TCP timestamps with; use the first
+	// one found. It needs raw sockets (root/CAP_NET_RAW) and degrades silently.
+	if cfg.Uptime && len(opens) > 0 {
+		sec := uptimeProbe(ip, opens[0].Port)
+		if sec > 0 {
+			res.UptimeSec = sec
+			res.Uptime = formatUptime(sec)
+		}
+	}
+
 	if len(opens) == 0 {
 		res.Note = "no open ports in the common range"
 	}
 	if ttl == 0 {
 		res.Note = trimJoin(res.Note, "icmp filtered; OS guess unavailable", " · ")
+	}
+	if res.UptimeSec > 0 {
+		res.Note = trimJoin(res.Note, "uptime ≈ "+res.Uptime+" (TCP timestamp)", " · ")
+	} else if cfg.Uptime && len(opens) > 0 {
+		res.Note = trimJoin(res.Note, "uptime unknown (needs raw sockets or no timestamp reply)", " · ")
 	}
 	res.Ports = sortPorts(opens)
 	return res
@@ -223,8 +266,18 @@ func bannerFor(ctx context.Context, ip string, port int) string {
 		_, _ = conn.Write([]byte("HEAD / HTTP/1.0\r\n\r\n"))
 	} else if port == 110 || port == 995 {
 		// POP3: banner is the greeting; nothing to write.
+	} else if port == 554 {
+		_, _ = conn.Write([]byte("OPTIONS rtsp://localhost/ RTSP/1.0\r\nCSeq: 1\r\n\r\n"))
+	} else if port == 23 {
+		// Telnet: most daemons offer to negotiate options and ask for login.
+		_, _ = conn.Write([]byte("\r\n"))
+	} else if port == 25 || port == 26 || port == 587 {
+		_, _ = conn.Write([]byte("EHLO gnulte\r\n"))
+	} else if port == 6379 {
+		_, _ = conn.Write([]byte("INFO server\r\n"))
 	} else if port == 21 || port == 1433 || port == 4369 || port == 5432 ||
-		port == 3306 || port == 27017 || port == 27018 || port == 5672 {
+		port == 3306 || port == 27017 || port == 27018 || port == 5672 ||
+		port == 22 || port == 143 || port == 119 || port == 194 {
 		// These daemons announce themselves on connect; read only.
 	}
 
@@ -238,14 +291,39 @@ func bannerFor(ctx context.Context, ip string, port int) string {
 		}
 	}
 
-	banner := firstLine(buf.String())
+	raw := buf.String()
+	banner := firstLine(raw)
 	if isWebPort(port) {
 		// Prefer the Server: header over the raw request echo.
-		if s := webServer(buf.String()); s != "" {
+		if s := webServer(raw); s != "" {
 			banner = s
+		}
+	} else if port == 554 {
+		// RTSP replies look like HTTP; the Server header is the good part.
+		if s := webServer(raw); s != "" {
+			banner = s
+		}
+	} else if port == 6379 {
+		// INFO replies with a bulk string; dig the version out of it.
+		if v := redisVersion(raw); v != "" {
+			banner = "redis " + v
 		}
 	}
 	return sanitize(banner)
+}
+
+// redisVersion extracts redis_version from an INFO reply bulk string.
+func redisVersion(raw string) string {
+	for _, l := range strings.Split(raw, "\n") {
+		l = strings.TrimSpace(l)
+		if strings.HasPrefix(l, "redis_version:") {
+			v := strings.TrimSpace(l[len("redis_version:"):])
+			if v != "" {
+				return v
+			}
+		}
+	}
+	return ""
 }
 
 // isWebPort lists HTTP listeners that need a request before they speak.
@@ -313,17 +391,25 @@ func sanitize(s string) string {
 // guessOS infers an operating system family from the ICMP reply TTL, which
 // starts at a well-known value and only decreases with hops.
 func guessOS(ttl int) string {
+	os, _ := guessOSConf(ttl)
+	return os
+}
+
+// guessOSConf is guessOS plus a rough confidence for the TTL-only guess. The
+// confidence is low because the TTL alone only separates broad families and a
+// reordered/filtered hop count widens the spread.
+func guessOSConf(ttl int) (string, int) {
 	switch {
 	case ttl <= 0:
-		return ""
+		return "", 0
 	case ttl <= 64:
-		return "Linux/Unix"
+		return "Linux/Unix", 65
 	case ttl <= 128:
-		return "Windows"
+		return "Windows", 65
 	case ttl <= 255:
-		return "Network device"
+		return "Network device", 60
 	}
-	return ""
+	return "", 0
 }
 
 // FingerprintOS refines the coarse TTL-based guess using the deep scan results
@@ -331,6 +417,15 @@ func guessOS(ttl int) string {
 // human-readable label such as "Linux", "Windows", "macOS", "Android",
 // "Synology NAS", "Printer firmware", "Router firmware", "Cisco IOS", etc.
 func FingerprintOS(ttl int, ports []Port, vendor, typ string) string {
+	label, _ := FingerprintOSConf(ttl, ports, vendor, typ)
+	return label
+}
+
+// FingerprintOSConf is FingerprintOS plus a confidence 0-100. Stronger
+// evidence improves the score: banners (95) beat open-port signals (85-90)
+// which beat the pure TTL bucket (65). The value lets the caller show e.g.
+// "Windows (88%)" or sort hosts by how certain the OS guess is.
+func FingerprintOSConf(ttl int, ports []Port, vendor, typ string) (string, int) {
 	vl := strings.ToLower(vendor)
 	tl := strings.ToLower(typ)
 
@@ -346,191 +441,196 @@ func FingerprintOS(ttl int, ports []Port, vendor, typ string) string {
 	bannerAll := strings.Join(banners, " ")
 
 	// --- Step 1: TTL-based initial bucket.
-	bucket := guessOS(ttl)
+	bucket, bucketConf := guessOSConf(ttl)
 
 	// --- Step 2: strong banner-based overrides (these are near-certain).
+	// Confidence 95: an explicit product banner ("SSH-2.0-OpenSSH",
+	// "Microsoft-IIS", "dropbear") is almost never wrong.
 	if strings.Contains(bannerAll, "openssh_for_windows") {
-		return "Windows"
+		return "Windows", 95
 	}
 	if strings.Contains(bannerAll, "ssh-2.0-openssh") {
 		if strings.Contains(vl, "apple") {
-			return "macOS"
+			return "macOS", 95
 		}
 		if strings.Contains(vl, "microsoft") || strings.Contains(vl, "windows") {
-			return "Windows"
+			return "Windows", 95
 		}
 		if strings.Contains(vl, "synology") {
-			return "Synology DSM"
+			return "Synology DSM", 95
 		}
 		if strings.Contains(vl, "qnap") {
-			return "QNAP QTS"
+			return "QNAP QTS", 95
 		}
 		if strings.Contains(vl, "raspberry") {
-			return "Linux (Raspberry Pi)"
+			return "Linux (Raspberry Pi)", 95
 		}
-		return "Linux"
+		return "Linux", 95
 	}
 	if strings.Contains(bannerAll, "dropbear") && (strings.Contains(vl, "tp-link") || strings.Contains(vl, "router") || strings.Contains(vl, "netgear") || strings.Contains(vl, "tenda") || strings.Contains(vl, "asus") || strings.Contains(vl, "openwrt")) {
-		return "Router firmware"
+		return "Router firmware", 95
 	}
 	if strings.Contains(bannerAll, "dropbear") {
-		return "Embedded Linux"
+		return "Embedded Linux", 90
 	}
 	if strings.Contains(bannerAll, "ssh-2.0-rou") || strings.Contains(bannerAll, "dropbear") {
-		return "Router firmware"
+		return "Router firmware", 90
 	}
 	if strings.Contains(bannerAll, "openwrt") || strings.Contains(bannerAll, "openwrt") {
-		return "Linux (OpenWrt)"
+		return "Linux (OpenWrt)", 95
 	}
 	if strings.Contains(bannerAll, "microsoft ftp service") || strings.Contains(bannerAll, "microsoft windows") {
-		return "Windows"
+		return "Windows", 95
 	}
 	if strings.Contains(bannerAll, "microsoft iis") || strings.Contains(bannerAll, "microsoft-iis") {
-		return "Windows Server"
+		return "Windows Server", 95
 	}
 	if strings.Contains(bannerAll, "nginx") {
 		for _, rv := range []string{"router", "openwrt", "tenda", "tp-link", "netgear", "d-link", "asus"} {
 			if strings.Contains(vl, rv) {
-				return "Router firmware"
+				return "Router firmware", 90
 			}
 		}
-		return "Linux"
+		return "Linux", 90
 	}
 	if strings.Contains(bannerAll, "apache") && !strings.Contains(bannerAll, "apache-coyote") {
 		if strings.Contains(vl, "synology") || strings.Contains(vl, "qnap") {
-			return "NAS firmware"
+			return "NAS firmware", 90
 		}
-		return "Linux"
+		return "Linux", 90
 	}
 	if strings.Contains(bannerAll, "lighttpd") {
-		return "Linux"
+		return "Linux", 90
 	}
 	if strings.Contains(bannerAll, "samba") {
-		return "Linux"
+		return "Linux", 90
 	}
 	if strings.Contains(bannerAll, "proftpd") || strings.Contains(bannerAll, "vsftpd") {
-		return "Linux"
+		return "Linux", 90
 	}
 	if strings.Contains(bannerAll, "filezilla") {
-		return "Windows"
+		return "Windows", 90
 	}
 	if strings.Contains(bannerAll, "synology") || strings.Contains(bannerAll, "dsm") {
-		return "Synology DSM"
+		return "Synology DSM", 90
 	}
 	if strings.Contains(bannerAll, "qts") && strings.Contains(vl, "qnap") {
-		return "QNAP QTS"
+		return "QNAP QTS", 90
 	}
 	if strings.Contains(bannerAll, "cisco") {
-		return "Cisco IOS"
+		return "Cisco IOS", 95
 	}
 	if strings.Contains(bannerAll, "juniper") {
-		return "JunOS"
+		return "JunOS", 95
 	}
 	if strings.Contains(bannerAll, "mikrotik") || strings.Contains(bannerAll, "routeros") {
-		return "RouterOS"
+		return "RouterOS", 95
 	}
 	if strings.Contains(bannerAll, "epson") || strings.Contains(bannerAll, "canon") || strings.Contains(bannerAll, "brother") || strings.Contains(bannerAll, "hp laserjet") || strings.Contains(bannerAll, "xerox") {
-		return "Printer firmware"
+		return "Printer firmware", 95
 	}
 	if strings.Contains(bannerAll, "3com") || strings.Contains(bannerAll, "netgear") {
-		return "Router firmware"
+		return "Router firmware", 90
 	}
 
 	// --- Step 3: port-based signals.
 	if open[445] || open[139] {
 		// SMB open — strong Windows signal unless it's a known Linux NAS.
 		if strings.Contains(vl, "synology") || strings.Contains(vl, "qnap") || strings.Contains(vl, "western digital") || strings.Contains(vl, "buffalo") || strings.Contains(vl, "asustor") {
-			return "NAS firmware"
+			return "NAS firmware", 85
 		}
 		if strings.Contains(vl, "raspberry") {
-			return "Linux (Raspberry Pi)"
+			return "Linux (Raspberry Pi)", 85
 		}
 		// Could be Samba on Linux, but Windows is more common with SMB.
 		if bucket == "Windows" {
-			return "Windows"
+			return "Windows", 85
+		}
+		if open[3389] {
+			return "Windows", 88
 		}
 	}
 	if open[3389] {
 		// RDP — almost certainly Windows.
-		return "Windows"
+		return "Windows", 92
 	}
 	if open[22] && !open[445] {
 		// SSH present but no SMB: lean Unix.
 		if strings.Contains(vl, "apple") {
-			return "macOS"
+			return "macOS", 85
 		}
 		if strings.Contains(vl, "synology") {
-			return "Synology DSM"
+			return "Synology DSM", 85
 		}
 		if bucket == "Linux/Unix" || bucket == "" {
-			return "Linux"
+			return "Linux", 85
 		}
 	}
 	if open[5900] || open[5901] {
 		// VNC — common on macOS and Linux.
 		if strings.Contains(vl, "apple") {
-			return "macOS"
+			return "macOS", 85
 		}
 		if bucket == "Windows" {
-			return "Windows"
+			return "Windows", 80
 		}
 	}
 	if open[631] {
 		// CUPS — Linux or macOS.
 		if strings.Contains(vl, "apple") {
-			return "macOS"
+			return "macOS", 85
 		}
-		return "Linux"
+		return "Linux", 80
 	}
 	if open[161] && !open[22] && !open[445] {
 		// SNMP-only — likely a managed network device.
-		return "Router firmware"
+		return "Router firmware", 85
 	}
 
 	// --- Step 4: vendor + type signals (lower confidence, but better than bucket).
 	if strings.Contains(vl, "apple") {
 		if strings.Contains(tl, "mobile") || strings.Contains(tl, "phone") || strings.Contains(tl, "tablet") {
-			return "iOS"
+			return "iOS", 72
 		}
-		return "macOS"
+		return "macOS", 72
 	}
 	if strings.Contains(vl, "samsung") || strings.Contains(vl, "xiaomi") || strings.Contains(vl, "huawei") || strings.Contains(vl, "oppo") || strings.Contains(vl, "vivo") || strings.Contains(vl, "realme") || strings.Contains(vl, "google") || strings.Contains(vl, "oneplus") || strings.Contains(vl, "nothing") || strings.Contains(vl, "iqoo") {
-		return "Android"
+		return "Android", 70
 	}
 	if strings.Contains(vl, "microsoft") {
-		return "Windows"
+		return "Windows", 80
 	}
 	if strings.Contains(vl, "synology") {
-		return "Synology DSM"
+		return "Synology DSM", 80
 	}
 	if strings.Contains(vl, "qnap") {
-		return "QNAP QTS"
+		return "QNAP QTS", 80
 	}
 	if strings.Contains(vl, "raspberry") || strings.Contains(vl, "arduino") || strings.Contains(vl, "espressif") {
-		return "Embedded Linux"
+		return "Embedded Linux", 80
 	}
 	if strings.Contains(vl, "canon") || strings.Contains(vl, "epson") || strings.Contains(vl, "brother") || strings.Contains(vl, "hewlett-packard") || strings.Contains(vl, "zebra") || strings.Contains(vl, "xerox") || strings.Contains(vl, "ricoh") {
-		return "Printer firmware"
+		return "Printer firmware", 82
 	}
 	if strings.Contains(vl, "cisco") || strings.Contains(vl, "juniper") || strings.Contains(vl, "ubiquiti") || strings.Contains(vl, "mikrotik") || strings.Contains(vl, "aruba") || strings.Contains(vl, "fortinet") || strings.Contains(vl, "sonicwall") {
-		return "Router firmware"
+		return "Router firmware", 82
 	}
 	if strings.Contains(tl, "printer") || strings.Contains(tl, "scanner") {
-		return "Printer firmware"
+		return "Printer firmware", 72
 	}
 	if strings.Contains(tl, "router") || strings.Contains(tl, "gateway") {
-		return "Router firmware"
+		return "Router firmware", 72
 	}
 	if strings.Contains(tl, "camera") || strings.Contains(tl, "nvr") || strings.Contains(tl, "dvr") {
-		return "Camera firmware"
+		return "Camera firmware", 72
 	}
 	if strings.Contains(tl, "media") || strings.Contains(tl, "tv") {
-		return "Smart TV firmware"
+		return "Smart TV firmware", 72
 	}
 	if strings.Contains(tl, "nas") {
-		return "NAS firmware"
+		return "NAS firmware", 72
 	}
 
 	// --- Step 5: fall back to TTL bucket.
-	return bucket
+	return bucket, bucketConf
 }

@@ -157,6 +157,51 @@ func (e *editor) run() {
 				c.TrafficSec = clamp(n, 1, 10)
 				return nil
 			}},
+		{"deep-scan retries per port", itemInt, func(c Config) string { return fmt.Sprintf("%d", c.ProbeRetries) },
+			func(c *Config, v string) error {
+				n, err := strconv.Atoi(v)
+				if err != nil {
+					return fmt.Errorf("a whole number, 1-5")
+				}
+				c.ProbeRetries = clamp(n, 1, 5)
+				return nil
+			}},
+		{"OS guess confidence %", itemBool, func(c Config) string { return boolText(c.OSConfidence) },
+			func(c *Config, v string) error {
+				switch strings.TrimSpace(strings.ToLower(v)) {
+				case "on", "1", "yes", "true":
+					c.OSConfidence = true
+				case "off", "0", "no", "false":
+					c.OSConfidence = false
+				default:
+					return fmt.Errorf("on or off")
+				}
+				return nil
+			}},
+		{"uptime estimate (TCP timestamps)", itemBool, func(c Config) string { return boolText(c.UptimeGuess) },
+			func(c *Config, v string) error {
+				switch strings.TrimSpace(strings.ToLower(v)) {
+				case "on", "1", "yes", "true":
+					c.UptimeGuess = true
+				case "off", "0", "no", "false":
+					c.UptimeGuess = false
+				default:
+					return fmt.Errorf("on or off")
+				}
+				return nil
+			}},
+		{"flag ICMP-alive hosts w/o ARP", itemBool, func(c Config) string { return boolText(c.RogueFlag) },
+			func(c *Config, v string) error {
+				switch strings.TrimSpace(strings.ToLower(v)) {
+				case "on", "1", "yes", "true":
+					c.RogueFlag = true
+				case "off", "0", "no", "false":
+					c.RogueFlag = false
+				default:
+					return fmt.Errorf("on or off")
+				}
+				return nil
+			}},
 	}
 
 	for {

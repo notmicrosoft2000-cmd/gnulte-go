@@ -39,6 +39,12 @@ type Config struct {
 	WifiCount    int    `json:"wifi_count"`     // 802.11 frames per burst, 1-256
 	WifiDelaySec int    `json:"wifi_delay_sec"` // seconds between bursts, 1-60
 	TrafficSec   int    `json:"traffic_sec"`    // gnulte-traffic update interval, 1-10
+
+	// SCANLTE technical tuning (v12).
+	ProbeRetries int  `json:"probe_retries"` // deep-scan retries per open port, 1-5
+	OSConfidence bool `json:"os_confidence"` // show a confidence % beside OS guesses
+	UptimeGuess  bool `json:"uptime_guess"`  // estimate host uptime from TCP timestamps
+	RogueFlag    bool `json:"rogue_flag"`    // flag ICMP-alive hosts with no ARP record
 }
 
 // Default returns the built-in defaults, used when no config file exists.
@@ -53,6 +59,11 @@ func Default() Config {
 		WifiCount:    64,
 		WifiDelaySec: 5,
 		TrafficSec:   1,
+
+		ProbeRetries: 1,
+		OSConfidence: true,
+		UptimeGuess:  true,
+		RogueFlag:    true,
 	}
 }
 
@@ -114,6 +125,7 @@ func (c *Config) Sanitize() {
 	c.WifiCount = clamp(c.WifiCount, 1, 256)
 	c.WifiDelaySec = clamp(c.WifiDelaySec, 1, 60)
 	c.TrafficSec = clamp(c.TrafficSec, 1, 10)
+	c.ProbeRetries = clamp(c.ProbeRetries, 1, 5)
 }
 
 func clamp(v, lo, hi int) int {

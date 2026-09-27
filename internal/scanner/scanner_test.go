@@ -211,8 +211,8 @@ func TestParseSynAckTimestamp(t *testing.T) {
 	pkt[20+13] = 0x12 // SYN+ACK (flags live in the low byte of the 16-bit field)
 	hdr := (8) << 4   // data offset = 8 words
 	pkt[20+12] = byte(hdr)
-	pkt[20+20] = 8    // kind: timestamp
-	pkt[20+21] = 10   // length
+	pkt[20+20] = 8  // kind: timestamp
+	pkt[20+21] = 10 // length
 	pkt[20+22] = 0xde
 	pkt[20+23] = 0xad
 	pkt[20+24] = 0xbe

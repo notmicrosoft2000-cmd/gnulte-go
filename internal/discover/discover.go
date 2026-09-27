@@ -109,6 +109,73 @@ func ipAlive(ctx context.Context, ip string) bool {
 	return err == nil
 }
 
+// Privileged reports whether we can open raw sockets (root, or a capability
+// override). ARP probing and frame injection need it; everything else degrades.
+func Privileged() bool { return os.Geteuid() == 0 }
+
+// ARPSweep probes every target with `arping` (ARP who-has), catching hosts that
+// answer ARP but filter ICMP echo — common on phones, smart TVs and IOT. It
+// needs raw sockets, so it only works as root; run gnulte-scan with sudo to
+// enable it. Returns the sorted list of hosts that answered.
+func ARPSweep(ctx context.Context, targets []string, iface string, threads int, onProgress ...func(completed, alive int)) []string {
+	if threads < 1 {
+		threads = 1
+	}
+	if threads > 256 {
+		threads = 256
+	}
+	if !Privileged() {
+		return nil
+	}
+	if _, err := exec.LookPath("arping"); err != nil {
+		return nil
+	}
+	jobs := make(chan string)
+	var live []string
+	var mu sync.Mutex
+	var completed, alive int
+	report := func(d, a int) {
+		if len(onProgress) > 0 && onProgress[0] != nil {
+			onProgress[0](d, a)
+		}
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < threads; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for ip := range jobs {
+				ok := arpAlive(ctx, ip, iface)
+				mu.Lock()
+				completed++
+				if ok {
+					live = append(live, ip)
+					alive++
+				}
+				report(completed, alive)
+				mu.Unlock()
+			}
+		}()
+	}
+	for _, ip := range targets {
+		jobs <- ip
+	}
+	close(jobs)
+	wg.Wait()
+	sort.Strings(live)
+	return live
+}
+
+func arpAlive(ctx context.Context, ip, iface string) bool {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	// -c 1 asks one who-has and stops; -w bounds the wait; -q stays quiet. The
+	// reply both proves the host is up and populates the kernel ARP table, so
+	// Neighbors() later sees its MAC.
+	cmd := exec.CommandContext(ctx, "arping", "-q", "-c", "1", "-w", "2", "-I", iface, ip)
+	return cmd.Run() == nil
+}
+
 // Neighbors returns ip->MAC from /proc/net/arp, optionally restricted to one
 // interface (empty = all). If arp-scan is available and we are root it is used
 // first to also learn quiet devices.

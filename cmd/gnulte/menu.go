@@ -521,16 +521,34 @@ func confirmStart() bool {
 	return a == "y" || a == "yes"
 }
 
-// trafficWindowChoice asks whether to show all targets in this dashboard or
-// open a separate traffic & speed monitor window for side-by-side watching.
-func trafficWindowChoice() bool {
+// watchMode selects how a multi-target test is displayed.
+type watchMode int
+
+const (
+	watchDashboard watchMode = iota
+	watchOneWindow
+	watchWindows
+)
+
+// trafficWindowChoice asks how to watch multiple targets: the combined console
+// dashboard, one traffic & speed monitor window, or one separate window per
+// target (tabs in terminal emulators that support them).
+func trafficWindowChoice() watchMode {
 	fmt.Println()
 	fmt.Println(c(cCyan+cBold, " Two or more targets selected — how do you want to watch them?"))
 	fmt.Println("   1) all targets in this console dashboard (default)")
-	fmt.Println("   2) traffic & speed monitor in a separate terminal window")
-	sel := prompt("   choice [1/2]: ")
+	fmt.Println("   2) traffic & speed monitor in one separate window")
+	fmt.Println("   3) one separate window per target (tabs)")
+	sel := strings.TrimSpace(prompt("   choice [1/2/3]: "))
 	fmt.Println()
-	return strings.TrimSpace(sel) == "2"
+	switch sel {
+	case "2":
+		return watchOneWindow
+	case "3":
+		return watchWindows
+	default:
+		return watchDashboard
+	}
 }
 
 // launchTrafficWindow detaches a gnulte-traffic window for the watched targets
@@ -556,6 +574,38 @@ func launchTrafficWindow(interval int, iface string, targets []string) {
 		return
 	}
 	fmt.Println("  " + okText("Traffic monitor opened in a separate window — "+strings.Join(targets, ", ")))
+}
+
+// launchTrafficWindows detaches one gnulte-traffic terminal window per target,
+// so each target gets a focused monitor of its own (tabs where the terminal
+// emulator supports them). Warns rather than failing mid-way.
+func launchTrafficWindows(interval int, iface string, targets []string) {
+	bin := trafficBinary()
+	if bin == "" {
+		fmt.Println("  " + warnText("gnulte-traffic is not installed — run the traffic monitor separately (gnulte-traffic -i ... -t ...)"))
+		return
+	}
+	startedAny := false
+	for _, t := range targets {
+		args := []string{bin, "-i", iface, "-t", t}
+		if interval > 0 {
+			args = append(args, "--interval", strconv.Itoa(interval))
+		}
+		started, err := ux.LaunchTerminal(args...)
+		if err != nil {
+			fmt.Printf("  %s could not open a terminal window for %s: %v\n", warnText(""), t, err)
+			continue
+		}
+		if !started {
+			fmt.Println("  " + warnText("no terminal emulator found — add $TERMINAL (e.g. export TERMINAL='xterm -e') to enable separate windows"))
+			return
+		}
+		startedAny = true
+	}
+	if startedAny {
+		fmt.Println("  " + okText(fmt.Sprintf("One traffic monitor window per target opened (%d/%d) — Ctrl+C in any window closes it.",
+			len(targets), len(targets))))
+	}
 }
 
 // trafficBinary locates the installed gnulte-traffic binary (directly beside

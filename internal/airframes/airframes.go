@@ -38,6 +38,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os/exec"
+	"strconv"
+	"strings"
 )
 
 // MAC is a parsed, byte-order-natural 48-bit address.
@@ -168,6 +171,55 @@ func BeaconFrame(bssid MAC, ssid string, channel uint8, seq uint16) []byte {
 	f = append(f, rates...)
 	f = append(f, 0x03, 0x01, channel)
 	return f
+}
+
+// SetChannel switches a monitor-mode wireless interface to the given channel so
+// injection follows an AP or a client that channel-hops. It uses `iw` (the same
+// tool that put the interface into monitor mode), so it needs the same
+// privileges as NewInjector; gnulte-wifi calls it under sudo. Every failure
+// returns a descriptive error.
+func SetChannel(iface string, ch uint8) error {
+	if !InterfaceExists(iface) {
+		return fmt.Errorf("interface %s does not exist", iface)
+	}
+	cmd := exec.Command("iw", "dev", iface, "set", "channel", strconv.Itoa(int(ch)))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("iw set channel %d: %v (%s)", ch, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// ParseChannels converts a comma-separated list like "1,6,11" or "36,40,44"
+// into the uint8 channel list. It rejects empty or out-of-range entries.
+func ParseChannels(list string) ([]uint8, error) {
+	var out []uint8
+	seen := map[uint8]bool{}
+	for _, p := range strings.Split(list, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 1 || n > 196 {
+			return nil, fmt.Errorf("invalid channel %q (1-196)", p)
+		}
+		ch := uint8(n)
+		if !seen[ch] {
+			seen[ch] = true
+			out = append(out, ch)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no channels in list %q", list)
+	}
+	return out, nil
+}
+
+// ReasonCodes is the rotating reason-code set used when mixing is enabled. All
+// of these are ordinary deauth reasons that read as a legitimate disconnect.
+func ReasonCodes() []uint16 {
+	return []uint16{ReasonUnspecified, ReasonDisassociatedNeedAuth, ReasonLeavingBSS, 8, 23}
 }
 
 // var errNotLinux is defined in the platform-specific injector file.

@@ -27,12 +27,6 @@ import (
 	"gnulte-go/internal/monitor"
 )
 
-// defaultSessionPath names the automatic report written when --report is not
-// given (each test gets its own file).
-func defaultSessionPath() string {
-	return fmt.Sprintf("gnulte-session-%s.html", time.Now().Format("20060102-150405"))
-}
-
 // writeSessionReport renders a single self-contained HTML file combining the
 // target statistics (SVG latency charts) with the full live console log — the
 // entire history of the session, not just a summary.

@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Config is the merged default set shared by the GNULTE tools.
@@ -45,6 +46,14 @@ type Config struct {
 	OSConfidence bool `json:"os_confidence"` // show a confidence % beside OS guesses
 	UptimeGuess  bool `json:"uptime_guess"`  // estimate host uptime from TCP timestamps
 	RogueFlag    bool `json:"rogue_flag"`    // flag ICMP-alive hosts with no ARP record
+	ArpSweep     bool `json:"arp_sweep"`     // find hosts via ARP sweep when running privileged
+	StealthArp   bool `json:"stealth_arp"`   // gnulte: in-Go on-demand ARP spoofing (discreet)
+
+	// GNULTE-WIFI tuning (v13).
+	WifiJitterMs   int    `json:"wifi_jitter_ms"`   // random 0-N ms delay between frames, 0-100
+	WifiMixReasons bool   `json:"wifi_mix_reasons"` // rotate deauth reason codes per burst
+	WifiHop        bool   `json:"wifi_hop"`         // hop channels between bursts
+	WifiChannels   string `json:"wifi_channels"`    // comma-separated hop list, e.g. "1,6,11"
 }
 
 // Default returns the built-in defaults, used when no config file exists.
@@ -64,6 +73,13 @@ func Default() Config {
 		OSConfidence: true,
 		UptimeGuess:  true,
 		RogueFlag:    true,
+		ArpSweep:     true,
+		StealthArp:   false,
+
+		WifiJitterMs:   2,
+		WifiMixReasons: true,
+		WifiHop:        false,
+		WifiChannels:   "1,6,11",
 	}
 }
 
@@ -126,6 +142,10 @@ func (c *Config) Sanitize() {
 	c.WifiDelaySec = clamp(c.WifiDelaySec, 1, 60)
 	c.TrafficSec = clamp(c.TrafficSec, 1, 10)
 	c.ProbeRetries = clamp(c.ProbeRetries, 1, 5)
+	c.WifiJitterMs = clamp(c.WifiJitterMs, 0, 100)
+	if strings.TrimSpace(c.WifiChannels) == "" {
+		c.WifiChannels = "1,6,11"
+	}
 }
 
 func clamp(v, lo, hi int) int {

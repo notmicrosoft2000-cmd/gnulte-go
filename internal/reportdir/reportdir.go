@@ -80,12 +80,12 @@ func Timestamp() string {
 
 // DefaultPath returns the full path for a tool's auto-named report: the named
 // subfolder inside the hub plus "<prefix>-<timestamp>.html". When the home
-// directory is unavailable a local relative path is returned instead (and
-// never an error), so report generation is the last thing that ever breaks.
+// directory is unavailable a cwd-relative path is returned instead (and never
+// an error), so report generation is the last thing that ever breaks.
 func DefaultPath(sub SubDir, prefix string) string {
 	dir, err := Sub(sub)
 	if err != nil {
-		return "." // bare prefix would collide with the cwd; still fine here
+		return fmt.Sprintf("%s-%s.html", prefix, Timestamp())
 	}
 	return filepath.Join(dir, fmt.Sprintf("%s-%s.html", prefix, Timestamp()))
 }

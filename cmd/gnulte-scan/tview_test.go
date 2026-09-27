@@ -18,6 +18,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -131,5 +132,54 @@ func TestRawTableLinesHasGutters(t *testing.T) {
 	}
 	if !has {
 		t.Error("snapshot should include an OS column")
+	}
+}
+
+func TestTabBarShowsAllWindows(t *testing.T) {
+	tab := newTable()
+	bar := tab.tabBar()
+	for _, want := range []string{"[1] Devices", "[2] Log", "[3] Summary"} {
+		if !strings.Contains(bar, want) {
+			t.Errorf("tab bar missing %q: %q", want, bar)
+		}
+	}
+}
+
+func TestLogLinesTailShowsNewest(t *testing.T) {
+	tab := newTable()
+	log := make([]string, 40)
+	for i := range log {
+		log[i] = fmt.Sprintf("line-%02d", i)
+	}
+	tab.log = log
+	tab.logOff = 0 // tail
+	lines := tab.logLines()
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "line-39") {
+		t.Errorf("tail window missing newest line:\n%s", joined)
+	}
+	// Scrolling far up reveals line-00 and hides the newest.
+	tab.logOff = 100 // clamped to the top of the log
+	lines = tab.logLines()
+	joined = strings.Join(lines, "\n")
+	if !strings.Contains(joined, "line-00") {
+		t.Errorf("scrolled window missing oldest line:\n%s", joined)
+	}
+	if strings.Contains(joined, "line-39") {
+		t.Errorf("scrolled window still showing newest line:\n%s", joined)
+	}
+}
+
+func TestSummaryLinesCountsByTypeAndPorts(t *testing.T) {
+	tab := newTable()
+	tab.rows = sampleRows()
+	tab.rows[1].Ports = "443,22"
+	tab.rows[3].Ports = "5000"
+	lines := tab.summaryLines()
+	joined := strings.Join(lines, "\n")
+	for _, want := range []string{"Scan summary — 4 host(s)", "Router/Gateway", "Computer", "NAS", "open ports total   3"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("summary missing %q:\n%s", want, joined)
+		}
 	}
 }

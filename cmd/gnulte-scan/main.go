@@ -26,12 +26,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
 	"net"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -41,6 +43,7 @@ import (
 	"gnulte-go/internal/ident"
 	"gnulte-go/internal/netutil"
 	"gnulte-go/internal/out"
+	"gnulte-go/internal/reportdir"
 	"gnulte-go/internal/safety"
 	"gnulte-go/internal/scanner"
 	"gnulte-go/internal/settings"
@@ -49,10 +52,11 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "12.0"
+const version = "13.0"
 
 // scanPrefs holds the technical-tuning settings so deepScan and buildRows can
-// honor the SCANLTE v12 knobs (probe retries, uptime, rogue flag, confidence).
+// honor the SCANLTE knobs (probe retries, uptime, rogue flag, confidence,
+// ARP sweep, wifi tuning).
 var scanPrefs settings.Config = settings.Default()
 
 // session collects the permanent console lines so the final HTML report can
@@ -85,6 +89,8 @@ func main() {
 		asCSV       = flag.Bool("c", false, "output CSV")
 		quiet       = flag.Bool("q", false, "quiet: results only")
 		useSound    = flag.Bool("sound", false, "play a tone per result")
+		arpArg      = flag.Bool("arp", false, "also sweep by ARP (auto when root; catches hosts that block ping)")
+		noArp       = flag.Bool("no-arp", false, "disable the automatic ARP sweep")
 		reportArg   = flag.String("report", "", "write the post-test HTML report (full log history) to FILE")
 		noReport    = flag.Bool("no-report", false, "skip writing the post-test HTML report")
 		showDocs    = flag.Bool("docs", false, "print the safety documents and exit")
@@ -118,7 +124,7 @@ func main() {
 	cols := ux.Width()
 
 	if *showVer {
-		fmt.Printf("gnulte-scan (Go) v%s\n", version)
+		fmt.Printf("SCANLTE (gnulte-scan) v%s — side tool for GNULTE\n", version)
 		return
 	}
 	if *showDocs {
@@ -222,6 +228,48 @@ func main() {
 		bar.Finish(len(targets), len(live))
 	}
 
+	// ARP sweep (v13): hosts that filter ICMP but answer ARP appear too. It
+	// needs raw sockets, so it runs automatically under root and is skipped
+	// (with a hint) otherwise. --arp forces it, --no-arp disables it.
+	useArp := scanPrefs.ArpSweep
+	if *arpArg {
+		useArp = true
+	}
+	if *noArp {
+		useArp = false
+	}
+	var arpLive []string
+	if useArp {
+		if discover.Privileged() {
+			arpBar := ux.NewBar("ARP sweep "+orUnknown(subnet)+" (hosts that block ping)", len(targets))
+			arpLive = discover.ARPSweep(ctx, targets, cfg.Interface, *threads, func(done, alive int) {
+				arpBar.Update(done, alive)
+			})
+			arpBar.Finish(len(targets), len(arpLive))
+			if len(arpLive) > 0 && !*quiet {
+				sess.pl(fmt.Sprintf("  ARP sweep found %d host(s) answering ARP", len(arpLive)),
+					fmt.Sprintf("  ARP sweep found %d host(s) answering ARP", len(arpLive)))
+			}
+		} else if !*quiet && !exporting {
+			sess.pl(ux.C(ux.Dim, "  ARP sweep skipped (needs sudo) — run `sudo gnulte-scan` to also catch ping-blocking hosts"),
+				"  ARP sweep skipped (needs root)")
+		}
+	}
+
+	// Merge ARP-only hosts into the live set before identification.
+	if len(arpLive) > 0 {
+		seen := make(map[string]bool, len(live)+len(arpLive))
+		merged := make([]string, 0, len(live)+len(arpLive))
+		for _, ip := range append(append([]string{}, live...), arpLive...) {
+			if !seen[ip] {
+				seen[ip] = true
+				merged = append(merged, ip)
+			}
+		}
+		sort.Strings(merged)
+		live = merged
+	}
+
 	// Lease ICMP-filters respect ARP: neighbors who ignore echo still appear.
 	if showUI {
 		busy := ux.NewBusy(fmt.Sprintf("resolving %d host(s)", len(live)))
@@ -269,7 +317,7 @@ func main() {
 	interactiveQuit := false
 	if *interactive && !exporting {
 		if ux.TTY() && tui.StdinTTY() {
-			final, quit := interactiveTable(rows)
+			final, quit := interactiveTable(rows, sess.log)
 			interactiveQuit = quit
 			rows = final
 			for _, line := range rawTableLines(rows) {
@@ -319,14 +367,27 @@ func main() {
 
 	if !*noReport {
 		path := *reportArg
-		if path == "" {
-			path = fmt.Sprintf("gnulte-scan-report-%s.html", time.Now().Format("20060102-150405"))
+		autoPath := path == ""
+		if autoPath {
+			path = reportdir.DefaultPath(reportdir.GnulteScan, "gnulte-scan-report")
 		}
-		meta := scanMeta{Interface: cfg.Interface, SelfIP: cfg.SelfIP, Gateway: cfg.Gateway, Subnet: subnet}
-		if err := writeScanReport(path, sess.log, rows, meta); err != nil {
-			fmt.Fprintf(os.Stderr, "gnulte-scan: report: %v\n", err)
-		} else if !*quiet {
-			fmt.Fprintf(ux.Out, "HTML report written to %s\n", path)
+		// Interactive (-T) terminals are asked before a report lands in the
+		// hub; explicit --report and piped runs always write.
+		if autoPath && *interactive && !*quiet && ux.TTY() {
+			fmt.Fprint(ux.Out, "Generate HTML report? (y/N): ")
+			line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+			if s := strings.ToLower(strings.TrimSpace(line)); s != "y" && s != "yes" {
+				sess.pl(ux.C(ux.Dim, "  HTML report skipped"), "  HTML report skipped")
+				path = ""
+			}
+		}
+		if path != "" {
+			meta := scanMeta{Interface: cfg.Interface, SelfIP: cfg.SelfIP, Gateway: cfg.Gateway, Subnet: subnet}
+			if err := writeScanReport(path, sess.log, rows, meta); err != nil {
+				fmt.Fprintf(os.Stderr, "gnulte-scan: report: %v\n", err)
+			} else if !*quiet {
+				fmt.Fprintf(ux.Out, "HTML report written to %s\n", path)
+			}
 		}
 	}
 }
@@ -347,13 +408,26 @@ func exportKind(j, y, c bool) string {
 	return ""
 }
 
-// banner draws a width-aware title bar with static styling (no animation).
+// scanlteLogo is the SCANLTE wordmark: a clean six-line block logo in the
+// same vein as the GNULTE banner, readable on any terminal.
+const scanlteLogo = `    ███████╗ ██████╗ █████╗ ███╗   ██╗██╗     ████████╗███████╗
+    ██╔════╝██╔════╝██╔══██╗████╗  ██║██║     ╚══██╔══╝██╔════╝
+    ███████╗██║     ███████║██╔██╗ ██║██║        ██║   █████╗
+    ╚════██║██║     ██╔══██║██║╚██╗██║██║        ██║   ██╔══╝
+    ███████║╚██████╗██║  ██║██║ ╚████║███████╗   ██║   ███████╗
+    ╚══════╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚══════╝`
+
+// banner draws the SCANLTE wordmark and a width-aware title bar (static
+// styling, no animation).
 func banner(cols int) {
 	w := ux.Clamp(cols-2, 24, 78)
 	line := "  " + strings.Repeat("═", w)
 	sess.pl(ux.C(ux.Dim, line), line)
-	sess.pl("  "+ux.C(ux.Header, "GNULTE SCAN")+"   "+ux.C(ux.Cyan, "v"+version)+"   "+ux.C(ux.Dim, "LAN discovery"),
-		"  GNULTE SCAN   v"+version+"   LAN discovery")
+	for _, r := range strings.Split(scanlteLogo, "\n") {
+		sess.pl(ux.C(ux.Header, r), r)
+	}
+	sess.pl("  "+ux.C(ux.Cyan, "SCANLTE v"+version)+"   "+ux.C(ux.Dim, "side tool for GNULTE · LAN discovery"),
+		"  SCANLTE v"+version+"   side tool for GNULTE · LAN discovery")
 	sess.pl("  "+ux.C(ux.Dim, "authorized network testing only"), "  authorized network testing only")
 	sess.pl(ux.C(ux.Dim, line), line)
 	fmt.Fprintln(ux.Out)
@@ -518,7 +592,7 @@ func fatal(err error) {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `gnulte-scan (Go) v%s — authorized network testing only
+	fmt.Fprintf(os.Stderr, `SCANLTE (gnulte-scan) v%s — side tool for GNULTE, authorized network testing only
 
 Usage:
   gnulte-scan [options]
@@ -528,7 +602,8 @@ Options:
   -C, --cidr CIDR         subnet to scan (default: from interface)
   -t, --threads N         parallel ping workers (default: 64)
   -d, --deep              deep scan alive hosts (in-Go port scanner)
-  -T, --interactive       interactive full-screen device table (live terminal)
+  -T, --interactive       interactive full-screen monitor with windows
+                          (Devices/Log/Summary tabs, o = settings page; live terminal)
   -j, --json              output JSON
   -y, --yaml              output YAML
   -c, --csv               output CSV

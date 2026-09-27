@@ -48,7 +48,7 @@ func rawUptime(ip string, port int) int {
 		return 0
 	}
 
-	dTicks := uint64(samp2 - samp1) & 0xffffffff
+	dTicks := uint64(samp2-samp1) & 0xffffffff
 	dWall := wall2.Sub(wall1)
 	if dTicks == 0 || dWall <= 0 {
 		return 0
@@ -118,13 +118,13 @@ func buildSyncPacket(dstIP [4]byte, dstPort uint16) []byte {
 	copy(pkt[12:16], dstIP[:])
 
 	// --- TCP header ---
-	binary.BigEndian.PutUint16(pkt[20:22], 41234)              // src port
-	binary.BigEndian.PutUint16(pkt[22:24], dstPort)            // dst port
-	binary.BigEndian.PutUint32(pkt[24:28], 1)                  // seq
-	binary.BigEndian.PutUint16(pkt[28:30], 0)                  // ack
-	binary.BigEndian.PutUint16(pkt[32:34], 8<<12|0x02)         // header len 8 words + SYN
-	binary.BigEndian.PutUint16(pkt[34:36], 64240)              // window
-	binary.BigEndian.PutUint16(pkt[38:40], 0)                  // urgent (checksum stays 0 for now)
+	binary.BigEndian.PutUint16(pkt[20:22], 41234)      // src port
+	binary.BigEndian.PutUint16(pkt[22:24], dstPort)    // dst port
+	binary.BigEndian.PutUint32(pkt[24:28], 1)          // seq
+	binary.BigEndian.PutUint16(pkt[28:30], 0)          // ack
+	binary.BigEndian.PutUint16(pkt[32:34], 8<<12|0x02) // header len 8 words + SYN
+	binary.BigEndian.PutUint16(pkt[34:36], 64240)      // window
+	binary.BigEndian.PutUint16(pkt[38:40], 0)          // urgent (checksum stays 0 for now)
 
 	// --- TCP options: NOP + timestamp (kind 8, len 10, TSval=1, TSecr=0) ---
 	pkt[40] = 1 // NOP

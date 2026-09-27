@@ -19,10 +19,12 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
 	"gnulte-go/internal/discover"
+	"gnulte-go/internal/settings"
 	"gnulte-go/internal/tui"
 	"gnulte-go/internal/ux"
 )
@@ -68,11 +70,20 @@ func (t tvRow) sortKey(field int) string {
 	}
 }
 
-// interactiveTable runs the full-screen device table until the operator quits.
-// It returns the rows in the final display order so the caller can reuse them
-// for the report snapshot. terminate reports whether the user quit by 'q'
-// (making the caller skip the plain table too).
-func interactiveTable(rows []discover.Row) (final []discover.Row, quit bool) {
+// Tabs inside the interactive screen: the device table, the live session log,
+// and a summary pane. "multi monitor" the /-T screen into windows.
+const (
+	tabDevices = iota
+	tabLog
+	tabSummary
+)
+
+// interactiveTable runs the full-screen device monitor until the operator
+// quits. It is tabbed — Devices / Log / Summary — and 'o' opens the settings
+// editor as a modal page. It returns the rows in the final display order so
+// the caller can reuse them for the report snapshot. terminate reports whether
+// the user quit by 'q' (making the caller skip the plain table too).
+func interactiveTable(rows []discover.Row, log []string) (final []discover.Row, quit bool) {
 	scr, err := tui.Open()
 	if err != nil {
 		// Not a live terminal: fall back to the classic table.
@@ -80,15 +91,79 @@ func interactiveTable(rows []discover.Row) (final []discover.Row, quit bool) {
 	}
 	defer scr.Close()
 
-	t := &tvTable{rows: rows, sortBy: sortIP, detail: -1}
+	t := &tvTable{rows: rows, sortBy: sortIP, detail: -1, log: log}
 	t.build()
 	for {
 		t.draw(scr)
 		key, r := scr.Key()
-		if t.filterEdit {
+		if t.tab == tabDevices && t.filterEdit {
 			if t.handleFilterKey(key, r) {
 				continue
 			}
+		}
+		if key == tui.KeyTab {
+			t.tab = (t.tab + 1) % 3
+			continue
+		}
+		// Direct window jumps by number: [1]/[2]/[3].
+		if key == tui.KeyRune {
+			switch r {
+			case '1':
+				t.tab = tabDevices
+				continue
+			case '2':
+				t.tab = tabLog
+				continue
+			case '3':
+				t.tab = tabSummary
+				continue
+			}
+		}
+		if key == tui.KeyRune && (r == 'o' || r == 'O') {
+			// Settings modal: leave the screen, edit+save, reopen on the same
+			// tab. The saved values feed scanPrefs for the next run's deep scan.
+			scr.Close()
+			updated, eerr := settings.Edit(scanPrefs)
+			if eerr == nil {
+				scanPrefs = updated
+				if serr := settings.Save(scanPrefs); serr != nil {
+					fmt.Fprintf(os.Stderr, "gnulte-scan: settings: %v\n", serr)
+				}
+			}
+			scr, err = tui.Open()
+			if err != nil {
+				return t.finalRows(), true
+			}
+			continue
+		}
+		switch t.tab {
+		case tabLog:
+			switch key {
+			case tui.KeyUp:
+				t.logOff++ // older lines (clamped in logLines)
+			case tui.KeyDown:
+				if t.logOff > 0 {
+					t.logOff--
+				}
+			case tui.KeyEsc, tui.KeyEnter, tui.KeySpace:
+				t.tab = tabDevices
+			case tui.KeyRune:
+				if r == 'q' {
+					return t.finalRows(), true
+				}
+			}
+			continue
+		case tabSummary:
+			switch key {
+			case tui.KeyEsc, tui.KeyEnter, tui.KeySpace:
+				t.tab = tabDevices
+			case tui.KeyRune:
+				if r == 'q' {
+					return t.finalRows(), true
+				}
+			}
+			continue
+		case tabDevices: // fall through to the classic device-table keys
 		}
 		if key == tui.KeyEnter {
 			if t.detail >= 0 {
@@ -213,6 +288,11 @@ type tvTable struct {
 	// detailOff scrolls the detail pane when its content exceeds the screen.
 	detailOff  int
 	filterEdit bool
+	// Tabs: windowed "multi monitor" layout. log is the session transcript
+	// shown in the Log window; logOff scrolls it (0 = first visible line).
+	log    []string
+	logOff int
+	tab    int
 }
 
 // build applies the filter, sorts the view, and clamps the cursor.
@@ -277,8 +357,16 @@ func (t *tvTable) finalRows() []discover.Row {
 	return out
 }
 
-// draw renders one frame (table or detail) in a single flush.
+// draw renders one frame (table, detail, log or summary) in a single flush.
 func (t *tvTable) draw(scr *tui.Screen) {
+	if t.tab == tabLog {
+		scr.Draw(t.logLines())
+		return
+	}
+	if t.tab == tabSummary {
+		scr.Draw(t.summaryLines())
+		return
+	}
 	if t.detail >= 0 && t.detail < len(t.view) {
 		scr.Draw(t.detailLines(t.view[t.detail].r))
 		return
@@ -293,7 +381,138 @@ func (t *tvTable) draw(scr *tui.Screen) {
 	if t.filterEdit {
 		status = "filter: " + string(t.filter) + "▌   (⏎ apply · esc clear)"
 	}
-	scr.Draw(t.tableLines(status))
+	lines := t.tableLines(status)
+	lines = append([]string{t.tabBar()}, lines[:len(lines)-1]...)
+	scr.Draw(lines)
+}
+
+// tabBar is the window strip at the top of the interactive screen.
+func (t *tvTable) tabBar() string {
+	names := []string{"Devices", "Log", "Summary"}
+	width := ux.Width()
+	var b strings.Builder
+	for i, n := range names {
+		label := fmt.Sprintf("[%d] %s ", i+1, n)
+		if i == t.tab {
+			label = ux.Invert(label)
+		}
+		b.WriteString(label)
+	}
+	rest := width - b.Len()
+	if rest < 24 {
+		rest = 24
+	}
+	b.WriteString(ux.C(ux.Dim, strings.Repeat(" ", rest)))
+	b.WriteString(ux.C(ux.Dim, "Tab/1-3 window · o settings · q quit"))
+	return ux.TruncPad(b.String(), width)
+}
+
+// logLines renders the session transcript window (tail-capped, scrollable).
+// logOff counts lines scrolled up from the tail; 0 shows the newest lines.
+func (t *tvTable) logLines() []string {
+	width := ux.Width()
+	height := ux.Height()
+	lines := make([]string, 0, height)
+	lines = append(lines, t.tabBar())
+	lines = append(lines, ux.TruncPad(ux.C(ux.Dim, strings.Repeat("─", width-2)), width))
+	maxRows := height - 3
+	if maxRows < 3 {
+		maxRows = 3
+	}
+	n := len(t.log)
+	scroll := n - maxRows
+	if scroll < 0 {
+		scroll = 0
+	}
+	if t.logOff > scroll {
+		t.logOff = scroll
+	}
+	top := scroll - t.logOff
+	bottom := top + maxRows
+	if bottom > n {
+		bottom = n
+	}
+	if n == 0 {
+		top, bottom = 0, 0
+	}
+	for i := top; i < bottom; i++ {
+		lines = append(lines, ux.TruncPad(t.log[i], width))
+	}
+	for len(lines) < height {
+		lines = append(lines, " ")
+	}
+	return lines
+}
+
+// summaryLines renders the per-column breakdown window: host counts by type,
+// OS guesses, open ports, and anything flagged.
+func (t *tvTable) summaryLines() []string {
+	width := ux.Width()
+	height := ux.Height()
+	lines := make([]string, 0, height)
+	lines = append(lines, t.tabBar())
+	lines = append(lines, ux.TruncPad(ux.C(ux.Dim, strings.Repeat("─", width-2)), width))
+
+	byType := map[string]int{}
+	osSeen := map[string]int{}
+	portTotal, flagged := 0, 0
+	for _, r := range t.rows {
+		byType[r.Type]++
+		if r.OS != "" {
+			osSeen[r.OS]++
+		}
+		if r.Ports != "" {
+			portTotal += len(strings.Split(r.Ports, ","))
+		}
+		if strings.Contains(strings.ToLower(r.ScanNote), "rogue") {
+			flagged++
+		}
+	}
+	lines = append(lines, ux.C(ux.Header, ux.TruncPad(" Scan summary — "+fmt.Sprintf("%d host(s)", len(t.rows)), width)))
+	lines = append(lines, " ")
+	if len(byType) == 0 {
+		lines = append(lines, "  no devices discovered in this scan.")
+	}
+	var types []string
+	for k := range byType {
+		types = append(types, k)
+	}
+	sort.Strings(types)
+	lines = append(lines, ux.C(ux.Cyan, "  by type"))
+	for _, k := range types {
+		lines = append(lines, fmt.Sprintf("    %-22s %d", k, byType[k]))
+	}
+	lines = append(lines, " ")
+	lines = append(lines, ux.C(ux.Cyan, "  details"))
+	lines = append(lines, fmt.Sprintf("    open ports total   %d", portTotal))
+	lines = append(lines, fmt.Sprintf("    hosts w/ ARP MAC   %d", countMACs(t.rows)))
+	lines = append(lines, fmt.Sprintf("    flagged (rogue?)   %d", flagged))
+	if len(osSeen) > 0 {
+		lines = append(lines, " ")
+		lines = append(lines, ux.C(ux.Cyan, "  OS fingerprint"))
+		var oses []string
+		for k := range osSeen {
+			oses = append(oses, k)
+		}
+		sort.Strings(oses)
+		for _, k := range oses {
+			lines = append(lines, fmt.Sprintf("    %-28s %d", k, osSeen[k]))
+		}
+	}
+	for len(lines) < height {
+		lines = append(lines, " ")
+	}
+	return lines
+}
+
+func countMACs(rows []discover.Row) int {
+	n := 0
+	for _, r := range rows {
+		if r.MAC != "" {
+			n++
+		}
+	}
+	return n
 }
 
 // cell renders one truncated, coloured field at a fixed width.

@@ -145,3 +145,41 @@ func TestFakeMACsAreSafe(t *testing.T) {
 		t.Errorf("FakeBSSID not locally administered: %s", b)
 	}
 }
+
+func TestParseChannels(t *testing.T) {
+	ch, err := ParseChannels("1, 6, 11")
+	if err != nil || len(ch) != 3 || ch[0] != 1 || ch[2] != 11 {
+		t.Errorf("ParseChannels(1,6,11) = %v, %v want [1 6 11]", ch, err)
+	}
+	// Duplicates collapse, order kept.
+	ch, err = ParseChannels("6,6,1")
+	if err != nil || len(ch) != 2 || ch[0] != 6 || ch[1] != 1 {
+		t.Errorf("dedupe = %v, %v want [6 1]", ch, err)
+	}
+	if _, err := ParseChannels(""); err == nil {
+		t.Error("empty list should fail")
+	}
+	if _, err := ParseChannels("1,99,200"); err == nil {
+		t.Error("out-of-range channel should fail")
+	}
+	if _, err := ParseChannels("1,x"); err == nil {
+		t.Error("non-numeric channel should fail")
+	}
+}
+
+func TestReasonCodesRotate(t *testing.T) {
+	rc := ReasonCodes()
+	if len(rc) < 3 {
+		t.Fatalf("ReasonCodes() = %v, want a rotating set", rc)
+	}
+	// The classic "legitimate disconnect" reason must be in the mix.
+	found := false
+	for _, r := range rc {
+		if r == ReasonLeavingBSS {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("ReasonCodes missing the canonical LeaveBSS reason")
+	}
+}

@@ -55,9 +55,12 @@ type editor struct {
 
 // editItem is one editor row: a label, a kind, a getter/setter pair, a
 // human help line, and the factory-default display value used by the reset key.
+// head rows are non-editable category separators (rendered dim, skipped by the
+// arrow keys) that keep the growing option list browsable.
 type editItem struct {
 	label string
 	kind  int
+	head  bool
 	get   func(c Config) string
 	set   func(c *Config, v string) error
 	help  string
@@ -68,6 +71,7 @@ const (
 	itemStr = iota
 	itemInt
 	itemBool
+	itemHead
 )
 
 // run builds the categorized item list and drives the edit loop.
@@ -75,10 +79,12 @@ func (e *editor) run() {
 	row := func(label string, kind int, get func(c Config) string, set func(c *Config, v string) error, help, def string) editItem {
 		return editItem{label: label, kind: kind, get: get, set: set, help: help, def: def}
 	}
+	head := func(label string) editItem {
+		return editItem{label: label, kind: itemHead, head: true}
+	}
 
-	// Categories are rendered as headers; each one remembers where its items
-	// start in the flat list so navigation/scroll stays simple.
 	e.items = append(e.items,
+		head("NETWORK & MONITOR"),
 		row("interface", itemStr,
 			func(c Config) string { return orAuto(c.Interface) },
 			func(c *Config, v string) error {
@@ -123,6 +129,29 @@ func (e *editor) run() {
 				return nil
 			},
 			"per-ping timeout; raise it for slow or degraded links (100-60000)", "1000ms"),
+		row("ping history depth", itemInt,
+			func(c Config) string { return fmt.Sprintf("%d", c.History) },
+			func(c *Config, v string) error {
+				n, err := strconv.Atoi(v)
+				if err != nil {
+					return fmt.Errorf("a whole number, 10-240")
+				}
+				c.History = clamp(n, 10, 240)
+				return nil
+			},
+			"how many ping samples each monitor keeps per target — the latency history sparkline (10-240)", "60"),
+		row("traffic window update (s)", itemInt,
+			func(c Config) string { return fmt.Sprintf("%ds", c.TrafficSec) },
+			func(c *Config, v string) error {
+				n, err := strconv.Atoi(v)
+				if err != nil {
+					return fmt.Errorf("whole seconds, 1-10")
+				}
+				c.TrafficSec = clamp(n, 1, 10)
+				return nil
+			},
+			"refresh interval for the gnulte-traffic window (1-10)", "1s"),
+		head("SCANLTE SCAN"),
 		row("scan threads", itemInt,
 			func(c Config) string { return fmt.Sprintf("%d", c.ScanThreads) },
 			func(c *Config, v string) error {
@@ -161,10 +190,20 @@ func (e *editor) run() {
 			func(c Config) string { return boolText(c.ArpSweep) },
 			func(c *Config, v string) error { return setBool(&c.ArpSweep, v) },
 			"also find hosts via an ARP sweep — catches devices that block ping (needs sudo)", boolText(true)),
+		row("service discovery (mDNS/DNS-SD)", itemBool,
+			func(c Config) string { return boolText(c.ServiceDiscovery) },
+			func(c *Config, v string) error { return setBool(&c.ServiceDiscovery, v) },
+			"gnulte-scan: ask the network's mDNS/DNS-SD responders (Avahi-style) what each device offers", boolText(true)),
+		head("TRAFFIC ENGINE"),
 		row("stealth ARP spoofing", itemBool,
 			func(c Config) string { return boolText(c.StealthArp) },
 			func(c *Config, v string) error { return setBool(&c.StealthArp, v) },
 			"gnulte: answer ARP only when asked (on-demand) with a slow cache refresh — far less visible to other scanners", boolText(false)),
+		row("advanced mode (echo commands)", itemBool,
+			func(c Config) string { return boolText(c.Advanced) },
+			func(c *Config, v string) error { return setBool(&c.Advanced, v) },
+			"gnulte: echo the exact command line for every tc/arpspoof/sysctl step as it runs (still recorded in the HTML report when off)", boolText(true)),
+		head("GNULTE-WIFI"),
 		row("wifi frames per burst", itemInt,
 			func(c Config) string { return fmt.Sprintf("%d", c.WifiCount) },
 			func(c *Config, v string) error {
@@ -216,18 +255,15 @@ func (e *editor) run() {
 				return nil
 			},
 			"comma-separated channel list to hop through, e.g. \"1,6,11\"", "1,6,11"),
-		row("traffic window update (s)", itemInt,
-			func(c Config) string { return fmt.Sprintf("%ds", c.TrafficSec) },
-			func(c *Config, v string) error {
-				n, err := strconv.Atoi(v)
-				if err != nil {
-					return fmt.Errorf("whole seconds, 1-10")
-				}
-				c.TrafficSec = clamp(n, 1, 10)
-				return nil
-			},
-			"refresh interval for the gnulte-traffic window (1-10)", "1s"),
+		head("TERMINAL & UI"),
+		row("typing animation", itemBool,
+			func(c Config) string { return boolText(c.Typing) },
+			func(c *Config, v string) error { return setBool(&c.Typing, v) },
+			"type the interactive confirmation out character by character on live terminals", boolText(true)),
 	)
+
+	// The cursor starts on the first editable value, never on a header.
+	e.sel = e.firstItem()
 
 	for {
 		e.draw()
@@ -238,10 +274,10 @@ func (e *editor) run() {
 		}
 		switch key {
 		case tui.KeyUp:
-			e.sel = (e.sel + len(e.items) - 1) % len(e.items)
+			e.sel = e.step(-1)
 			e.clampTop()
 		case tui.KeyDown:
-			e.sel = (e.sel + 1) % len(e.items)
+			e.sel = e.step(1)
 			e.clampTop()
 		case tui.KeyLeft, tui.KeyRight:
 			e.jog(key == tui.KeyRight)
@@ -249,9 +285,9 @@ func (e *editor) run() {
 			return
 		case tui.KeyEnter, tui.KeySpace:
 			it := e.items[e.sel]
-			if it.kind == itemBool {
+			if !it.head && it.kind == itemBool {
 				_ = it.set(&e.cfg, boolText(!e.boolVal(e.sel)))
-			} else {
+			} else if !it.head {
 				e.edit = true
 				e.buf = nil // typing replaces the value from scratch
 				e.liveErr = ""
@@ -264,11 +300,56 @@ func (e *editor) run() {
 				}
 			case 'R':
 				e.resetAll()
+			case 'g':
+				e.sel = e.firstItem()
+				e.top = 0
+			case 'G':
+				e.sel = e.lastItem()
+				e.clampTop()
 			case 'q', 'Q':
 				return
 			}
 		}
 	}
+}
+
+// step returns the next selectable index in dir's direction, skipping the
+// non-editable category headers so the arrow keys always land on a value.
+func (e *editor) step(dir int) int {
+	n := len(e.items)
+	i := e.sel + dir
+	for tries := 0; tries < n; tries++ {
+		if i < 0 {
+			i = n - 1
+		} else if i >= n {
+			i = 0
+		}
+		if !e.items[i].head {
+			return i
+		}
+		i += dir
+	}
+	return e.sel
+}
+
+// firstItem/lastItem find the first and last editable value rows (Home/End and
+// the g/G jump keys land on a value, never on a header).
+func (e *editor) firstItem() int {
+	for i := range e.items {
+		if !e.items[i].head {
+			return i
+		}
+	}
+	return 0
+}
+
+func (e *editor) lastItem() int {
+	for i := len(e.items) - 1; i >= 0; i-- {
+		if !e.items[i].head {
+			return i
+		}
+	}
+	return 0
 }
 
 func setBool(dst *bool, v string) error {
@@ -317,9 +398,12 @@ func parseInt(s string) int {
 	return n
 }
 
-// resetAll restores every item to its factory default.
+// resetAll restores every value row to its factory default (headers untouched).
 func (e *editor) resetAll() {
 	for i := range e.items {
+		if e.items[i].head {
+			continue
+		}
 		_ = e.items[i].set(&e.cfg, e.items[i].def)
 	}
 	e.liveErr = ""
@@ -387,12 +471,16 @@ func boolText(b bool) string {
 
 // draw renders the whole settings screen in one flicker-free flush: category
 // headers, the scroll window, and a footer with the current help for the row
-// under the cursor.
+// under the cursor. The box scales with the terminal up to 96 columns so a
+// wide window shows a wide list (headers divide it into browsable sections).
 func (e *editor) draw() {
 	width := ux.Width()
 	inner := width - 4
-	if inner > 74 {
-		inner = 74
+	if inner > 96 {
+		inner = 96
+	}
+	if inner < 40 {
+		inner = 40
 	}
 	visible := e.visible()
 	lines := make([]string, 0, visible+6)
@@ -409,20 +497,31 @@ func (e *editor) draw() {
 	shown := 0
 	for i := e.top; i < len(e.items) && shown < visible; i++ {
 		it := e.items[i]
-		body := "  │ " + it.label + ":" + strings.Repeat(" ", max0(inner-len(it.label)-len(it.get(e.cfg))-3)) + it.get(e.cfg) + " "
-		if e.edit && i == e.sel {
-			body = "  │ " + it.label + ":" + strings.Repeat(" ", max0(inner-len(it.label)-len(string(e.buf))-4)) + string(e.buf) + "_ │"
-			body = ux.C(ux.Bold, body)
-		}
-		if i == e.sel && !e.edit {
-			body = ux.C(ux.Bold, body)
+		var body string
+		if it.head {
+			// Category separator: a dim rule with the section name in it.
+			pad := inner - len(it.label) - 5
+			if pad < 1 {
+				pad = 1
+			}
+			body = "  │── " + ux.C(ux.Dim+ux.Bold, it.label) + strings.Repeat("─", pad) + " ─│"
+			body = ux.C(ux.Dim, body)
+		} else {
+			body = "  │ " + it.label + ":" + strings.Repeat(" ", max0(inner-len(it.label)-len(it.get(e.cfg))-3)) + it.get(e.cfg) + " "
+			if e.edit && i == e.sel {
+				body = "  │ " + it.label + ":" + strings.Repeat(" ", max0(inner-len(it.label)-len(string(e.buf))-4)) + string(e.buf) + "_ │"
+				body = ux.C(ux.Bold, body)
+			}
+			if i == e.sel && !e.edit {
+				body = ux.C(ux.Bold, body)
+			}
 		}
 		if showScroll {
 			mark := " "
 			if i >= e.top+visible {
 				mark = "▸"
 			}
-			body = body[:len(body)-1] + mark + "│"
+			body = trimRightCell(body) + mark + "│"
 		}
 		lines = append(lines, body)
 		shown++
@@ -432,17 +531,31 @@ func (e *editor) draw() {
 	}
 	lines = append(lines, "  └"+strings.Repeat("─", inner)+"┘")
 
-	foot := "  ↑/↓ move · ←/→ adjust · Enter edit/toggle · r reset · R reset all · Esc save & exit"
+	foot := "  ↑/↓ move · ←/→ adjust · Enter edit/toggle · g/G first/last · r reset · R reset all · Esc save & exit"
 	if e.edit {
 		foot = "  entering a value… Enter accept · Esc cancel"
 		if e.liveErr != "" {
 			foot = "  " + ux.C(ux.Red, e.liveErr) + " — Enter accept · Esc cancel"
 		}
-	} else if it := e.items[e.sel]; it.help != "" {
+	} else if it := e.items[e.sel]; !it.head && it.help != "" {
 		foot = "  " + ux.C(ux.Dim, it.help)
 	}
 	lines = append(lines, foot)
 	e.s.Draw(lines)
+}
+
+// trimRightCell drops the last visible cell from a box row. When the row was
+// colourised (bold selection), the trailing ANSI reset is kept whole so the
+// line never ends inside an escape sequence.
+func trimRightCell(s string) string {
+	const reset = "\033[0m"
+	if strings.HasSuffix(s, reset) {
+		return s[:len(s)-len(reset)]
+	}
+	if len(s) > 0 {
+		return s[:len(s)-1]
+	}
+	return s
 }
 
 func max0(v int) int {

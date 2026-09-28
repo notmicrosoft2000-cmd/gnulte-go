@@ -145,12 +145,13 @@ func JSON(w io.Writer, rows []discover.Row) error {
 		Type     string   `json:"type,omitempty"`
 		Ports    string   `json:"ports,omitempty"`
 		OS       string   `json:"os,omitempty"`
+		Services []string `json:"services,omitempty"`
 		Banners  []string `json:"banners,omitempty"`
 		ScanNote string   `json:"scan_note,omitempty"`
 	}
 	list := make([]host, 0, len(rows))
 	for _, r := range rows {
-		list = append(list, host{r.IP, r.MAC, r.Vendor, r.Hostname, r.Type, r.Ports, r.OS, r.Banners, r.ScanNote})
+		list = append(list, host{r.IP, r.MAC, r.Vendor, r.Hostname, r.Type, r.Ports, r.OS, r.Services, r.Banners, r.ScanNote})
 	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
@@ -180,6 +181,12 @@ func YAML(w io.Writer, rows []discover.Row) error {
 		if r.OS != "" {
 			fmt.Fprintf(w, "    os: %q\n", r.OS)
 		}
+		if len(r.Services) > 0 {
+			fmt.Fprintln(w, "    services:")
+			for _, s := range r.Services {
+				fmt.Fprintf(w, "      - %q\n", s)
+			}
+		}
 		for _, b := range r.Banners {
 			fmt.Fprintf(w, "    - banner: %q\n", b)
 		}
@@ -193,11 +200,11 @@ func YAML(w io.Writer, rows []discover.Row) error {
 // CSV writes a header row followed by one row per host.
 func CSV(w io.Writer, rows []discover.Row) error {
 	cw := csv.NewWriter(w)
-	if err := cw.Write([]string{"ip", "mac", "vendor", "hostname", "type", "ports", "os", "banners", "scan_note"}); err != nil {
+	if err := cw.Write([]string{"ip", "mac", "vendor", "hostname", "type", "ports", "os", "services", "banners", "scan_note"}); err != nil {
 		return err
 	}
 	for _, r := range rows {
-		if err := cw.Write([]string{r.IP, r.MAC, r.Vendor, r.Hostname, r.Type, r.Ports, r.OS, strings.Join(r.Banners, " | "), r.ScanNote}); err != nil {
+		if err := cw.Write([]string{r.IP, r.MAC, r.Vendor, r.Hostname, r.Type, r.Ports, r.OS, strings.Join(r.Services, " | "), strings.Join(r.Banners, " | "), r.ScanNote}); err != nil {
 			return err
 		}
 	}

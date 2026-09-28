@@ -329,7 +329,7 @@ func (t *tvTable) build() {
 // matches reports whether a row satisfies the filter term (case-insensitive).
 func (r tvRow) matches(q string) bool {
 	raw := r.r
-	hay := strings.ToLower(raw.IP + " " + raw.MAC + " " + raw.Vendor + " " + raw.Hostname + " " + raw.Type + " " + raw.OS)
+	hay := strings.ToLower(raw.IP + " " + raw.MAC + " " + raw.Vendor + " " + raw.Hostname + " " + raw.Type + " " + raw.OS + " " + strings.Join(raw.Services, " "))
 	return strings.Contains(hay, strings.ToLower(q))
 }
 
@@ -455,7 +455,7 @@ func (t *tvTable) summaryLines() []string {
 
 	byType := map[string]int{}
 	osSeen := map[string]int{}
-	portTotal, flagged := 0, 0
+	portTotal, flagged, svcTotal := 0, 0, 0
 	for _, r := range t.rows {
 		byType[r.Type]++
 		if r.OS != "" {
@@ -464,6 +464,7 @@ func (t *tvTable) summaryLines() []string {
 		if r.Ports != "" {
 			portTotal += len(strings.Split(r.Ports, ","))
 		}
+		svcTotal += len(r.Services)
 		if strings.Contains(strings.ToLower(r.ScanNote), "rogue") {
 			flagged++
 		}
@@ -486,6 +487,7 @@ func (t *tvTable) summaryLines() []string {
 	lines = append(lines, ux.C(ux.Cyan, "  details"))
 	lines = append(lines, fmt.Sprintf("    open ports total   %d", portTotal))
 	lines = append(lines, fmt.Sprintf("    hosts w/ ARP MAC   %d", countMACs(t.rows)))
+	lines = append(lines, fmt.Sprintf("    mDNS services      %d", svcTotal))
 	lines = append(lines, fmt.Sprintf("    flagged (rogue?)   %d", flagged))
 	if len(osSeen) > 0 {
 		lines = append(lines, " ")
@@ -668,6 +670,11 @@ func (t *tvTable) detailLines(r discover.Row) []string {
 				add("  " + l)
 			}
 		}
+	}
+	if len(r.Services) > 0 {
+		add("")
+		add(ux.TruncPad(ux.C(ux.Dim, "mDNS services (DNS-SD)"), width))
+		add(ux.TruncPad("  "+ux.C(ux.Cyan, strings.Join(r.Services, ", ")), width))
 	}
 	// Scroll if the content runs past the screen.
 	n := len(lines)

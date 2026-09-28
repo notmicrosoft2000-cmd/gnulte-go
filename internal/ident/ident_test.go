@@ -2,6 +2,7 @@ package ident
 
 import (
 	"encoding/binary"
+	"strings"
 	"testing"
 )
 
@@ -231,5 +232,44 @@ func TestNBSTATQueryShape(t *testing.T) {
 	}
 	if binary.BigEndian.Uint16(q[len(q)-4:len(q)-2]) != 0x0021 {
 		t.Errorf("nbstatQuery qtype != NBSTAT: % x", q[len(q)-4:])
+	}
+}
+
+// TestServiceQueryPacketShape pins the DNS-SD PTR probe packet: one question
+// per known service type, each a PTR/IN query with the unicast-response bit.
+func TestServiceQueryPacketShape(t *testing.T) {
+	q := serviceQueryPacket()
+	if got := int(binary.BigEndian.Uint16(q[4:6])); got != len(serviceTypes) {
+		t.Fatalf("QDCOUNT = %d, want %d", got, len(serviceTypes))
+	}
+	pos := 12
+	for i := range serviceTypes {
+		_, n, ok := skipName(q, pos)
+		if !ok {
+			t.Fatalf("service %d name did not parse", i)
+		}
+		if q[n] != 0 || q[n+1] != 12 { // qtype PTR
+			t.Fatalf("service %d qtype != PTR", i)
+		}
+		if q[n+2] != 0x80 { // unicast-response bit
+			t.Fatalf("service %d missing unicast-response bit", i)
+		}
+		pos = n + 4
+	}
+	if pos != len(q) {
+		t.Fatalf("packet ends at %d, want %d", pos, len(q))
+	}
+}
+
+// TestServiceQueryLabelMap ensures every short label the scan shows has a
+// place in the packet (no orphan labels, no non-matching types).
+func TestServiceQueryLabelMap(t *testing.T) {
+	for _, s := range serviceTypes {
+		if s.label == "" {
+			t.Fatalf("service %s has an empty label", s.name)
+		}
+		if _, ok := serviceLabel[strings.TrimSuffix(s.name, ".")]; !ok {
+			t.Fatalf("serviceLabel missing entry for %s", s.name)
+		}
 	}
 }

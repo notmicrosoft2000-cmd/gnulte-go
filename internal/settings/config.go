@@ -54,6 +54,12 @@ type Config struct {
 	WifiMixReasons bool   `json:"wifi_mix_reasons"` // rotate deauth reason codes per burst
 	WifiHop        bool   `json:"wifi_hop"`         // hop channels between bursts
 	WifiChannels   string `json:"wifi_channels"`    // comma-separated hop list, e.g. "1,6,11"
+
+	// Toolkit session UX (v13).
+	Advanced         bool `json:"advanced"`          // echo the exact command lines gnulte runs as they run
+	Typing           bool `json:"typing"`            // typewriter animation for the interactive confirmation
+	History          int  `json:"history"`           // ping samples kept per target in the monitors (10-240)
+	ServiceDiscovery bool `json:"service_discovery"` // gnulte-scan: mDNS/DNS-SD service discovery (Avahi-style)
 }
 
 // Default returns the built-in defaults, used when no config file exists.
@@ -80,6 +86,11 @@ func Default() Config {
 		WifiMixReasons: true,
 		WifiHop:        false,
 		WifiChannels:   "1,6,11",
+
+		Advanced:         true, // the command transcript stays visible unless asked to switch off
+		Typing:           true,
+		History:          60,
+		ServiceDiscovery: true,
 	}
 }
 
@@ -143,6 +154,7 @@ func (c *Config) Sanitize() {
 	c.TrafficSec = clamp(c.TrafficSec, 1, 10)
 	c.ProbeRetries = clamp(c.ProbeRetries, 1, 5)
 	c.WifiJitterMs = clamp(c.WifiJitterMs, 0, 100)
+	c.History = clamp(c.History, 10, 240)
 	if strings.TrimSpace(c.WifiChannels) == "" {
 		c.WifiChannels = "1,6,11"
 	}

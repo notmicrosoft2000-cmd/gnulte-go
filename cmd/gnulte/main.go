@@ -54,6 +54,10 @@ const version = "13.0"
 // HTML report shows the full command flow, not just the monitor's own output.
 var bootLog []string
 
+// typingOn is whether the interactive confirmation should be typed out rather
+// than printed at once (from settings, only on a live terminal).
+var typingOn bool
+
 // bootf records one boot-transcript line and echoes it to the console. quiet
 // silences the echo but the line still lands in the transcript.
 func bootf(quiet bool, format string, args ...any) {
@@ -203,6 +207,7 @@ func main() {
 	if err != nil {
 		fatal(fmt.Errorf("settings: %v", err))
 	}
+	typingOn = prefs.Typing && !*quiet && ansi
 
 	// The settings editor is a full-screen terminal TU/t and writes straight
 	// back to the config file, then hands control back to the shell.
@@ -333,7 +338,9 @@ func main() {
 		Quiet:         *quiet,
 		Stealth:       *stealthArg,
 		Verbose: func(line string) {
-			bootf(*quiet, "  $ "+line)
+			// Advanced mode echoes the exact command line as it runs; the
+			// transcript (and therefore the HTML report) always records it.
+			bootf(!prefs.Advanced || *quiet, "  $ "+line)
 		},
 	}
 	if *rangeCIDR != "" {
@@ -461,6 +468,7 @@ func main() {
 		Iface:      cfg.Interface,
 		Impairment: impairmentString(&ec, *profile),
 		TCPPorts:   ux.SplitPorts(*probePorts),
+		History:    prefs.History,
 	}
 	// The per-ping timeout must exceed the planned latency, or a degraded but
 	// reachable target (e.g. the 3000ms voip profile) would read as offline.
@@ -795,6 +803,12 @@ func safetySummary(c *engine.Config, randomize, profile, beep bool, iv time.Dura
 	say := func(format string, args ...any) {
 		line := fmt.Sprintf(format, args...)
 		bootLog = append(bootLog, line)
+		if typingOn {
+			// Type the confirmation out so the session reads like a live
+			// session; the transcript line is already recorded whole.
+			ux.Typeprint(os.Stdout, line+"\n", 4*time.Millisecond)
+			return
+		}
 		fmt.Println(line)
 	}
 	say("══════════════════════════════════════════════════")

@@ -201,6 +201,10 @@ type Monitor struct {
 	// and yield a measurable latency.
 	TCPPorts []int
 
+	// History bounds the per-target ping samples kept (the latency history fed
+	// to the sparkline and the report's SVG timeline). 0 keeps everything.
+	History int
+
 	// Log records every permanent console line for the post-test HTML report
 	// (the whole live log history, not just the summary).
 	Log   []string
@@ -230,6 +234,13 @@ type Monitor struct {
 
 	expMu sync.Mutex
 	exp   *os.File
+}
+
+// trimHistory keeps at most m.History samples for the latency history.
+func (m *Monitor) trimHistory(st *Stats) {
+	if m.History > 0 && len(st.Samples) > m.History {
+		st.Samples = st.Samples[len(st.Samples)-m.History:]
+	}
 }
 
 // rec appends one plain-text console line to the session history.
@@ -448,6 +459,7 @@ func (m *Monitor) runSingle(ctx context.Context, ip string) error {
 					st.Max = int64(rtt)
 				}
 				st.Samples = append(st.Samples, rtt)
+				m.trimHistory(st)
 				if !m.Quiet {
 					if note == "" {
 						note = "—"
@@ -604,6 +616,7 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 							stats[i].Max = int64(rtt)
 						}
 						stats[i].Samples = append(stats[i].Samples, rtt)
+						m.trimHistory(stats[i])
 					} else {
 						stats[i].Drops++
 					}
@@ -660,23 +673,6 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 				m.OnTick()
 			}
 		}
-	}
-}
-
-func sparkChar(v int) byte {
-	switch {
-	case v < 0:
-		return 'x'
-	case v <= 80:
-		return '.'
-	case v <= 250:
-		return '-'
-	case v <= 500:
-		return '='
-	case v <= 1000:
-		return '#'
-	default:
-		return 'M'
 	}
 }
 
@@ -749,20 +745,12 @@ func (m *Monitor) renderDashboard(stats []*Stats, lastNote []string, keyboard, v
 		if st.Count > 0 {
 			mn, mx = fmt.Sprintf("%dms", st.Min), fmt.Sprintf("%dms", st.Max)
 		}
-		spark := "    "
-		if n := len(st.Samples); n > 0 {
-			start := 0
-			if n > 30 {
-				start = n - 30
-			}
-			sp := make([]byte, 0, n-start)
-			for _, v := range st.Samples[start:] {
-				sp = append(sp, sparkChar(v))
-			}
-			spark = string(sp[:min(len(sp), 30)])
+		spark := ""
+		if sp := ux.SparkRTT(st.Samples, 30); sp != "" {
+			spark = dim(sp)
 		}
 		lines = append(lines, fmt.Sprintf("      %-16s min %s · max %s · jitter ±%dms %s %s",
-			"", mn, mx, st.jitter(), tcpNote, dim(spark)))
+			"", mn, mx, st.jitter(), tcpNote, spark))
 	}
 	lines = append(lines, fmt.Sprintf("  [%s]", time.Now().Format("15:04:05")))
 
@@ -776,13 +764,6 @@ func (m *Monitor) renderDashboard(stats []*Stats, lastNote []string, keyboard, v
 	for _, ln := range lines {
 		fmt.Println(ln)
 	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // rateText renders one host's live down/up rates from the traffic counter, or

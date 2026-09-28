@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"gnulte-go/internal/netutil"
+	"gnulte-go/internal/probe"
 	"gnulte-go/internal/settings"
 	"gnulte-go/internal/traffic"
 	"gnulte-go/internal/tui"
@@ -44,12 +45,46 @@ import (
 
 const version = "13.0"
 
+// pinger tracks the ping history of one watched host across ticks: the last
+// RTT, running min/max/avg/loss, and the bounded sample ring that becomes the
+// latency sparkline under the traffic row.
+type pinger struct {
+	count   int
+	drops   int
+	total   int64
+	min     int64
+	max     int64
+	last    int
+	samples []int
+}
+
+func (h *pinger) add(rtt int, capN int) {
+	h.last = rtt
+	if rtt < 0 {
+		h.drops++
+		return
+	}
+	h.count++
+	h.total += int64(rtt)
+	if h.min == 0 || int64(rtt) < h.min {
+		h.min = int64(rtt)
+	}
+	if int64(rtt) > h.max {
+		h.max = int64(rtt)
+	}
+	h.samples = append(h.samples, rtt)
+	if capN > 0 && len(h.samples) > capN {
+		h.samples = h.samples[len(h.samples)-capN:]
+	}
+}
+
 func main() {
 	var (
 		iface    = flag.String("i", "", "network interface (default: auto-detect)")
 		targets  = flag.String("t", "", "host IP(s) to watch, comma-separated")
 		interval = flag.Int("interval", 0, "seconds between updates (0 = settings/1)")
 		duration = flag.Int("duration", 0, "auto-stop after N seconds (0 = until interrupt)")
+		history  = flag.Int("history", 0, "ping samples kept per host (0 = settings/60)")
 		quiet    = flag.Bool("q", false, "quiet: no banner")
 		showVer  = flag.Bool("version", false, "print version and exit")
 	)
@@ -70,6 +105,11 @@ func main() {
 	if *interval > 0 {
 		iv = ux.Clamp(*interval, 1, 10)
 	}
+	histCap := ux.Clamp(cfgLoaded.History, 10, 240)
+	if *history > 0 {
+		histCap = ux.Clamp(*history, 10, 240)
+	}
+	timeout := time.Duration(ux.Clamp(cfgLoaded.TimeoutMs, 100, 60000)) * time.Millisecond
 
 	// Administrator-privilege handshake: counting packets needs a raw socket.
 	if os.Geteuid() != 0 && os.Getenv("GNULTE_AS_ROOT") != "1" {
@@ -151,6 +191,7 @@ func main() {
 
 	tick := time.NewTicker(time.Duration(iv) * time.Second)
 	defer tick.Stop()
+	hist := make([]pinger, len(hosts))
 	for {
 		select {
 		case <-sigCtx.Done():
@@ -163,7 +204,21 @@ func main() {
 			if hasCounter {
 				rates = counter.Snapshot()
 			}
-			lines := render(hosts, rates, nic, iv)
+			// One ping per host each tick (concurrently, so N hosts cost the
+			// same wall time as one) — the per-IP ping history under each row.
+			var wg sync.WaitGroup
+			for i, ip := range hosts {
+				wg.Add(1)
+				go func(i int, ip string) {
+					defer wg.Done()
+					rctx, cancel := context.WithTimeout(sigCtx, timeout)
+					defer cancel()
+					rtt, _ := probe.Ping(rctx, ip, timeout)
+					hist[i].add(rtt, histCap)
+				}(i, ip)
+			}
+			wg.Wait()
+			lines := render(hosts, rates, nic, iv, hist)
 			if inView {
 				tui.DrawFrame(os.Stdout, ux.Width(), lines)
 			} else {
@@ -193,9 +248,11 @@ func parseHosts(s string) []string {
 	return out
 }
 
-// render builds one dashboard frame from the latest per-host snapshot.
-func render(hosts []string, rates map[string]traffic.Rate, nic string, iv int) []string {
-	out := make([]string, 0, len(hosts)+6)
+// render builds one dashboard frame from the latest per-host snapshot. Each
+// watched host gets its traffic row plus a dim ping row underneath: last RTT,
+// average, loss, and the block sparkline of every ping recorded (the history).
+func render(hosts []string, rates map[string]traffic.Rate, nic string, iv int, hist []pinger) []string {
+	out := make([]string, 0, len(hosts)*2+6)
 	rule := "  ── " + nic + " " + strings.Repeat("─", 28)
 	out = append(out, ux.C(ux.Cyan, rule))
 	out = append(out, ux.C(ux.Header+ux.Bold, "  LIVE TRAFFIC")+
@@ -204,7 +261,7 @@ func render(hosts []string, rates map[string]traffic.Rate, nic string, iv int) [
 
 	var totRX, totTX, totRXp, totTXp int64
 	first := true
-	for _, ip := range hosts {
+	for i, ip := range hosts {
 		r := rates[ip]
 		// Pad the plain IP before colouring: padding a string that already
 		// carries ANSI escapes misaligns the columns by the escape length.
@@ -217,6 +274,9 @@ func render(hosts []string, rates map[string]traffic.Rate, nic string, iv int) [
 		dl := rateLine(r.RXBytes, r.RXPkts)
 		ul := rateLine(r.TXBytes, r.TXPkts)
 		out = append(out, fmt.Sprintf("%-18s   %s", key, ux.TruncPad(dl+"    "+ul, 40)))
+		if hp := pingLine(ip, hist[i]); hp != "" {
+			out = append(out, hp)
+		}
 		totRX += r.RXBytes
 		totTX += r.TXBytes
 		totRXp += r.RXPkts
@@ -227,6 +287,31 @@ func render(hosts []string, rates map[string]traffic.Rate, nic string, iv int) [
 		ux.C(ux.Bold, "TOTAL"), ux.TruncPad(rateLine(totRX, totRXp)+"    "+rateLine(totTX, totTXp), 40)))
 	out = append(out, time.Now().Format("  [15:04:05]"))
 	return out
+}
+
+// pingLine renders one host's ping history: last RTT, average, loss, and the
+// latency sparkline of every ping recorded so far. Empty until the first ping.
+func pingLine(ip string, h pinger) string {
+	if h.count+h.drops == 0 {
+		return ""
+	}
+	att := h.count + h.drops
+	loss := float64(h.drops) * 100 / float64(att)
+	avg := int64(0)
+	if h.count > 0 {
+		avg = h.total / int64(h.count)
+	}
+	last := "--"
+	if h.last >= 0 {
+		last = fmt.Sprintf("%dms", h.last)
+	}
+	head := fmt.Sprintf("ping %s · avg %dms · loss %.0f%%", last, avg, loss)
+	spark := ux.SparkRTT(h.samples, 30)
+	line := "  " + ux.TruncPad(ip, 16) + "  " + ux.C(ux.Dim, head)
+	if spark != "" {
+		line += "  " + ux.C(ux.Cyan, spark)
+	}
+	return line
 }
 
 // rateLine formats one direction as "↓ 1.2KB/s (12 pkt/s)", idle when quiet.

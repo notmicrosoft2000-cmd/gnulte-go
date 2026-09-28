@@ -104,6 +104,10 @@ func hasColumn(rows []discover.Row, field int) bool {
 			if r.OS != "" {
 				return true
 			}
+		case 6:
+			if len(r.Services) > 0 {
+				return true
+			}
 		}
 	}
 	return false
@@ -141,6 +145,10 @@ func renderTable(s *session, rows []discover.Row, width int) {
 	}
 	if hasColumn(rows, 5) {
 		defs = append(defs, cdef{"OS", 8, func(r discover.Row) string { return r.OS }, noColor})
+	}
+	if hasColumn(rows, 6) {
+		defs = append(defs, cdef{"SERVICES", 8,
+			func(r discover.Row) string { return strings.Join(r.Services, ", ") }, dimc})
 	}
 
 	// Natural widths from the longest cell (capped so one field cannot blow the

@@ -48,6 +48,7 @@ type Row struct {
 	OSConf   int // confidence 0-100 from deep scan
 	Uptime   string
 	Banners  []string
+	Services []string // mDNS/DNS-SD service labels (Avahi-style discovery)
 	ScanNote string
 	IsSelf   bool
 	IsNew    bool
@@ -285,6 +286,26 @@ func EnrichHostnames(ctx context.Context, rows []Row) {
 	for i := range rows {
 		if rows[i].Type == "" && rows[i].Hostname != "" {
 			rows[i].Type = ident.DeviceType(rows[i].Vendor, rows[i].Hostname, "", nil)
+		}
+	}
+}
+
+// EnrichServices fills each row's Services field with the mDNS/DNS-SD service
+// labels (Avahi-style: airplay, ssh, chromecast, printer, …) its address
+// advertises on the multicast channel. It is a garnish, not a dependency: it
+// returns silently when disabled or when the network has no responders.
+func EnrichServices(ctx context.Context, rows []Row, enabled bool) {
+	if !enabled || len(rows) == 0 {
+		return
+	}
+	ips := make([]string, 0, len(rows))
+	for _, r := range rows {
+		ips = append(ips, r.IP)
+	}
+	labels := ident.ServiceLabels(ctx, ips)
+	for i := range rows {
+		if l := labels[rows[i].IP]; len(l) > 0 {
+			rows[i].Services = l
 		}
 	}
 }

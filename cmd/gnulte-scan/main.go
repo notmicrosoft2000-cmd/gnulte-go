@@ -291,6 +291,31 @@ func main() {
 		rows = buildRows(ctx, live, discover.Neighbors(context.Background(), cfg.Interface), cfg)
 	}
 	discover.EnrichHostnames(ctx, rows)
+
+	// mDNS/DNS-SD service discovery (Avahi-style): what each device offers.
+	if scanPrefs.ServiceDiscovery {
+		sdBusy := ux.NewBusy("asking mDNS/DNS-SD responders what each device offers")
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			discover.EnrichServices(ctx, rows, true)
+		}()
+		for {
+			select {
+			case <-done:
+				total := 0
+				for _, r := range rows {
+					total += len(r.Services)
+				}
+				sdBusy.Done(fmt.Sprintf("%d advertised service(s) found", total))
+			case <-time.After(60 * time.Millisecond):
+				sdBusy.Spin()
+				continue
+			}
+			break
+		}
+	}
+
 	if *deep {
 		deepBusy := ux.NewBusy(fmt.Sprintf("deep-scanning %d host(s): common ports, services, banners", len(rows)))
 		done := make(chan struct{})

@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"gnulte-go/internal/ux"
 )
 
 func TestPingOnceLocalhost(t *testing.T) {
@@ -32,9 +34,6 @@ func TestStatsLossAndAvg(t *testing.T) {
 }
 
 func TestSparkAndStatusIcon(t *testing.T) {
-	if sparkChar(-1) != 'x' || sparkChar(40) != '.' || sparkChar(1000) != '#' {
-		t.Error("sparkChar mapping wrong")
-	}
 	if statusIcon(-1) == "" {
 		t.Error("statusIcon should never return an empty glyph")
 	}
@@ -42,5 +41,14 @@ func TestSparkAndStatusIcon(t *testing.T) {
 		if statusIcon(v) == "" {
 			t.Errorf("statusIcon(%d) returned empty", v)
 		}
+	}
+}
+
+// The dashboard's latency history now comes from the shared block sparkline;
+// this pins the mapping so a future refactor cannot silently change it.
+func TestDashboardSparkMapping(t *testing.T) {
+	sp := ux.SparkRTT([]int{-1, 4, 64, 300, 600}, 10)
+	if sp != "·▁▅▇█" {
+		t.Fatalf("SparkRTT mapping changed: %q", sp)
 	}
 }

@@ -31,6 +31,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -368,6 +369,246 @@ func reversePTRQuery(ip string) []byte {
 		"in-addr", "arpa",
 	}, "."))
 	b.Write([]byte{0, 12, 0x80, 0x01}) // qtype PTR, qclass IN + UnicastResponse
+	return b.Bytes()
+}
+
+// ----- DNS-SD service discovery (mDNS, Avahi-style) -----
+
+// serviceType is one DNS-SD service type we probe for: the multicast service
+// name (e.g. "_airplay._tcp.local.") and the short label shown in scan rows.
+type serviceType struct {
+	name  string
+	label string
+}
+
+// serviceTypes is the curated set of places mDNS/DNS-SD responders (Avahi,
+// macOS, Windows, Linux, IoT firmware) advertise services. Probing all of
+// them is one small multicast packet (kept under the usual ~1.4KB UDP limit),
+// and only these labels ever reach the device table — unrelated noise on the
+// channel is ignored.
+var serviceTypes = []serviceType{
+	{"_airplay._tcp.local.", "airplay"},
+	{"_raop._tcp.local.", "airplay-audio"},
+	{"_googlecast._tcp.local.", "chromecast"},
+	{"_spotify-connect._tcp.local.", "spotify"},
+	{"_hap._tcp.local.", "homekit"},
+	{"_matter._tcp.local.", "matter"},
+	{"_meshcop._udp.local.", "thread"},
+	{"_companion-link._tcp.local.", "apple-connect"},
+	{"_ssh._tcp.local.", "ssh"},
+	{"_http._tcp.local.", "http"},
+	{"_https._tcp.local.", "https"},
+	{"_smb._tcp.local.", "smb"},
+	{"_afpovertcp._tcp.local.", "afp"},
+	{"_workstation._tcp.local.", "workstation"},
+	{"_printer._tcp.local.", "printer"},
+	{"_ipp._tcp.local.", "ipp"},
+	{"_scanner._tcp.local.", "scanner"},
+	{"_pdl-datastream._tcp.local.", "pdl"},
+	{"_rtsp._tcp.local.", "rtsp"},
+	{"_onvif._tcp.local.", "onvif"},
+	{"_rfb._tcp.local.", "vnc"},
+	{"_rdp._tcp.local.", "rdp"},
+	{"_mobile-device._tcp.local.", "mobile-sync"},
+	{"_nut._tcp.local.", "ups"},
+}
+
+// serviceLabel maps a full service name ("_airplay._tcp.local") to its short
+// label, built once so the membership test stays cheap.
+var serviceLabel = func() map[string]string {
+	m := make(map[string]string, len(serviceTypes))
+	for _, s := range serviceTypes {
+		m[strings.TrimSuffix(s.name, ".")] = s.label
+	}
+	return m
+}()
+
+// ServiceLabels asks the LAN's mDNS/DNS-SD responders (Avahi and friends) what
+// services each candidate address offers, and returns ip -> short labels. It
+// runs a two-phase multicast exchange: PTR probes for every known service
+// type, then SRV/A probes for any instance the first answer burst did not map
+// to an address. Responders that stay silent contribute nothing; the whole
+// probe is bounded by the context (default under two seconds) and needs no
+// mDNS daemon of our own.
+func ServiceLabels(ctx context.Context, ips []string) map[string][]string {
+	out := map[string][]string{}
+	if len(ips) == 0 {
+		return out
+	}
+	want := map[string]bool{}
+	for _, ip := range ips {
+		want[ip] = true
+	}
+	conn, err := listenMDNS()
+	if err != nil {
+		return out
+	}
+	defer conn.Close()
+
+	var rrs []mdnsRR
+	collect := func(q []byte) {
+		_ = conn.SetDeadline(time.Now().Add(serviceBudget(ctx)))
+		if _, err := conn.Write(q); err != nil {
+			return
+		}
+		buf := make([]byte, 8192)
+		for {
+			n, _, err := conn.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			rrs = append(rrs, mdnsRRs(buf[:n])...)
+		}
+	}
+
+	// Phase 1: every known service type in one PTR packet.
+	collect(serviceQueryPacket())
+
+	// Figure out what phase 1 still left dangling: instances without a host
+	// (no SRV yet) and hosts without an address (no A yet).
+	hostIP := map[string]string{}
+	instanceHost := map[string]string{}
+	for _, rr := range rrs {
+		switch rr.typ {
+		case 1:
+			if rr.ip != nil && rr.owner != "" {
+				hostIP[rr.owner] = rr.ip.String()
+			}
+		case 33:
+			if rr.owner != "" && rr.target != "" {
+				instanceHost[rr.owner] = rr.target
+			}
+		}
+	}
+	instances := map[string]bool{}     // instance names advertised in PTRs
+	instanceSvc := map[string]string{} // instance name -> label
+	for _, rr := range rrs {
+		if rr.typ != 12 || rr.target == "" {
+			continue
+		}
+		label, ok := serviceLabel[strings.TrimSuffix(rr.owner, ".")]
+		if !ok {
+			continue
+		}
+		instances[rr.target] = true
+		instanceSvc[rr.target] = label
+	}
+
+	// Phase 2: resolve what is still missing, in a second packet.
+	if len(instances) > 0 {
+		var srvQ, aQ []string
+		for inst := range instances {
+			if hostIP[inst] == "" && instanceHost[inst] == "" {
+				srvQ = append(srvQ, inst)
+			}
+		}
+		for _, host := range instanceHost {
+			host = strings.TrimSuffix(host, ".")
+			if hostIP[host] == "" {
+				aQ = append(aQ, host)
+			}
+		}
+		sort.Strings(srvQ)
+		sort.Strings(aQ)
+		if len(srvQ)+len(aQ) > 0 {
+			collect(buildServiceQueries(srvQ, aQ))
+		}
+	}
+
+	// Rebuild the address maps with phase 2 answers included.
+	hostIP = map[string]string{}
+	instanceHost = map[string]string{}
+	for _, rr := range rrs {
+		switch rr.typ {
+		case 1:
+			if rr.ip != nil && rr.owner != "" {
+				hostIP[rr.owner] = rr.ip.String()
+			}
+		case 33:
+			if rr.owner != "" && rr.target != "" {
+				instanceHost[rr.owner] = rr.target
+			}
+		}
+	}
+
+	// Every advertised instance resolves to the address that hosts it, either
+	// directly (an A record whose owner is the instance) or through its SRV
+	// target host.
+	for inst, label := range instanceSvc {
+		ip := ""
+		switch {
+		case hostIP[inst] != "":
+			ip = hostIP[inst]
+		case instanceHost[inst] != "":
+			ip = hostIP[strings.TrimSuffix(instanceHost[inst], ".")]
+		}
+		if ip == "" || !want[ip] {
+			continue
+		}
+		out[ip] = append(out[ip], label)
+	}
+	for ip, labels := range out {
+		sort.Strings(labels)
+		seen := labels[:0]
+		for i, l := range labels {
+			if i == 0 || l != labels[i-1] {
+				seen = append(seen, l)
+			}
+		}
+		out[ip] = seen
+	}
+	return out
+}
+
+// listenMDNS opens the multicast socket used for service discovery, falling
+// back to an ephemeral unicast socket when group membership is unavailable.
+func listenMDNS() (*net.UDPConn, error) {
+	group := &net.UDPAddr{IP: net.IPv4(224, 0, 0, 251), Port: 5353}
+	conn, err := net.ListenMulticastUDP("udp4", nil, group)
+	if err == nil {
+		return conn, nil
+	}
+	return net.DialUDP("udp4", nil, group)
+}
+
+// serviceBudget bounds one phase of the service probe by the context's
+// deadline, defaulting to 900ms on a context without one.
+func serviceBudget(ctx context.Context) time.Duration {
+	if dl, ok := ctx.Deadline(); ok {
+		if rem := time.Until(dl); rem > 0 && rem < 900*time.Millisecond {
+			return rem
+		}
+	}
+	return 900 * time.Millisecond
+}
+
+// serviceQueryPacket builds one mDNS packet asking for the PTR record of every
+// known service type at once, with the UnicastResponse bit on each question so
+// responders answer straight back to our socket.
+func serviceQueryPacket() []byte {
+	b := &bytes.Buffer{}
+	b.Write([]byte{0, 0, 0, 0, byte(len(serviceTypes) >> 8), byte(len(serviceTypes)), 0, 0, 0, 0, 0, 0})
+	for _, s := range serviceTypes {
+		writeName(b, s.name)
+		b.Write([]byte{0, 12, 0x80, 0x01}) // qtype PTR, qclass IN + UnicastResponse
+	}
+	return b.Bytes()
+}
+
+// buildServiceQueries builds one multicast packet of SRV and A probes (with
+// the UnicastResponse bit) for instances and hosts phase 1 left unresolved.
+func buildServiceQueries(instances, hosts []string) []byte {
+	b := &bytes.Buffer{}
+	n := len(instances) + len(hosts)
+	b.Write([]byte{0, 0, 0, 0, byte(n >> 8), byte(n), 0, 0, 0, 0, 0, 0})
+	for _, inst := range instances {
+		writeName(b, inst)
+		b.Write([]byte{0, 33, 0x80, 0x01}) // qtype SRV
+	}
+	for _, h := range hosts {
+		writeName(b, h)
+		b.Write([]byte{0, 1, 0x80, 0x01}) // qtype A
+	}
 	return b.Bytes()
 }
 

@@ -225,3 +225,69 @@ func TestPingerRingCap(t *testing.T) {
 		t.Fatalf("min/max wrong: %d/%d", h.min, h.max)
 	}
 }
+
+// TestPingerPctPercentiles checks nearest-rank p50/p95 over the RTT ring.
+func TestPingerPctPercentiles(t *testing.T) {
+	h := pinger{}
+	for _, rtt := range []int{10, 20, 30, 40, 50, 60, 70, 80, 90, 100} {
+		h.add(rtt, 60)
+	}
+	if g := h.pct(50); g != 55 && g != 50 && g != 60 {
+		t.Fatalf("p50 = %d, want a mid value (50–60)", g)
+	}
+	if g := h.pct(95); g != 100 {
+		t.Fatalf("p95 = %d, want 100", g)
+	}
+	var empty pinger
+	if empty.pct(50) != 0 {
+		t.Fatal("pct on an empty ring should be 0")
+	}
+	// Deterministic odd-size check: nearest rank of 60% of 5 samples = #3.
+	h2 := pinger{}
+	for _, rtt := range []int{1, 2, 3, 4, 5} {
+		h2.add(rtt, 60)
+	}
+	if g := h2.pct(60); g != 3 {
+		t.Fatalf("p60 of 1..5 = %d, want 3", g)
+	}
+}
+
+// TestParseArp reads a /proc/net/arp-shaped fixture: only complete, interface-
+// matched entries survive, and MACs come back upper-cased.
+func TestParseArp(t *testing.T) {
+	fixture := `IP address       HW type     Flags       HW address            Mask     Device
+192.168.100.1    0x1         0x2         00:11:22:33:44:55     *        wlan0
+192.168.100.13   0x1         0x2         a4:83:e7:12:34:56     *        wlan0
+192.168.100.2    0x1         0x0         00:00:00:00:00:00     *        wlan0
+192.168.99.1     0x1         0x2         de:ad:be:ef:00:01     *        eth1
+not-an-ip        0x1         0x2         11:22:33:44:55:66     *        wlan0
+`
+	got := parseArp(strings.NewReader(fixture), "wlan0")
+	if len(got) != 2 {
+		t.Fatalf("parsed %d neighbours, want 2 (router + host): %v", len(got), got)
+	}
+	if got["192.168.100.13"] != "A4:83:E7:12:34:56" {
+		t.Fatalf("MAC not upper-cased: %q", got["192.168.100.13"])
+	}
+	if _, ok := got["192.168.100.2"]; ok {
+		t.Fatal("incomplete (Flags 0x0) entries must be skipped")
+	}
+	if _, ok := got["192.168.99.1"]; ok {
+		t.Fatal("other-interface entries must be filtered out")
+	}
+	if _, ok := got["not-an-ip"]; ok {
+		t.Fatal("non-IP rows must be skipped")
+	}
+}
+
+// TestGatewayColorAssignment pins the per-host hue slots (appearance order).
+func TestGatewayColorAssignment(t *testing.T) {
+	hosts := []string{"192.0.2.1", "192.0.2.2", "192.0.2.3"}
+	stats := map[string]*hostStat{}
+	for i, ip := range hosts {
+		stats[ip] = &hostStat{color: i}
+	}
+	if stats["192.0.2.1"].color != 0 || stats["192.0.2.3"].color != 2 {
+		t.Fatalf("hue slots wrong: %v", []int{stats["192.0.2.1"].color, stats["192.0.2.3"].color})
+	}
+}

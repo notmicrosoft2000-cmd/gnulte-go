@@ -31,7 +31,7 @@ func TestVrowsTrafficSort(t *testing.T) {
 		"192.168.100.40":  {RXBytes: 50_000, TXBytes: 500_000},
 		"192.168.100.207": {RXBytes: 2_000_000, TXBytes: 800_000},
 	}
-	rows := vrows(st, hosts, nil, rates, stats, 1)
+	rows := vrows(st, hosts, nil, rates, stats, 1, layoutNormal)
 	want := []string{"192.168.100.13", "192.168.100.207", "192.168.100.40"}
 	for i, w := range want {
 		if rows[i].ip != w {
@@ -44,7 +44,7 @@ func TestVrowsTrafficSort(t *testing.T) {
 func TestVrowsLatencySort(t *testing.T) {
 	hosts, stats := testHosts()
 	st := &viewState{sortMode: sortPing}
-	rows := vrows(st, hosts, nil, map[string]traffic.Rate{}, stats, 1)
+	rows := vrows(st, hosts, nil, map[string]traffic.Rate{}, stats, 1, layoutNormal)
 	if rows[0].ip != "192.168.100.40" {
 		t.Fatalf("sortPing first = %s, want the 180ms host", rows[0].ip)
 	}
@@ -55,7 +55,7 @@ func TestVrowsCursorClamp(t *testing.T) {
 	hosts, stats := testHosts()
 	// Only one host alarms; with the alarm filter, cursor 5 must clamp to 0.
 	st := &viewState{alarmOnly: true, cursor: 5}
-	rows := vrows(st, hosts, nil, map[string]traffic.Rate{}, stats, 1)
+	rows := vrows(st, hosts, nil, map[string]traffic.Rate{}, stats, 1, layoutNormal)
 	if len(rows) != 1 || rows[0].ip != "192.168.100.13" {
 		t.Fatalf("alarm-only filter rows = %v, want just the alarming host", rowsIPs(rows))
 	}
@@ -193,16 +193,256 @@ func TestHostSliceKeepsCursor(t *testing.T) {
 }
 
 // TestBuildViewNeverExceedsHeight is the overflow guard: no matter how many
-// panes are open, the frame must fit the terminal height.
+// screens and panes are open, the frame must fit the terminal height.
 func TestBuildViewNeverExceedsHeight(t *testing.T) {
 	hosts, stats := testHosts()
-	st := &viewState{detail: true, showTalk: true, showHelp: true, alarmOnly: true}
-	flows := []traffic.Flow{{A: "192.168.100.13:443", B: "151.101.1.69:443", AB: 1000, BA: 200}}
-	for _, h := range []int{10, 12, 18, 24, 40} {
-		env := watchEnv{nic: "wlan0", subnet: "192.168.100.0/24", iv: 1, start: time.Now(), alarmOn: true, gwRTT: -2}
-		out := buildView(st, hosts, nil, map[string]traffic.Rate{}, flows, nil, stats, env, h)
-		if len(out) > h {
-			t.Fatalf("height %d: frame has %d lines, want ≤ %d:\n%v", h, len(out), h, out)
+	flows := []traffic.Flow{
+		{A: "192.168.100.13:443", B: "151.101.1.69:443", AB: 1000, BA: 200, ABp: 5, BAp: 2},
+		{A: "192.168.100.13:443", B: "192.168.100.40:53", AB: 400, BA: 300, ABp: 4, BAp: 4},
+	}
+	for _, sc := range []int{scrHosts, scrTalkers, scrFlows, scrArp} {
+		for _, h := range []int{10, 12, 18, 24, 40} {
+			st := &viewState{detail: true, showHelp: true, screen: sc}
+			env := watchEnv{nic: "wlan0", subnet: "192.168.100.0/24", iv: 1, start: time.Now(),
+				alarmOn: true, gwRTT: -2, hasCounter: true, width: 120,
+				neigh: map[string]string{"192.168.100.13": "A4:83:E7:12:34:56"}}
+			out := buildView(st, hosts, nil, map[string]traffic.Rate{}, flows, map[string]bool{}, stats, env, h)
+			if len(out) > h {
+				t.Fatalf("screen %d height %d: frame has %d lines, want ≤ %d:\n%v",
+					sc, h, len(out), h, out)
+			}
+		}
+	}
+}
+
+// TestIpCellUsesHostHue pins the per-IP colouring: the IP cell is wrapped in
+// the host's stable hue (padded to width), so a device stays recognisable by
+// colour on every screen.
+func TestIpCellUsesHostHue(t *testing.T) {
+	got := ipCell("192.168.100.13", 3, 15)
+	if got != ux.C(ux.Hue(3), ux.TruncPad("192.168.100.13", 15)) {
+		t.Fatalf("ipCell = %q, want the host's hue wrapper", got)
+	}
+	// The hue index rides on the hostStat, wired in vrows rows.
+	s := &hostStat{color: 2}
+	rows := watchRow("10.0.0.1", hostInfo{}, traffic.Rate{}, s, 1)
+	got = strings.TrimSpace(ux.StripAnsi(rows[0]))
+	if !strings.HasPrefix(got, "10.0.0.1") {
+		t.Fatalf("row must lead with the coloured IP cell, got %q", got)
+	}
+}
+
+// TestWatchRowCompactTwoLines and the wide variant pin the width-scaled row
+// shapes: each band is internally stable and never wider than its terminal.
+func TestWatchRowCompactTwoLines(t *testing.T) {
+	st := &hostStat{color: 1}
+	st.ping.add(12, 60)
+	rows := watchRowCompact("192.0.2.7", hostInfo{Host: "radio"}, traffic.Rate{RXBytes: 9000}, st, 1)
+	if len(rows) != 2 {
+		t.Fatalf("compact row = %d lines, want 2:\n%v", len(rows), rows)
+	}
+	for _, ln := range rows {
+		if ux.RuneLen(ux.StripAnsi(ln)) > 78 {
+			t.Fatalf("compact line over 78 cols: %q", ln)
+		}
+	}
+	// A bare host still fills both lines (stable height).
+	bare := watchRowCompact("192.0.2.7", hostInfo{}, traffic.Rate{}, &hostStat{color: 1}, 1)
+	if len(bare) != 2 {
+		t.Fatalf("compact bare row = %d lines, want 2", len(bare))
+	}
+}
+
+func TestWatchRowWideFourLines(t *testing.T) {
+	st := &hostStat{color: 4}
+	for _, rtt := range []int{10, 20, 30, 40, 50} {
+		st.ping.add(rtt, 60)
+	}
+	st.addRate(2_000_000, 300_000, 60)
+	rows := watchRowWide("192.0.2.9", hostInfo{Host: "printer-lobby"}, traffic.Rate{TXBytes: 5000}, st, 1)
+	if len(rows) != 4 {
+		t.Fatalf("wide row = %d lines, want 4:\n%v", len(rows), rows)
+	}
+	all := strings.Join(rows, "\n")
+	if !strings.Contains(all, "p50 30ms") || !strings.Contains(all, "p95 50ms") {
+		t.Fatalf("wide row missing percentiles:\n%s", all)
+	}
+	if !strings.Contains(all, "session ↓") || !strings.Contains(all, "bytes ↓") {
+		t.Fatalf("wide row missing session-total line:\n%s", all)
+	}
+	for _, ln := range rows {
+		if ux.RuneLen(ux.StripAnsi(ln)) > 116 {
+			t.Fatalf("wide line over 116 cols: %q", ln)
+		}
+	}
+}
+
+// TestLayoutForBands pins the width thresholds of the scaled TUI.
+func TestLayoutForBands(t *testing.T) {
+	cases := []struct {
+		w    int
+		want int
+	}{
+		{40, layoutCompact}, {77, layoutCompact},
+		{78, layoutNormal}, {115, layoutNormal},
+		{116, layoutWide}, {200, layoutWide},
+		{0, layoutNormal}, // unknown width (non-TTY/tests) defaults to normal
+	}
+	for _, tc := range cases {
+		if got := layoutFor(tc.w); got != tc.want {
+			t.Fatalf("layoutFor(%d) = %d, want %d", tc.w, got, tc.want)
+		}
+	}
+}
+
+// TestTalkersScreenRanksByRate builds screen 2: busiest host first, bars
+// scaled to the max, peer counts, and the LAN-internal communicators block.
+func TestTalkersScreenRanksByRate(t *testing.T) {
+	hosts, stats := testHosts()
+	rates := map[string]traffic.Rate{
+		"192.168.100.13":  {RXBytes: 5_000_000, TXBytes: 10_000},
+		"192.168.100.40":  {RXBytes: 50_000, TXBytes: 500_000},
+		"192.168.100.207": {RXBytes: 2_000_000, TXBytes: 800_000},
+	}
+	flows := []traffic.Flow{
+		{A: "192.168.100.13:443", B: "8.8.8.8:443", AB: 1000, BA: 200},
+		{A: "192.168.100.13:443", B: "192.168.100.40:53", AB: 400, BA: 300},
+	}
+	hostSet := map[string]bool{}
+	for _, ip := range hosts {
+		hostSet[ip] = true
+	}
+	env := watchEnv{iv: 1, subnet: "192.168.100.0/24", hasCounter: true, width: 120}
+	out := talkersLines(hosts, nil, rates, stats, flows, hostSet, env, 30)
+	all := strings.Join(out, "\n")
+	if !strings.Contains(all, "TOP TALKERS") {
+		t.Fatalf("talkers header missing:\n%s", all)
+	}
+	// Busiest (13: 5,010,000) must rank #1 and lead its row.
+	if !strings.Contains(out[1], "192.168.100.13") {
+		t.Fatalf("busiest host not first:\n%v", out[:3])
+	}
+	if !strings.Contains(all, "▁") && !strings.Contains(all, "█") {
+		t.Fatalf("rate bars missing:\n%s", all)
+	}
+	if !strings.Contains(all, "COMMUNICATORS") || !strings.Contains(all, "⟷LAN") {
+		t.Fatalf("LAN-internal communicators block missing:\n%s", all)
+	}
+	if !strings.Contains(all, "peers 2") {
+		t.Fatalf("peer count missing (13 talks to 8.8.8.8 and 40):\n%s", all)
+	}
+}
+
+// TestFlowsScreenListsPairsAndGates: with the capture socket the pair table
+// renders; without it the screen explains the root requirement instead.
+func TestFlowsScreenListsPairsAndGates(t *testing.T) {
+	_, stats := testHosts()
+	flows := []traffic.Flow{
+		{A: "192.168.100.13:443", B: "8.8.8.8:443", AB: 1200, BA: 900, ABp: 7, BAp: 5},
+	}
+	hostSet := map[string]bool{"192.168.100.13": true, "192.168.100.40": true, "192.168.100.207": true}
+	env := watchEnv{iv: 1, subnet: "192.168.100.0/24", hasCounter: true, width: 120}
+	out := flowsLines(flows, hostSet, stats, env, 30)
+	all := strings.Join(out, "\n")
+	if !strings.Contains(all, "8.8.8.8:443") || !strings.Contains(all, "A→B") {
+		t.Fatalf("flow pair missing:\n%s", all)
+	}
+
+	env.hasCounter = false
+	out = flowsLines(flows, hostSet, stats, env, 30)
+	all = strings.Join(out, "\n")
+	if !strings.Contains(all, "⛔") || !strings.Contains(all, "sudo gnulte-lan") {
+		t.Fatalf("root gate missing:\n%s", all)
+	}
+}
+
+// TestArpScreenShowsNeighbours: the ARP screen renders watched hosts with
+// ping/grade and unknown neighbours dimmed, and recovers the vendor from the
+// MAC even for hosts outside the watch list.
+func TestArpScreenShowsNeighbours(t *testing.T) {
+	hosts, stats := testHosts()
+	stats["192.168.100.13"].ping.add(23, 60)
+	info := map[string]hostInfo{
+		"192.168.100.13": {IP: "192.168.100.13", MAC: "A4:83:E7:12:34:56", Vendor: "Apple, Inc.", Type: "phone", Host: "cassie-phone"},
+	}
+	env := watchEnv{iv: 1, width: 120, hasCounter: true,
+		neigh: map[string]string{
+			"192.168.100.13": "A4:83:E7:12:34:56",
+			"192.168.100.1":  "00:11:22:33:44:55", // the router, not watched
+		}}
+	st := &viewState{}
+	out := arpLines(st, hosts, info, stats, env, 30)
+	all := strings.Join(out, "\n")
+	for _, want := range []string{"NEIGHBOURS", "A4:83:E7:12:34:56", "Apple, Inc.", "ping 23ms", "192.168.100.1", "00:11:22:33:44:55"} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("ARP screen missing %q:\n%s", want, all)
+		}
+	}
+}
+
+// TestBarFillsLeftToRight spot-checks the talkers scale bars.
+func TestBarFillsLeftToRight(t *testing.T) {
+	if got := bar(0, 1000, 4); got != "    " {
+		t.Fatalf("bar(0) = %q, want blank", got)
+	}
+	if got := bar(800, 1000, 4); !strings.HasPrefix(got, "█") {
+		t.Fatalf("bar(800/1000,4) = %q, want full cells at the left", got)
+	}
+	if got := bar(1000, 1000, 4); got != "████" {
+		t.Fatalf("bar(max) = %q, want full", got)
+	}
+	full := bar(1000, 1000, 6)
+	if ux.RuneLen(full) != 6 {
+		t.Fatalf("bar width = %d, want 6", ux.RuneLen(full))
+	}
+}
+
+// TestLanPair classifies LAN-internal conversation pairs.
+func TestLanPair(t *testing.T) {
+	if !lanPair("192.168.100.13:443", "192.168.100.40:53", "192.168.100.0/24") {
+		t.Fatal("two LAN hosts should be an internal pair")
+	}
+	if lanPair("192.168.100.13:443", "8.8.8.8:443", "192.168.100.0/24") {
+		t.Fatal("a host and the internet should not be tagged LAN-internal")
+	}
+	if lanPair("192.168.100.13:443", "192.168.99.40:53", "192.168.100.0/24") {
+		t.Fatal("a host outside the subnet should not match")
+	}
+}
+
+// TestEnvHeaderShowsNetRates verifies the header's LAN-wide net line.
+func TestEnvHeaderShowsNetRates(t *testing.T) {
+	hosts, _ := testHosts()
+	rates := map[string]traffic.Rate{
+		"192.168.100.13":  {RXBytes: 1024 * 1024 * 2},
+		"192.168.100.40":  {RXBytes: 1024 * 512},
+		"192.168.100.207": {TXBytes: 1024 * 1024},
+	}
+	env := watchEnv{nic: "wlan0", subnet: "192.168.100.0/24", iv: 1, start: time.Now(),
+		selfIP: "192.168.100.207", gwIP: "192.168.100.1", gwRTT: 3, hasCounter: true}
+	out := envHeader(&viewState{screen: scrHosts}, hosts, rates, env)
+	all := strings.Join(out, "\n")
+	if !strings.Contains(all, "net ↓ 2") || !strings.Contains(all, "↑ 1") {
+		t.Fatalf("header net totals missing:\n%s", all)
+	}
+	if !strings.Contains(all, "HOSTS") {
+		t.Fatalf("screen tag missing:\n%s", all)
+	}
+	env.hasCounter = false
+	out = envHeader(&viewState{screen: scrFlows}, hosts, rates, env)
+	if !strings.Contains(strings.Join(out, "\n"), "speeds-free") {
+		t.Fatalf("speeds-free marker missing on no-socket runs:\n%v", out)
+	}
+}
+
+// TestFooterHintsPerScreen confirms every screen explains its own keys.
+func TestFooterHintsPerScreen(t *testing.T) {
+	if !strings.Contains(footerHint(&viewState{screen: scrHosts}), "↑↓ host") {
+		t.Fatal("hosts footer lost the host navigation hints")
+	}
+	for _, sc := range []int{scrTalkers, scrFlows, scrArp} {
+		if !strings.Contains(footerHint(&viewState{screen: sc}), "q quit") {
+			t.Fatalf("screen %d footer missing quit hint", sc)
 		}
 	}
 }

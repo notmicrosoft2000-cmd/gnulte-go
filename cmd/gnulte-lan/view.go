@@ -19,27 +19,81 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 	"time"
 
+	"gnulte-go/internal/discover"
 	"gnulte-go/internal/traffic"
 	"gnulte-go/internal/ux"
 )
 
-// The interactive watch view (tui.Screen): cursor, ordering, panes. It lives
-// on the alternate screen when stdin/stdout are a live terminal; piped and
-// -q runs keep the classic buildLines transcript instead.
+// The interactive watch view (tui.Screen): screen modes, cursor, ordering,
+// per-host hues. It lives on the alternate screen when stdin/stdout are a live
+// terminal; piped and -q runs keep the classic buildLines transcript instead.
+//
+// v13.5 turns the watch into a four-screen console:
+//
+//	1 HOSTS     the live dashboard, one fixed-shape block per host
+//	2 TALKERS   hosts ranked by combined rate, with bars and peers
+//	3 FLOWS     per-conversation pairs A ⇄ B (needs the root capture socket)
+//	4 ARP       the neighbour table: MAC · vendor · type · host · live RTT
+//
+// Rows scale with terminal width (compact 2-line < 78 cols, normal 3-line,
+// wide 4-line ≥ 116 cols) and every host keeps one stable hue across screens
+// so you can follow a device by colour alone.
+
+// Screen modes.
+const (
+	scrHosts = iota
+	scrTalkers
+	scrFlows
+	scrArp
+)
+
+// screenLabel is the mode tag shown in the header status line.
+func screenLabel(s int) string {
+	switch s {
+	case scrTalkers:
+		return "TALKERS"
+	case scrFlows:
+		return "FLOWS"
+	case scrArp:
+		return "ARP"
+	default:
+		return "HOSTS"
+	}
+}
+
+// Row layout bands, chosen once per draw from the terminal width. Height is
+// stable within a band, so the only time the frame resizes is a real resize.
+const (
+	layoutCompact = iota // < 78 cols: two lines per host
+	layoutNormal         // 78–115 cols: the three-line v13.4 block
+	layoutWide           // ≥ 116 cols: four lines, extra stats
+)
+
+func layoutFor(width int) int {
+	switch {
+	case width > 0 && width < 78:
+		return layoutCompact
+	case width >= 116:
+		return layoutWide
+	default:
+		return layoutNormal
+	}
+}
 
 // viewState is everything the operator can change while the watch runs:
-// which host the cursor sits on, how rows are ordered, whether the detail /
-// talkers / help panes are visible, and whether only alarming hosts are shown.
+// which host the cursor sits on, how rows are ordered, which screen is up,
+// whether the detail pane is open, and whether only alarming hosts are shown.
 type viewState struct {
 	cursor    int  // index into the current (filtered, sorted) row order
 	sortMode  int  // sortAddr, sortTraffic or sortPing
 	alarmOnly bool // hide hosts that are not alarming
 	detail    bool // host detail pane open, for the cursor host
-	showTalk  bool // global top-talkers pane
+	screen    int  // scrHosts, scrTalkers, scrFlows or scrArp
 	showHelp  bool // expanded key hints
 	auto      bool // whole-LAN watch mode (router skipped)
 	count     int  // how many rows the last draw showed (after the alarm filter)
@@ -67,7 +121,8 @@ func (s *viewState) sortName() string {
 
 // watchEnv is the frame-time environment the view needs beyond the watched
 // rows themselves: the network the watch runs on, the operator's own machine,
-// the gateway's last latency, and the aggregate flags.
+// the gateway's last latency, the aggregate flags, the terminal width (for row
+// layout scaling) and the fresh neighbour table (for the ARP screen).
 type watchEnv struct {
 	nic, subnet string
 	selfIP      string
@@ -77,7 +132,9 @@ type watchEnv struct {
 	start       time.Time
 	up          int // hosts with at least one successful ping
 	alarmOn     bool
-	hasCounter  bool
+	hasCounter  bool // raw capture socket live (root)
+	width       int  // terminal columns, for layoutFor
+	neigh       map[string]string
 }
 
 // vrow is one host row with its sort keys and rendered lines precomputed.
@@ -90,11 +147,11 @@ type vrow struct {
 }
 
 // vrows builds the visible row set in the current sort/filter order and
-// clamps cursor and scroll into range. Every row is exactly three lines (see
-// watchRow), so the frame height is stable no matter how much — or how
-// little — is known about a host.
+// clamps cursor and scroll into range. Every row is exactly the lines of its
+// layout band (two, three or four — see watchRow*), so the frame height is
+// stable no matter how much — or how little — is known about a host.
 func vrows(st *viewState, hosts []string, info map[string]hostInfo, rates map[string]traffic.Rate,
-	stats map[string]*hostStat, iv int) []vrow {
+	stats map[string]*hostStat, iv int, layout int) []vrow {
 
 	order := make([]int, len(hosts))
 	for i := range hosts {
@@ -134,7 +191,7 @@ func vrows(st *viewState, hosts []string, info map[string]hostInfo, rates map[st
 			slide: r.RXBytes + r.TXBytes,
 			ping:  stt.ping.avg(),
 			alarm: stt.alarm,
-			lines: watchRow(ip, info[ip], r, stt, iv),
+			lines: watchRowFor(ip, info[ip], r, stt, iv, layout),
 		})
 	}
 	if len(out) == 0 {
@@ -154,6 +211,25 @@ func vrows(st *viewState, hosts []string, info map[string]hostInfo, rates map[st
 	return out
 }
 
+// watchRowFor picks the layout band's row renderer.
+func watchRowFor(ip string, h hostInfo, r traffic.Rate, st *hostStat, iv, layout int) []string {
+	switch layout {
+	case layoutCompact:
+		return watchRowCompact(ip, h, r, st, iv)
+	case layoutWide:
+		return watchRowWide(ip, h, r, st, iv)
+	default:
+		return watchRow(ip, h, r, st, iv)
+	}
+}
+
+// ipCell paints a host's IP in its stable, per-host hue, padded to width. The
+// hue index comes from the hostStat's palette slot, so the same device keeps
+// the same colour on every row and every screen.
+func ipCell(ip string, hue, width int) string {
+	return ux.C(ux.Hue(hue), ux.TruncPad(ip, width))
+}
+
 // watchRow renders the fixed three-line block every dashboard host occupies,
 // sparse or not. The height never changes — a host with no identity and no
 // pings yet still fills all three lines — so rows never make the frame grow
@@ -166,7 +242,7 @@ func watchRow(ip string, h hostInfo, r traffic.Rate, st *hostStat, iv int) []str
 	if st.alarm {
 		badge = ux.C(ux.Red, " ⚠")
 	}
-	line1 := "  " + ux.C(ux.Yellow, ux.TruncPad(ip, 15)) + badge + " " +
+	line1 := "  " + ipCell(ip, st.color, 15) + badge + " " +
 		ux.TruncPad(rateLine(r.RXBytes, r.RXPkts, iv), 21) + "  " +
 		ux.TruncPad(upRateLine(r.TXBytes, r.TXPkts, iv), 21) + "  " +
 		pingCell(st) + " " + grade(st)
@@ -187,12 +263,93 @@ func watchRow(ip string, h hostInfo, r traffic.Rate, st *hostStat, iv int) []str
 	return []string{line1, line2, line3}
 }
 
+// watchRowCompact is the two-line form for terminals under 78 columns: one
+// line of traffic + latency, one line of identity + health. Exactly two lines
+// no matter how little is known.
+func watchRowCompact(ip string, h hostInfo, r traffic.Rate, st *hostStat, iv int) []string {
+	badge := " "
+	if st.alarm {
+		badge = ux.C(ux.Red, "⚠")
+	} else {
+		badge = ux.C(ux.Dim, "·")
+	}
+	line1 := "  " + ipCell(ip, st.color, 12) + " " + badge + " " +
+		ux.TruncPad(rateLine(r.RXBytes, r.RXPkts, iv), 13) + " " +
+		ux.TruncPad(upRateLine(r.TXBytes, r.TXPkts, iv), 13) + " " +
+		pingShort(st)
+
+	line2 := "  "
+	if id := identityLine(h); id != "" {
+		line2 += ux.TruncPad(id, 42)
+	} else {
+		line2 += ux.C(ux.Dim, "unknown device")
+	}
+	if p := statsCompact(st, iv); p != "" {
+		line2 += "  " + p
+	}
+	line2 = ux.TruncPad(line2, 76)
+	return []string{line1, line2}
+}
+
+// watchRowWide is the four-line form for terminals of 116 columns or more:
+// the normal traffic line with wider rate cells, identity, the health line
+// with p50/p95 latency, and a session-totals line (what the detail pane used
+// to hoard, now on every row).
+func watchRowWide(ip string, h hostInfo, r traffic.Rate, st *hostStat, iv int) []string {
+	badge := "  "
+	if st.alarm {
+		badge = ux.C(ux.Red, " ⚠")
+	}
+	line1 := "  " + ipCell(ip, st.color, 15) + badge + " " +
+		ux.TruncPad(rateLine(r.RXBytes, r.RXPkts, iv), 24) + "  " +
+		ux.TruncPad(upRateLine(r.TXBytes, r.TXPkts, iv), 24) + "  " +
+		pingCell(st) + " " + grade(st)
+
+	line2 := "  "
+	if id := identityLine(h); id != "" {
+		line2 += id
+	} else {
+		line2 += ux.C(ux.Dim, "unknown device — no ARP entry")
+	}
+	line2 = ux.TruncPad(line2, 98)
+
+	inner := statsLine(st, iv)
+	if p := st.ping; p.count > 0 {
+		inner += ux.C(ux.Dim, fmt.Sprintf(" · p50 %dms · p95 %dms", p.pct(50), p.pct(95)))
+	}
+	line3 := "  " + ux.TruncPad(inner, 98)
+
+	line4 := ux.C(ux.Dim, fmt.Sprintf("  session ↓ %s · ↑ %s · peak ↓ %s · ↑ %s · bytes ↓ %s · ↑ %s",
+		ux.HumanRate(bps(st.totRX, iv)), ux.HumanRate(bps(st.totTX, iv)),
+		ux.HumanRate(bps(st.peakRX, iv)), ux.HumanRate(bps(st.peakTX, iv)),
+		humanBytes(st.totRX), humanBytes(st.totTX)))
+	return []string{line1, line2, line3, line4}
+}
+
+// statsCompact is the health tail for the compact two-line row.
+func statsCompact(st *hostStat, iv int) string {
+	p := st.ping
+	if p.count+p.drops == 0 {
+		return ux.C(ux.Dim, "no pings yet")
+	}
+	var parts []string
+	if p.last < 0 {
+		parts = append(parts, ux.C(ux.Red, "last ✗"))
+	} else {
+		parts = append(parts, fmt.Sprintf("jitter %dms", p.jitter()))
+	}
+	parts = append(parts, fmt.Sprintf("loss %.0f%%", p.loss()))
+	parts = append(parts, fmt.Sprintf("↓ %s", ux.HumanRate(bps(st.totRX, iv))))
+	parts = append(parts, fmt.Sprintf("↑ %s", ux.HumanRate(bps(st.totTX, iv))))
+	return ux.C(ux.Dim, strings.Join(parts, " · "))
+}
+
 // hostRowLines is the transcript variant of a host block (buildLines): the
 // fixed three-line sparse form below 9 hosts, one compact line when the LAN
 // is big enough that a wall of blocks would drown the output.
 func hostRowLines(ip string, h hostInfo, r traffic.Rate, st *hostStat, iv int, dense bool) []string {
 	if dense {
-		line := "  " + ux.C(ux.Yellow, ux.TruncPad(ip, 15))
+		line := "  " + ipCell(ip, st.color, 15)
 		if st.alarm {
 			line += " " + ux.C(ux.Red, "⚠")
 		}
@@ -259,10 +416,10 @@ func statsLine(st *hostStat, iv int) string {
 	return ux.C(ux.Dim, strings.Join(parts, " · "))
 }
 
-// buildView renders one interactive frame: header strip, the host rows
-// scrolled so the cursor stays visible, the detail pane, the top-talkers
-// pane, totals, and the key-hint footer. height is the terminal height; rows
-// that do not fit scroll instead of overflowing.
+// buildView renders one interactive frame: the screen header, the body for
+// the active screen (host rows, ranked talkers, conversation flows, or the
+// neighbour table), the session totals, and the key-hint footer. height is
+// the terminal height; bodies that do not fit scroll instead of overflowing.
 func buildView(st *viewState, hosts []string, info map[string]hostInfo, rates map[string]traffic.Rate,
 	flows []traffic.Flow, hostSet map[string]bool, stats map[string]*hostStat,
 	env watchEnv, height int) []string {
@@ -270,111 +427,78 @@ func buildView(st *viewState, hosts []string, info map[string]hostInfo, rates ma
 	const (
 		headerH = 4 // rule, status, self/gw, blank
 		footerH = 1
-		totalH  = 3 // rule, TOTAL, blank spacer
+		totalH  = 3 // blank, rule, TOTAL
 	)
-	footerExtra := 0
+	layout := layoutFor(env.width)
+	helpExtra, gcmdExtra := 0, 0
 	if st.showHelp {
-		footerExtra = 2
+		helpExtra = 2
 	}
-	talkH, detailH := paneHeights(st, flows)
+	if st.gCmd != "" {
+		gcmdExtra = 1
+	}
+	overhead := headerH + footerH + helpExtra + gcmdExtra + totalH
 
-	rows := vrows(st, hosts, info, rates, stats, env.iv)
-	mode := "watched set"
-	if st.auto {
-		mode = "LAN watch"
-	}
+	out := envHeader(st, hosts, rates, env)
 
-	out := make([]string, 0, height)
-
-	// ----- header: rule, status line, self/gateway line, blank -----
-	ruleTxt := "  ── " + env.nic
-	if env.subnet != "" {
-		ruleTxt += " · " + env.subnet
-	}
-	ruleTxt += " " + strings.Repeat("─", 22)
-	out = append(out, ux.C(ux.Cyan, ruleTxt))
-	status := "  " + ux.C(ux.Bold+ux.Header, "LIVE LAN WATCH") +
-		ux.C(ux.Dim, fmt.Sprintf("   every %ds · %d host%s · %s · sort %s · %d up",
-			env.iv, len(hosts), plural(len(hosts)), mode, st.sortName(), env.up))
-	status += ux.C(ux.Dim, "  "+elapsed(env.start))
-	if env.alarmOn {
-		status += ux.C(ux.Red, "  ⚠")
-	}
-	if !env.hasCounter {
-		status += ux.C(ux.Yellow, "  ¡ speeds-free")
-	}
-	out = append(out, status)
-	gw := "  self " + ux.C(ux.Header, env.selfIP)
-	if env.gwIP != "" {
-		gw += ux.C(ux.Dim, " · gw ") + ux.C(ux.Target, env.gwIP) + " " + gwCell(env.gwRTT)
-	}
-	out = append(out, gw)
-	out = append(out, "")
-
-	// ----- host rows, windowed by line budget so the cursor never leaves the
-	// screen and the frame never overflows a short terminal -----
-	budget := height - headerH - footerH - footerExtra - talkH - detailH - totalH
-	top, end := hostSlice(rows, st.cursor, budget)
-	if len(rows) == 0 {
-		out = append(out, ux.C(ux.Dim, "  no hosts — press a to clear the alarm filter"))
-	}
-	if top > 0 {
-		out = append(out, ux.C(ux.Dim, fmt.Sprintf("  ▴ %d more…", top)))
-	}
-	for i := top; i < end; i++ {
-		vr := rows[i]
-		lines := vr.lines
-		if i == st.cursor && len(lines) > 0 {
-			lines = cursorLines(lines)
+	switch st.screen {
+	case scrTalkers:
+		out = append(out, talkersLines(hosts, info, rates, stats, flows, hostSet, env, height-overhead)...)
+	case scrFlows:
+		out = append(out, flowsLines(flows, hostSet, stats, env, height-overhead)...)
+	case scrArp:
+		out = append(out, arpLines(st, hosts, info, stats, env, height-overhead)...)
+	default:
+		// ----- host rows, windowed by line budget so the cursor never leaves
+		// the screen and the frame never overflows a short terminal -----
+		rows := vrows(st, hosts, info, rates, stats, env.iv, layout)
+		detailH := 0
+		if st.detail && len(rows) > 0 {
+			detailH = 11
 		}
-		out = append(out, lines...)
-	}
-	if end < len(rows) {
-		out = append(out, ux.C(ux.Dim, fmt.Sprintf("  ▾ %d more…", len(rows)-end)))
-	}
-
-	// ----- detail pane for the cursor host -----
-	if st.detail && len(rows) > 0 {
-		ci := ux.Clamp(st.cursor, 0, len(rows)-1)
-		cip := rows[ci].ip
-		out = append(out, detailLines(cip, info[cip], stats[cip], rates[cip], flows, hostSet, env.iv)...)
-	}
-
-	// ----- global top talkers of this interval -----
-	if st.showTalk && len(flows) > 0 {
-		out = append(out, "", ux.C(ux.Bold, "  TOP TALKERS")+ux.C(ux.Dim, "  this interval · bold = watched host"))
-		n := 5
-		if len(flows) < n {
-			n = len(flows)
+		budget := height - headerH - footerH - helpExtra - gcmdExtra - detailH - totalH
+		top, end := hostSlice(rows, st.cursor, budget)
+		if len(rows) == 0 {
+			out = append(out, ux.C(ux.Dim, "  no hosts — press a to clear the alarm filter"))
 		}
-		sort.Slice(flows, func(i, j int) bool { return flows[i].Total() > flows[j].Total() })
-		for _, f := range flows[:n] {
-			out = append(out, flowLine(f, hostSet, env.iv))
+		if top > 0 {
+			out = append(out, ux.C(ux.Dim, fmt.Sprintf("  ▴ %d more…", top)))
+		}
+		for i := top; i < end; i++ {
+			vr := rows[i]
+			lines := vr.lines
+			if i == st.cursor && len(lines) > 0 {
+				lines = cursorLines(lines)
+			}
+			out = append(out, lines...)
+		}
+		if end < len(rows) {
+			out = append(out, ux.C(ux.Dim, fmt.Sprintf("  ▾ %d more…", len(rows)-end)))
+		}
+
+		// ----- detail pane for the cursor host -----
+		if st.detail && len(rows) > 0 {
+			ci := ux.Clamp(st.cursor, 0, len(rows)-1)
+			cip := rows[ci].ip
+			out = append(out, detailLines(cip, info[cip], stats[cip], rates[cip],
+				flows, hostSet, env.iv, netTotals(hosts, rates))...)
 		}
 	}
 
-	// ----- session totals -----
-	var totRX, totTX, totRXp, totTXp int64
-	for _, ip := range hosts {
-		r := rates[ip]
-		totRX += r.RXBytes
-		totTX += r.TXBytes
-		totRXp += r.RXPkts
-		totTXp += r.TXPkts
-	}
+	// ----- session totals (all screens) -----
+	tot := netTotals(hosts, rates)
 	out = append(out, "", ux.C(ux.Dim, "  "+strings.Repeat("─", 40)))
 	out = append(out, fmt.Sprintf("  %-17s %s",
-		ux.C(ux.Bold, "TOTAL"), ux.TruncPad(rateLine(totRX, totRXp, env.iv)+"    "+upRateLine(totTX, totTXp, env.iv), 46)))
+		ux.C(ux.Bold, "TOTAL"), ux.TruncPad(rateLine(tot.rx, tot.rxp, env.iv)+"    "+upRateLine(tot.tx, tot.txp, env.iv), 46)))
 
 	// ----- footer hints -----
-	out = append(out, "  "+ux.C(ux.Dim, "↑↓ host · ⏎ detail · s sort · t talkers · a alarm-only · o settings · g test cmd · h help · q quit"))
+	out = append(out, "  "+ux.C(ux.Dim, footerHint(st)))
 	if st.gCmd != "" {
 		out = append(out, "  "+ux.C(ux.Bold+ux.Green, "⬢ "+st.gCmd)+ux.C(ux.Dim, "   (run it in another terminal)"))
 	}
 	if st.showHelp {
-		out = append(out, ux.C(ux.Dim, "  s cycles traffic → latency → address; ⏎/Tab toggles the detail pane;"))
-		out = append(out, ux.C(ux.Dim, "  o edits settings live (interval, history, alarms, beeps); hold ↑/↓ to scroll fast;"))
-		out = append(out, ux.C(ux.Dim, "  g shows the gnulte command that tests the cursor host; Esc closes panes."))
+		out = append(out, ux.C(ux.Dim, "  1 hosts · 2 talkers (ranked ↓/↑ + whom each talks to) · 3 flows (pairs, root socket)"))
+		out = append(out, ux.C(ux.Dim, "  4 ARP neighbours · s cycles sort · ⏎/Tab detail · o settings · Esc closes panes / back to hosts"))
 	}
 	// Hard guarantee: never draw taller than the terminal (a very short TTY
 	// with every pane open can exhaust even the packed budget).
@@ -382,6 +506,347 @@ func buildView(st *viewState, hosts []string, info map[string]hostInfo, rates ma
 		out = out[:height]
 	}
 	return out
+}
+
+// netTotals sums the whole watched set's rates for the session-total line and
+// the header's net figures.
+type netTotal struct {
+	rx, tx, rxp, txp int64
+}
+
+func netTotals(hosts []string, rates map[string]traffic.Rate) netTotal {
+	var t netTotal
+	for _, ip := range hosts {
+		r := rates[ip]
+		t.rx += r.RXBytes
+		t.tx += r.TXBytes
+		t.rxp += r.RXPkts
+		t.txp += r.TXPkts
+	}
+	return t
+}
+
+// envHeader emits the screen header: rule, status, self/gateway lines and the
+// blank spacer. The status line carries the screen tag, the host count, the
+// LAN-wide net rate and the gateway's RTT context.
+func envHeader(st *viewState, hosts []string, rates map[string]traffic.Rate, env watchEnv) []string {
+	ruleTxt := "  ── " + env.nic
+	if env.subnet != "" {
+		ruleTxt += " · " + env.subnet
+	}
+	ruleTxt += " " + strings.Repeat("─", 22)
+	out := []string{ux.C(ux.Cyan, ruleTxt)}
+
+	status := "  " + ux.C(ux.Bold+ux.Header, "LIVE LAN WATCH") +
+		ux.C(ux.Dim, " · "+screenLabel(st.screen)) +
+		ux.C(ux.Dim, fmt.Sprintf("   every %ds · %d host%s · %s · sort %s · %d up",
+			env.iv, len(hosts), plural(len(hosts)), watchMode(st.auto), st.sortName(), env.up))
+	if env.hasCounter {
+		t := netTotals(hosts, rates)
+		status += ux.C(ux.Dim, fmt.Sprintf(" · net ↓ %s ↑ %s",
+			ux.HumanRate(bps(t.rx, env.iv)), ux.HumanRate(bps(t.tx, env.iv))))
+	} else {
+		status += ux.C(ux.Yellow, "  ¡ speeds-free")
+	}
+	status += ux.C(ux.Dim, "  "+elapsed(env.start))
+	if env.alarmOn {
+		status += ux.C(ux.Red, "  ⚠")
+	}
+	out = append(out, status)
+
+	gw := "  self " + ux.C(ux.Header, env.selfIP)
+	if env.gwIP != "" {
+		gw += ux.C(ux.Dim, " · gw ") + ux.C(ux.Target, env.gwIP) + " " + gwCell(env.gwRTT)
+	}
+	out = append(out, gw)
+	out = append(out, "")
+	return out
+}
+
+func watchMode(auto bool) string {
+	if auto {
+		return "LAN watch"
+	}
+	return "watched set"
+}
+
+// gateLines is the "this screen needs the root capture socket" placeholder —
+// the sudo-gated sections explain themselves instead of rendering an empty
+// table.
+func gateLines(name, why string) []string {
+	return []string{
+		"  " + ux.C(ux.Bold, name) + ux.C(ux.Red, "  ⛔ needs the capture socket (root)"),
+		"",
+		"  " + ux.C(ux.Dim, why),
+		"",
+		"  " + ux.C(ux.Green, "  re-run with: sudo gnulte-lan"),
+		"  " + ux.C(ux.Dim, "  (the watch auto-elevates via sudo — a socket here means root is live)"),
+		"",
+		ux.C(ux.Dim, "  meanwhile the HOSTS screen still shows latency, identity and alarms."),
+	}
+}
+
+// talkersLines is screen 2: every watched host ranked by its combined rate
+// this interval, with a down/up bar split and its peer count, followed by the
+// "communicators" block — the LAN-internal conversation pairs (who talks to
+// whom without leaving the subnet).
+func talkersLines(hosts []string, info map[string]hostInfo, rates map[string]traffic.Rate,
+	stats map[string]*hostStat, flows []traffic.Flow, hostSet map[string]bool,
+	env watchEnv, budget int) []string {
+
+	out := []string{
+		"  " + ux.C(ux.Bold, "TOP TALKERS") + ux.C(ux.Dim, "  by combined rate this interval · bars scale to the busiest host · peers = hosts talked to"),
+	}
+	type tk struct {
+		ip   string
+		rx   int64
+		tx   int64
+		tot  int64
+		peers int
+	}
+	var list []tk
+	var maxR int64
+	for _, ip := range hosts {
+		r := rates[ip]
+		tkt := tk{ip: ip, rx: r.RXBytes, tx: r.TXBytes, tot: r.RXBytes + r.TXBytes}
+		for _, f := range flows {
+			if hostSet[endpointHost(f.A)] && endpointHost(f.A) == ip ||
+				hostSet[endpointHost(f.B)] && endpointHost(f.B) == ip {
+				tkt.peers++
+			}
+		}
+		if tkt.tot > maxR {
+			maxR = tkt.tot
+		}
+		list = append(list, tkt)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].tot != list[j].tot {
+			return list[i].tot > list[j].tot
+		}
+		return list[i].ip < list[j].ip
+	})
+	busy := 0
+	for _, t := range list {
+		if t.tot > 0 {
+			busy++
+		}
+	}
+	if busy == 0 {
+		out = append(out, ux.C(ux.Dim, "  no traffic this interval — every host quiet"))
+		out = append(out, ux.C(ux.Dim, "  (rates need the root capture socket; pings and identity still show on screen 1)"))
+		return out
+	}
+
+	showBars := env.width >= 96
+	for i, t := range list {
+		if len(out) >= budget {
+			out = append(out, ux.C(ux.Dim, fmt.Sprintf("  ▾ %d more…", len(list)-i)))
+			break
+		}
+		line := fmt.Sprintf("  %2d  %s %s", i+1, ipCell(t.ip, stats[t.ip].color, 15), ux.TruncPad(ux.C(ux.Dim, nameOf(info[t.ip])), 18))
+		dl := ux.C(ux.Dim, "↓ "+ux.HumanRate(bps(t.rx, env.iv)))
+		ul := ux.C(ux.Dim, "↑ "+ux.HumanRate(bps(t.tx, env.iv)))
+		if showBars {
+			line += "  " + ux.TruncPad(dl, 12) + " " + bar(t.rx, maxR, 6) +
+				"  " + ux.TruncPad(ul, 12) + " " + bar(t.tx, maxR, 6)
+		} else {
+			line += "  " + ux.TruncPad(dl, 15) + "  " + ux.TruncPad(ul, 15)
+		}
+		line += ux.C(ux.Dim, fmt.Sprintf("  peers %d", t.peers))
+		out = append(out, line)
+	}
+
+	// Communicators: LAN-internal pairs — both ends on the watched subnet.
+	var internal []traffic.Flow
+	for _, f := range flows {
+		if lanPair(f.A, f.B, env.subnet) {
+			internal = append(internal, f)
+		}
+	}
+	if len(internal) > 0 {
+		sort.Slice(internal, func(i, j int) bool { return internal[i].Total() > internal[j].Total() })
+		out = append(out, "", "  "+ux.C(ux.Bold, "COMMUNICATORS")+ux.C(ux.Dim, "  LAN-internal pairs that never leave "+env.subnet))
+		shown := 0
+		for _, f := range internal {
+			if len(out) >= budget {
+				out = append(out, ux.C(ux.Dim, fmt.Sprintf("  ▾ %d more pairs…", len(internal)-shown)))
+				break
+			}
+			out = append(out, pairLine(f, hostSet, stats, env))
+			shown++
+		}
+	}
+	if len(out) == 1 {
+		out = append(out, ux.C(ux.Dim, "  no traffic yet"))
+	}
+	return out
+}
+
+// pairLine is one conversation row for the flows/communicators tables:
+// A ⇄ B with per-direction rates and a ⟷LAN tag for internal pairs.
+func pairLine(f traffic.Flow, hostSet map[string]bool, stats map[string]*hostStat, env watchEnv) string {
+	hue := func(e string) int {
+		if s := stats[endpointHost(e)]; s != nil {
+			return s.color
+		}
+		return 0
+	}
+	at := endpointTxt(f.A, hostSet[endpointHost(f.A)], hue(f.A))
+	bt := endpointTxt(f.B, hostSet[endpointHost(f.B)], hue(f.B))
+	tag := ""
+	if lanPair(f.A, f.B, env.subnet) {
+		tag = ux.C(ux.Cyan, " ⟷LAN")
+	}
+	line := "  " + at + " ⇄ " + bt + tag +
+		ux.C(ux.Dim, "  A→B ") + ux.TruncPad(ux.C(ux.Dim, ux.HumanRate(bps(f.AB, env.iv))), 11) +
+		ux.C(ux.Dim, " B→A ") + ux.TruncPad(ux.C(ux.Dim, ux.HumanRate(bps(f.BA, env.iv))), 11)
+	return line
+}
+
+// endpointTxt names one flow endpoint as "ip:port", truncated to width and
+// painted in the host's hue when it is a watched host (dim otherwise).
+func endpointTxt(e string, watched bool, hue int) string {
+	t := ux.TruncPad(e, 17)
+	if watched {
+		return ux.C(ux.Hue(hue), t)
+	}
+	return ux.C(ux.Dim, t)
+}
+
+// flowsLines is screen 3: the per-conversation table. Byte-accurate pair
+// attribution comes from the raw capture socket, so without it (speeds-free
+// run) the screen explains the sudo requirement instead of guessing.
+func flowsLines(flows []traffic.Flow, hostSet map[string]bool, stats map[string]*hostStat,
+	env watchEnv, budget int) []string {
+
+	if !env.hasCounter {
+		return gateLines("FLOWS",
+			"per-conversation byte attribution needs the raw AF_PACKET socket, which is not open here.")
+	}
+	out := []string{
+		"  " + ux.C(ux.Bold, "FLOWS") + ux.C(ux.Dim, "  conversations this interval · biggest pair first · ⟷LAN = both ends on "+env.subnet),
+	}
+	srt := append([]traffic.Flow(nil), flows...)
+	sort.Slice(srt, func(i, j int) bool { return srt[i].Total() > srt[j].Total() })
+	if len(srt) == 0 {
+		out = append(out, ux.C(ux.Dim, "  no conversations this interval — quiet LAN"))
+		return out
+	}
+	for i, f := range srt {
+		if len(out) >= budget {
+			out = append(out, ux.C(ux.Dim, fmt.Sprintf("  ▾ %d more conversations…", len(srt)-i)))
+			break
+		}
+		out = append(out, pairLine(f, hostSet, stats, env))
+	}
+	return out
+}
+
+// arpLines is screen 4: the neighbour table from /proc/net/arp, refreshed
+// live. Every known MAC gets its vendor and (when it is a watched host) its
+// live ping and health grade; the router and this machine appear too, dimmed.
+func arpLines(st *viewState, hosts []string, info map[string]hostInfo,
+	stats map[string]*hostStat, env watchEnv, budget int) []string {
+
+	out := []string{
+		"  " + ux.C(ux.Bold, "NEIGHBOURS") + ux.C(ux.Dim, "  /proc/net/arp · refreshed live · MAC · vendor · type · ping"),
+	}
+	keys := map[string]bool{}
+	for ip := range env.neigh {
+		keys[ip] = true
+	}
+	for _, ip := range hosts {
+		keys[ip] = true
+	}
+	sorted := make([]string, 0, len(keys))
+	for ip := range keys {
+		sorted = append(sorted, ip)
+	}
+	sort.Slice(sorted, func(i, j int) bool { return ipLess(sorted[i], sorted[j]) })
+	if len(sorted) == 0 {
+		out = append(out, ux.C(ux.Dim, "  empty neighbour table — nothing on the link yet"))
+		return out
+	}
+	for i, ip := range sorted {
+		if len(out) >= budget {
+			out = append(out, ux.C(ux.Dim, fmt.Sprintf("  ▾ %d more neighbours…", len(sorted)-i)))
+			break
+		}
+		known := stats[ip] != nil
+		h := info[ip]
+		mac := env.neigh[ip]
+		vendor := ""
+		if mac != "" {
+			vendor = discover.VendorFor(mac)
+		}
+		var ipTxt string
+		if known {
+			ipTxt = ipCell(ip, stats[ip].color, 15)
+		} else {
+			ipTxt = ux.C(ux.Dim, ux.TruncPad(ip, 15))
+		}
+		line := "  " + ipTxt + "  " + ux.TruncPad(ux.C(ux.Dim, mac), 17) + " " +
+			ux.TruncPad(ux.C(ux.Dim, vendor), 16) + " " +
+			ux.TruncPad(ux.C(ux.Dim, h.Type), 10) + " "
+		if known && h.Host != "" {
+			line += ux.TruncPad(ux.C(ux.Dim, h.Host), 14) + "  "
+		} else {
+			line += ux.TruncPad("", 14) + "  "
+		}
+		if known {
+			line += pingCell(stats[ip]) + " " + grade(stats[ip])
+		} else {
+			line += ux.TruncPad(ux.C(ux.Dim, "no ping watch"), 11)
+		}
+		out = append(out, ux.TruncPad(line, 104))
+	}
+	if !env.hasCounter {
+		out = append(out, ux.C(ux.Dim, "  byte-level ↓/↑ for these neighbours needs the capture socket (screen 3)"))
+	}
+	return out
+}
+
+// footerHint is the one-line key legend for the active screen.
+func footerHint(st *viewState) string {
+	switch st.screen {
+	case scrTalkers:
+		return "  talkers · 1/3/4 screens · ↑↓ host · ⏎ detail · h help · q quit"
+	case scrFlows:
+		return "  flows · 1/2/4 screens · ↑↓ host · ⏎ detail · h help · q quit"
+	case scrArp:
+		return "  neighbours · 1/2/3 screens · ↑↓ host · ⏎ detail · h help · q quit"
+	default:
+		return "  ↑↓ host · ⏎ detail · s sort · a alarm-only · g test cmd · 2-4 screens · o settings · h help · q quit"
+	}
+}
+
+func nameOf(h hostInfo) string {
+	if h.Host != "" {
+		return h.Host
+	}
+	if h.Type != "" {
+		return h.Type
+	}
+	if h.Vendor != "" {
+		return h.Vendor
+	}
+	return ""
+}
+
+// lanPair reports whether both ends of a conversation fall inside the watched
+// subnet — i.e. it is a LAN-internal "communicator" pair.
+func lanPair(a, b, subnet string) bool {
+	if subnet == "" {
+		return false
+	}
+	_, n, err := net.ParseCIDR(subnet)
+	if err != nil {
+		return false
+	}
+	ia := net.ParseIP(endpointHost(a))
+	ib := net.ParseIP(endpointHost(b))
+	return ia != nil && ib != nil && n.Contains(ia) && n.Contains(ib)
 }
 
 // gwCell renders the gateway's last RTT: "--" before the first sample, "✗"
@@ -395,22 +860,6 @@ func gwCell(rtt int) string {
 	default:
 		return ux.C(ux.Green, "↔ "+fmt.Sprintf("%dms", rtt))
 	}
-}
-
-// paneHeights is how many fixed lines the detail and talkers panes consume,
-// worst case (a detail pane can stretch to eleven lines with three flows).
-func paneHeights(st *viewState, flows []traffic.Flow) (talkH, detailH int) {
-	if st.showTalk && len(flows) > 0 {
-		n := 5
-		if len(flows) < n {
-			n = len(flows)
-		}
-		talkH = n + 2 // blank + title + rows
-	}
-	if st.detail {
-		detailH = 11
-	}
-	return talkH, detailH
 }
 
 // hostSlice picks the [start,end) host rows that fit inside the line budget,
@@ -477,12 +926,12 @@ func cursorLines(lines []string) []string {
 }
 
 // detailLines renders the selected host's information pane: identity, rates,
-// session averages, health verdict, latency history, the exact gnulte command
-// that would test it, and the flows it is involved in this interval.
+// session averages, health verdict, latency history with percentiles, the
+// exact gnulte command that would test it, and the flows it is involved in.
 func detailLines(ip string, h hostInfo, st *hostStat, r traffic.Rate,
-	flows []traffic.Flow, hostSet map[string]bool, iv int) []string {
+	flows []traffic.Flow, hostSet map[string]bool, iv int, tot netTotal) []string {
 
-	head := "  ── " + ux.C(ux.Bold, "DETAIL · "+ip)
+	head := "  ── " + ux.C(ux.Bold, "DETAIL · "+ipCell(ip, st.color, 0))
 	if h.Host != "" {
 		head += ux.C(ux.Dim, "  ("+h.Host+")")
 	}
@@ -504,6 +953,14 @@ func detailLines(ip string, h hostInfo, st *hostStat, r traffic.Rate,
 	out = append(out, "     "+ux.TruncPad(dl+"  "+ul, 50)+ux.C(ux.Dim, peak))
 	out = append(out, "     "+ux.C(ux.Dim, avg))
 
+	// The host's share of this interval's LAN traffic.
+	if tot.rx+tot.tx > 0 && st.totRX+st.totTX > 0 {
+		share := fmt.Sprintf("share of net ↓ %.0f%% · ↑ %.0f%%",
+			float64(st.totRX)*100/float64(tot.rx+tot.tx),
+			float64(st.totTX)*100/float64(tot.rx+tot.tx))
+		out = append(out, "     "+ux.C(ux.Dim, share))
+	}
+
 	// Health verdict: is this device a sensible GNULTE test target right now?
 	out = append(out, "     "+grade(st)+" "+healthText(st))
 
@@ -512,8 +969,8 @@ func detailLines(ip string, h hostInfo, st *hostStat, r traffic.Rate,
 	if st.ping.last < 0 {
 		lastS = "✗"
 	}
-	pl := fmt.Sprintf("ping last %s · avg %dms · min %dms · max %dms · loss %.0f%% · jitter %dms",
-		lastS, st.ping.avg(), st.ping.min, st.ping.max, st.ping.loss(), st.ping.jitter())
+	pl := fmt.Sprintf("ping last %s · avg %dms · p50 %dms · p95 %dms · min %dms · max %dms · loss %.0f%% · jitter %dms",
+		lastS, st.ping.avg(), st.ping.pct(50), st.ping.pct(95), st.ping.min, st.ping.max, st.ping.loss(), st.ping.jitter())
 	out = append(out, "     "+ux.C(ux.Dim, pl))
 	spk := "  latency " + ux.C(ux.Cyan, ux.SparkRTT(st.ping.samples, 26))
 	spk += "   ↓ " + ux.C(ux.Cyan, sparkRates(st.rxHist, 12))
@@ -563,6 +1020,39 @@ func healthText(st *hostStat) string {
 	default:
 		return ux.C(ux.Green, "stable — a good GNULTE test target")
 	}
+}
+
+// bar renders one host's rate as a short horizontal bar scaled to the busiest
+// host in the list, using the eight block levels. Cells the value fully
+// covers are solid █; the cell the value lands in is partially filled; the
+// rest stay blank, so bars fill left to right like iftop.
+func bar(v, max int64, width int) string {
+	if width <= 0 || max <= 0 {
+		return ""
+	}
+	runes := []rune("▁▂▃▄▅▆▇█")
+	out := make([]rune, width)
+	frac := float64(v) / float64(max)
+	for i := 0; i < width; i++ {
+		lo := float64(i) / float64(width)
+		hi := float64(i+1) / float64(width)
+		switch {
+		case frac >= hi:
+			out[i] = runes[7] // fully covered cell
+		case frac <= lo:
+			out[i] = ' '
+		default:
+			level := int((frac-lo)/(hi-lo)*8 + 0.5)
+			if level < 1 {
+				level = 1
+			}
+			if level > 8 {
+				level = 8
+			}
+			out[i] = runes[level-1]
+		}
+	}
+	return string(out)
 }
 
 // sparkRates maps a bounded byte-rate history to block levels, scaled so the

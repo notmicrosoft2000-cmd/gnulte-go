@@ -112,6 +112,25 @@ func TestTypeColorHues(t *testing.T) {
 	}
 }
 
+// TestHostHuesAreDistinctAndCycle pins the per-IP palette: eight hues, each
+// distinct, wrapping for out-of-range and negative indexes.
+func TestHostHuesAreDistinctAndCycle(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < NHostHues; i++ {
+		h := Hue(i)
+		if h == "" || h == Dim || h == Red {
+			t.Fatalf("Hue(%d) = %q — palette must avoid the dim/red health colours", i, h)
+		}
+		if seen[h] {
+			t.Fatalf("Hue(%d) repeats %q — hues must be distinct", i, h)
+		}
+		seen[h] = true
+	}
+	if Hue(0) != Hue(NHostHues) || Hue(0) != Hue(-NHostHues) {
+		t.Fatalf("Hue must cycle: Hue(0)=%q Hue(N)=%q Hue(-N)=%q", Hue(0), Hue(NHostHues), Hue(-NHostHues))
+	}
+}
+
 func TestDeviceIPCode(t *testing.T) {
 	if got := DeviceIPCode(true, "Phone"); got != Header {
 		t.Errorf("self host should be Header, got %q", got)

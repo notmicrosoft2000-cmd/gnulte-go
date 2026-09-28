@@ -50,6 +50,7 @@ func printBanner() {
 	fmt.Println("  " + ux.C(ux.Bold+ux.Header, "GNULTE-LAN v"+version) +
 		ux.C(ux.Dim, "  ·  the live LAN watch — who is here, how fast, who talks to whom"))
 	fmt.Println("  " + ux.C(ux.Dim, "passive watch only: counts packets and pings, never shapes or intercepts"))
+	fmt.Println("  " + ux.C(ux.Dim, "screens: 1 hosts · 2 talkers · 3 flows (root) · 4 neighbours · each IP keeps one colour"))
 	fmt.Println(ux.C(ux.Dim, line))
 	fmt.Println()
 }
@@ -62,6 +63,8 @@ func purpose() string {
 		"  crosses a rate or latency threshold. Run with no -t to watch the whole LAN.\n" +
 		"  It is passive — frames are only counted, nothing is shaped or intercepted.\n\n" +
 		"  With no arguments it auto-discovers the subnet (your host and the router are\n" +
-		"  skipped). Keys while watching: ↑↓ host · ⏎ detail · s sort · t talkers ·\n" +
-		"  a alarm-only · o settings · h help · q quit."
+		"  skipped). It is a four-screen console: 1 hosts · 2 talkers (ranked ↓/↑ with\n" +
+		"  bars and peers) · 3 flows (per-pair conversations, needs the root capture\n" +
+		"  socket) · 4 ARP neighbours. Keys: ↑↓ host · ⏎ detail · s sort · a alarm-only ·\n" +
+		"  o settings · h help · q quit. Every IP keeps one stable colour across screens."
 }

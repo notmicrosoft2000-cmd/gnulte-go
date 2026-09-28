@@ -31,12 +31,16 @@
 // It is passive: it captures only frame counts and pings, and never shapes,
 // spoofs or intercepts traffic — gnulte itself is the tool for that.
 //
-// The live view is interactive: arrows move the host cursor (hold one to
-// scroll fast), ⏎ opens a detail pane with a latency sparkline and the exact
-// gnulte command to test the host (g echoes it under the footer), s re-sorts,
-// t toggles the top talkers, a filters to alarming hosts, o opens the
-// settings editor mid-watch, and q quits. Piped runs fall back to a plain
-// per-tick transcript, and --export streams the same samples as CSV.
+// The live view is a four-screen console: arrows move the host cursor (hold
+// one to scroll fast), ⏎ opens a detail pane with a latency sparkline, the
+// exact gnulte command to test the host (g echoes it under the footer), and
+// the number keys (or t/f/n) switch screens — 1 hosts, 2 talkers ranked by
+// rate with bars and peers, 3 per-pair conversation flows (needs the root
+// capture socket), 4 the ARP neighbour table. s re-sorts, a filters to
+// alarming hosts, o opens the settings editor mid-watch, h expands the hints
+// and q quits. Every host keeps one stable hue across screens so you can
+// follow a device by colour. Piped runs fall back to a plain per-tick
+// transcript, and --export streams the same samples as CSV.
 package main
 
 import (
@@ -44,6 +48,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -65,7 +70,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "13.4"
+const version = "13.5"
 
 // hostInfo is the identity enrichment for one watched host.
 type hostInfo struct {
@@ -149,10 +154,32 @@ func (h *pinger) jitter() int64 {
 	return dev / int64(n)
 }
 
+// pct returns the p-th percentile (nearest-rank) of the recent RTT ring, so
+// the wide rows and the detail pane can show p50/p95 alongside the average.
+func (h *pinger) pct(p int) int64 {
+	if len(h.samples) == 0 {
+		return 0
+	}
+	cp := append([]int(nil), h.samples...)
+	sort.Ints(cp)
+	idx := (p*len(cp) + 99) / 100
+	if idx < 1 {
+		idx = 1
+	}
+	if idx > len(cp) {
+		idx = len(cp)
+	}
+	return int64(cp[idx-1])
+}
+
 // hostStat is everything a watched host accumulates for the dashboard and the
 // end-of-session report: rates, latency history, and totals.
 type hostStat struct {
 	ping pinger
+
+	// color is the host's slot in the shared per-IP hue palette, assigned in
+	// appearance order so each device keeps one stable colour across screens.
+	color int
 
 	rxHist []int64 // per-tick received bytes (bounded), becomes the report sparkline
 	txHist []int64
@@ -358,12 +385,17 @@ func main() {
 		defer counter.Close()
 	}
 
-	view := &viewState{showTalk: true, auto: subnet != ""}
+	view := &viewState{auto: subnet != ""}
 
 	stats := make(map[string]*hostStat, len(hosts))
-	for _, ip := range hosts {
-		stats[ip] = &hostStat{}
+	for i, ip := range hosts {
+		// One stable hue per host, in appearance order — the colour travels
+		// through every row, screen and tick.
+		stats[ip] = &hostStat{color: i}
 	}
+	// The kernel neighbour table is cheap to read fresh whenever the ARP
+	// screen is up; everything else reuses the discovery-time identity.
+	lastNeigh := arpTable(nic)
 	sess := &lanSession{
 		iface:  nic,
 		subnet: subnet,
@@ -473,8 +505,14 @@ func main() {
 			view.detail = !view.detail
 			return true, false
 		case tui.KeyEsc:
+			// Esc peels one layer: an open detail pane closes, a secondary
+			// screen falls back to hosts, and only then does it quit.
 			if view.detail {
 				view.detail = false
+				return true, false
+			}
+			if view.screen != scrHosts {
+				view.screen = scrHosts
 				return true, false
 			}
 			return true, true
@@ -483,13 +521,25 @@ func main() {
 			case 'q', 'Q':
 				return true, true
 			case 's', 'S':
+				view.screen = scrHosts
+				view.detail = false
 				view.sortMode = (view.sortMode + 1) % 3
-				return true, false
-			case 't', 'T':
-				view.showTalk = !view.showTalk
 				return true, false
 			case 'a', 'A':
 				view.alarmOnly = !view.alarmOnly
+				view.screen = scrHosts
+				return true, false
+			case '1':
+				view.screen = scrHosts
+				return true, false
+			case '2', 't', 'T':
+				view.screen = scrTalkers
+				return true, false
+			case '3', 'f', 'F':
+				view.screen = scrFlows
+				return true, false
+			case '4', 'n', 'N':
+				view.screen = scrArp
 				return true, false
 			case 'g', 'G':
 				if view.currentIP != "" {
@@ -552,6 +602,9 @@ func main() {
 				up++
 			}
 		}
+		if view.screen == scrArp {
+			lastNeigh = arpTable(nic)
+		}
 		env := watchEnv{
 			nic:        nic,
 			subnet:     subnet,
@@ -563,6 +616,8 @@ func main() {
 			up:         up,
 			alarmOn:    alarmOn,
 			hasCounter: hasCounter,
+			width:      ux.Width(),
+			neigh:      lastNeigh,
 		}
 		scr.Draw(buildView(view, hosts, info, lastRates, lastFlows, hostSet, stats, env, ux.Height()))
 	}
@@ -778,6 +833,41 @@ func enrich(ctx context.Context, iface string, hosts []string, neigh map[string]
 		}(ip)
 	}
 	wg.Wait()
+	return out
+}
+
+// arpTable reads the kernel neighbour table (ip → MAC) for one interface.
+// Unlike the discovery-time enrichment it is re-read whenever the ARP screen
+// is up, so the neighbour view stays live without a rescan.
+func arpTable(iface string) map[string]string {
+	f, err := os.Open("/proc/net/arp")
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	return parseArp(f, iface)
+}
+
+// parseArp parses /proc/net/arp rows into ip → MAC, optionally filtered to one
+// interface. Separated from arpTable so tests can feed it a fixture.
+func parseArp(r io.Reader, iface string) map[string]string {
+	out := map[string]string{}
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+		f := strings.Fields(sc.Text())
+		if len(f) < 6 {
+			continue
+		}
+		if iface != "" && f[5] != iface {
+			continue
+		}
+		if net.ParseIP(f[0]) == nil {
+			continue
+		}
+		if mac := strings.ToUpper(f[3]); mac != "" && mac != "00:00:00:00:00:00" {
+			out[f[0]] = mac
+		}
+	}
 	return out
 }
 

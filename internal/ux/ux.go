@@ -182,6 +182,34 @@ func DeviceIPCode(isSelf bool, typ string) string {
 	return TypeColor(typ)
 }
 
+// Host hue palette. Red is deliberately absent (it means "alarm"), as is dim
+// (it means "unknown"), so a host's row colour never collides with a health
+// verdict. The first five are the bright variants, the last three their base
+// forms — eight hues cycle per host in appearance order.
+const NHostHues = 8
+
+var hostHues = [NHostHues]string{
+	"\033[1;36m", // bright cyan
+	"\033[1;33m", // yellow (target hue)
+	"\033[1;35m", // bright magenta
+	"\033[1;32m", // bright green
+	"\033[1;34m", // bright blue
+	"\033[0;36m", // cyan
+	"\033[0;35m", // magenta
+	"\033[0;32m", // green
+}
+
+// Hue returns a stable ANSI colour for the host at palette position i: one
+// hue per IP, so a device stays the same colour across rows, screens and
+// ticks — find it by colour alone. Out-of-range and negative indexes wrap
+// into the palette.
+func Hue(i int) string {
+	if i < 0 {
+		i = -i
+	}
+	return hostHues[i%NHostHues]
+}
+
 // Trunc ellipsizes s at n runes.
 func Trunc(s string, n int) string {
 	r := []rune(s)

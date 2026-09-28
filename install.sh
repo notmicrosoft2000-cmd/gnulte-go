@@ -7,7 +7,6 @@ set -euo pipefail
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BINDIR="${BINDIR:-/usr/local/bin}"
 DOCDIR="/usr/local/share/doc/gnulte-go"
-VERSION="11.0"
 
 # --- root handling ---
 
@@ -55,14 +54,19 @@ for f in gnulte gnulte-scan gnulte-wifi gnulte-traffic gnulte-devices; do
         exit 1
     fi
 done
-if ! ./gnulte --version | grep -q "v${VERSION}"; then
-    echo "gnulte does not report v${VERSION}; aborting." >&2
+# The version is read from the freshly built tool — never hard-coded — so the
+# installer cannot silently drift behind the source tree.
+VERSION="$(./gnulte --version | grep -oE 'v[0-9]+\.[0-9]+' | head -1 || true)"
+if [[ -z "$VERSION" ]]; then
+    echo "gnulte does not report a version number; aborting." >&2
     exit 1
 fi
-if ! ./gnulte-traffic --version | grep -q "v${VERSION}"; then
-    echo "gnulte-traffic does not report v${VERSION}; aborting." >&2
-    exit 1
-fi
+for b in gnulte gnulte-scan gnulte-wifi gnulte-traffic gnulte-devices; do
+    if ! "./$b" --version 2>/dev/null | grep -q "$VERSION"; then
+        echo "$b does not report $VERSION; aborting." >&2
+        exit 1
+    fi
+done
 
 echo "[*] installing to ${BINDIR}..."
 mkdir -p "$BINDIR"
@@ -88,7 +92,7 @@ for doc in GNULTE SAFETY DISCLAIMER AUTHORIZED-USE NETWORK-TESTING; do
 done
 
 echo ""
-echo "GNULTE v${VERSION} installed successfully."
+echo "GNULTE ${VERSION} installed successfully."
 echo "  Binaries: ${BINDIR}/gnulte, ${BINDIR}/gnulte-scan, ${BINDIR}/gnulte-wifi, ${BINDIR}/gnulte-traffic, ${BINDIR}/gnulte-devices"
 echo "  Docs:     ${DOCDIR}/"
 echo ""

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gnulte-go/internal/traffic"
+	"gnulte-go/internal/ux"
 )
 
 func testHosts() ([]string, map[string]*hostStat) {
@@ -30,7 +31,7 @@ func TestVrowsTrafficSort(t *testing.T) {
 		"192.168.100.40":  {RXBytes: 50_000, TXBytes: 500_000},
 		"192.168.100.207": {RXBytes: 2_000_000, TXBytes: 800_000},
 	}
-	rows := vrows(st, hosts, nil, rates, stats, 1, false)
+	rows := vrows(st, hosts, nil, rates, stats, 1)
 	want := []string{"192.168.100.13", "192.168.100.207", "192.168.100.40"}
 	for i, w := range want {
 		if rows[i].ip != w {
@@ -43,7 +44,7 @@ func TestVrowsTrafficSort(t *testing.T) {
 func TestVrowsLatencySort(t *testing.T) {
 	hosts, stats := testHosts()
 	st := &viewState{sortMode: sortPing}
-	rows := vrows(st, hosts, nil, map[string]traffic.Rate{}, stats, 1, false)
+	rows := vrows(st, hosts, nil, map[string]traffic.Rate{}, stats, 1)
 	if rows[0].ip != "192.168.100.40" {
 		t.Fatalf("sortPing first = %s, want the 180ms host", rows[0].ip)
 	}
@@ -54,7 +55,7 @@ func TestVrowsCursorClamp(t *testing.T) {
 	hosts, stats := testHosts()
 	// Only one host alarms; with the alarm filter, cursor 5 must clamp to 0.
 	st := &viewState{alarmOnly: true, cursor: 5}
-	rows := vrows(st, hosts, nil, map[string]traffic.Rate{}, stats, 1, false)
+	rows := vrows(st, hosts, nil, map[string]traffic.Rate{}, stats, 1)
 	if len(rows) != 1 || rows[0].ip != "192.168.100.13" {
 		t.Fatalf("alarm-only filter rows = %v, want just the alarming host", rowsIPs(rows))
 	}
@@ -76,13 +77,62 @@ func TestHostRowLinesDenseMarksAlarm(t *testing.T) {
 	}
 }
 
+// TestWatchRowStableHeight pins the invariant behind the "no jumping" fix:
+// every host occupies exactly three lines no matter how little is known, so
+// rows arriving (or an identity resolving mid-watch) never resizes the frame.
+func TestWatchRowStableHeight(t *testing.T) {
+	cases := map[string]*hostStat{
+		"bare": &hostStat{},
+		"pings": func() *hostStat {
+			s := &hostStat{}
+			s.ping.add(20, 60)
+			return s
+		}(),
+		"alarmed": func() *hostStat {
+			s := &hostStat{}
+			s.ping.add(120, 60)
+			s.alarm = true
+			return s
+		}(),
+	}
+	for name, st := range cases {
+		rows := watchRow("192.0.2.10", hostInfo{Host: "cassie-phone"}, traffic.Rate{TXBytes: 5000}, st, 1)
+		if len(rows) != 3 {
+			t.Fatalf("%s: %d lines, want 3\n%v", name, len(rows), rows)
+		}
+		for _, ln := range rows {
+			if ux.RuneLen(ux.StripAnsi(ln)) > 80 {
+				t.Fatalf("%s: row over 80 cols: %q", name, ln)
+			}
+		}
+	}
+	// An alarming host must not push its rate columns right (the badge column
+	// is reserved): the "↓" of both rows must start at the same column.
+	quiet := watchRow("192.0.2.10", hostInfo{}, traffic.Rate{TXBytes: 1}, &hostStat{}, 1)
+	loud := watchRow("192.0.2.10", hostInfo{}, traffic.Rate{TXBytes: 1}, func() *hostStat {
+		s := &hostStat{}
+		s.ping.add(20, 60)
+		s.alarm = true
+		return s
+	}(), 1)
+	col := func(s string) int { return strings.Index(s, "↓") }
+	if col(quiet[0]) != col(loud[0]) {
+		t.Fatalf("alarm badge shifts rate column: quiet ↓ at %d, loud at %d\n%q\n%q",
+			col(quiet[0]), col(loud[0]), quiet[0], loud[0])
+	}
+}
+
 // TestBuildViewHasCursorAndFooter renders a frame and checks the cursor
 // marker and the key hints footer are present.
 func TestBuildViewHasCursorAndFooter(t *testing.T) {
 	hosts, stats := testHosts()
 	st := &viewState{}
-	out := buildView(st, hosts, nil, map[string]traffic.Rate{}, nil, nil, stats,
-		"wlan0", "192.168.100.0/24", 1, time.Now(), true, true, 24)
+	env := watchEnv{
+		nic: "wlan0", subnet: "192.168.100.0/24",
+		selfIP: "192.168.100.207", gwIP: "192.168.100.1", gwRTT: 3,
+		iv: 1, start: time.Now(), alarmOn: true, hasCounter: true,
+	}
+	out := buildView(st, hosts, nil, map[string]traffic.Rate{}, nil, nil, stats, env, 24)
 	all := strings.Join(out, "\n")
 	if !strings.Contains(all, "▸") {
 		t.Fatalf("frame missing cursor marker:\n%s", all)
@@ -90,22 +140,29 @@ func TestBuildViewHasCursorAndFooter(t *testing.T) {
 	if !strings.Contains(all, "↑↓ host · ⏎ detail · s sort") {
 		t.Fatalf("frame missing key hints:\n%s", all)
 	}
-	if !strings.Contains(all, "LIVE WATCH") {
+	if !strings.Contains(all, "LIVE LAN WATCH") {
 		t.Fatalf("frame missing header:\n%s", all)
+	}
+	if !strings.Contains(all, "self 192.168.100.207") {
+		t.Fatalf("frame missing self line:\n%s", all)
+	}
+	if !strings.Contains(all, "gw 192.168.100.1") || !strings.Contains(all, "↔ 3ms") {
+		t.Fatalf("frame missing gateway latency:\n%s", all)
 	}
 }
 
-// TestBuildViewDetailPane shows the identity and latency of the cursor host.
+// TestBuildViewDetailPane shows the identity and latency of the cursor host,
+// plus the gnulte test recipe.
 func TestBuildViewDetailPane(t *testing.T) {
 	hosts, stats := testHosts()
 	info := map[string]hostInfo{
 		"192.168.100.13": {IP: "192.168.100.13", MAC: "A4:83:E7:12:34:56", Vendor: "Apple, Inc.", Type: "phone", Host: "cassie-phone"},
 	}
 	st := &viewState{detail: true, cursor: 0}
-	out := buildView(st, hosts, info, map[string]traffic.Rate{}, nil, nil, stats,
-		"wlan0", "", 1, time.Now(), false, true, 30)
+	env := watchEnv{nic: "wlan0", iv: 1, start: time.Now(), hasCounter: true, gwRTT: -2}
+	out := buildView(st, hosts, info, map[string]traffic.Rate{}, nil, nil, stats, env, 30)
 	all := strings.Join(out, "\n")
-	for _, want := range []string{"DETAIL", "cassie-phone", "Apple, Inc."} {
+	for _, want := range []string{"DETAIL", "cassie-phone", "Apple, Inc.", "test with: gnulte -t 192.168.100.13"} {
 		if !strings.Contains(all, want) {
 			t.Fatalf("detail pane missing %q:\n%s", want, all)
 		}
@@ -142,8 +199,8 @@ func TestBuildViewNeverExceedsHeight(t *testing.T) {
 	st := &viewState{detail: true, showTalk: true, showHelp: true, alarmOnly: true}
 	flows := []traffic.Flow{{A: "192.168.100.13:443", B: "151.101.1.69:443", AB: 1000, BA: 200}}
 	for _, h := range []int{10, 12, 18, 24, 40} {
-		out := buildView(st, hosts, nil, map[string]traffic.Rate{}, flows, nil, stats,
-			"wlan0", "192.168.100.0/24", 1, time.Now(), true, false, h)
+		env := watchEnv{nic: "wlan0", subnet: "192.168.100.0/24", iv: 1, start: time.Now(), alarmOn: true, gwRTT: -2}
+		out := buildView(st, hosts, nil, map[string]traffic.Rate{}, flows, nil, stats, env, h)
 		if len(out) > h {
 			t.Fatalf("height %d: frame has %d lines, want ≤ %d:\n%v", h, len(out), h, out)
 		}

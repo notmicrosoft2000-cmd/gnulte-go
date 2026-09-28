@@ -41,9 +41,10 @@ type viewState struct {
 	detail    bool // host detail pane open, for the cursor host
 	showTalk  bool // global top-talkers pane
 	showHelp  bool // expanded key hints
-	scroll    int  // host rows scrolled off the top
 	auto      bool // whole-LAN watch mode (router skipped)
 	count     int  // how many rows the last draw showed (after the alarm filter)
+	currentIP string
+	gCmd      string // transient "gnulte -t <ip>" hint shown under the footer
 }
 
 // Row ordering modes.
@@ -64,6 +65,21 @@ func (s *viewState) sortName() string {
 	}
 }
 
+// watchEnv is the frame-time environment the view needs beyond the watched
+// rows themselves: the network the watch runs on, the operator's own machine,
+// the gateway's last latency, and the aggregate flags.
+type watchEnv struct {
+	nic, subnet string
+	selfIP      string
+	gwIP        string
+	gwRTT       int // gateway RTT ms: -2 not tried yet, -1 last attempt failed
+	iv          int
+	start       time.Time
+	up          int // hosts with at least one successful ping
+	alarmOn     bool
+	hasCounter  bool
+}
+
 // vrow is one host row with its sort keys and rendered lines precomputed.
 type vrow struct {
 	ip    string
@@ -74,10 +90,11 @@ type vrow struct {
 }
 
 // vrows builds the visible row set in the current sort/filter order and
-// clamps cursor and scroll into range. dense selects the one-line-per-host
-// layout for large LANs.
+// clamps cursor and scroll into range. Every row is exactly three lines (see
+// watchRow), so the frame height is stable no matter how much — or how
+// little — is known about a host.
 func vrows(st *viewState, hosts []string, info map[string]hostInfo, rates map[string]traffic.Rate,
-	stats map[string]*hostStat, iv int, dense bool) []vrow {
+	stats map[string]*hostStat, iv int) []vrow {
 
 	order := make([]int, len(hosts))
 	for i := range hosts {
@@ -117,12 +134,13 @@ func vrows(st *viewState, hosts []string, info map[string]hostInfo, rates map[st
 			slide: r.RXBytes + r.TXBytes,
 			ping:  stt.ping.avg(),
 			alarm: stt.alarm,
-			lines: hostRowLines(ip, info[ip], r, stt, iv, dense),
+			lines: watchRow(ip, info[ip], r, stt, iv),
 		})
 	}
 	if len(out) == 0 {
 		st.cursor = 0
 		st.count = 0
+		st.currentIP = ""
 		return out
 	}
 	if st.cursor < 0 {
@@ -131,50 +149,114 @@ func vrows(st *viewState, hosts []string, info map[string]hostInfo, rates map[st
 	if st.cursor > len(out)-1 {
 		st.cursor = len(out) - 1
 	}
-	if st.scroll > st.cursor {
-		st.scroll = st.cursor
-	}
 	st.count = len(out)
+	st.currentIP = out[st.cursor].ip
 	return out
 }
 
-// hostRowLines renders the dashboard lines for one host: the down/up traffic
-// row, then (sparse layout) identity and latency. An alerting host gets a red
-// ⚠ badge right after its address. Shared by the classic transcript
-// (buildLines) and the live view.
-func hostRowLines(ip string, h hostInfo, r traffic.Rate, st *hostStat, iv int, dense bool) []string {
-	label := ux.TruncPad(ip, 17)
-	traffic := fmt.Sprintf("  %s %s",
-		ux.C(ux.Yellow, label),
-		ux.TruncPad(rateLine(r.RXBytes, r.RXPkts, iv)+"   "+upRateLine(r.TXBytes, r.TXPkts, iv), 40))
+// watchRow renders the fixed three-line block every dashboard host occupies,
+// sparse or not. The height never changes — a host with no identity and no
+// pings yet still fills all three lines — so rows never make the frame grow
+// and shrink between ticks. Line 1 is traffic + latency + health glyph, line
+// 2 the identity, line 3 the session health detail.
+func watchRow(ip string, h hostInfo, r traffic.Rate, st *hostStat, iv int) []string {
+	// The badge column is always reserved so alarming hosts do not shift the
+	// rate columns right by a glyph.
+	badge := "  "
 	if st.alarm {
-		// Badge right after the address; cursor marker still leads the row.
-		traffic = "  " + ux.C(ux.Yellow, label) + " " + ux.C(ux.Red, "⚠") + " " +
-			ux.TruncPad(rateLine(r.RXBytes, r.RXPkts, iv)+"   "+upRateLine(r.TXBytes, r.TXPkts, iv), 40)
+		badge = ux.C(ux.Red, " ⚠")
 	}
+	line1 := "  " + ux.C(ux.Yellow, ux.TruncPad(ip, 15)) + badge + " " +
+		ux.TruncPad(rateLine(r.RXBytes, r.RXPkts, iv), 21) + "  " +
+		ux.TruncPad(upRateLine(r.TXBytes, r.TXPkts, iv), 21) + "  " +
+		pingCell(st) + " " + grade(st)
+
+	line2 := "  "
+	if id := identityLine(h); id != "" {
+		line2 += id
+	} else {
+		line2 += ux.C(ux.Dim, "unknown device — no ARP entry")
+	}
+	line2 = ux.TruncPad(line2, 78)
+
+	inner := statsLine(st, iv)
+	line3 := "  " + ux.TruncPad(inner, 66)
+	if st.alarm {
+		line3 = "  " + ux.C(ux.Red, "⚠ ALARM ·") + " " + ux.TruncPad(inner, 66)
+	}
+	return []string{line1, line2, line3}
+}
+
+// hostRowLines is the transcript variant of a host block (buildLines): the
+// fixed three-line sparse form below 9 hosts, one compact line when the LAN
+// is big enough that a wall of blocks would drown the output.
+func hostRowLines(ip string, h hostInfo, r traffic.Rate, st *hostStat, iv int, dense bool) []string {
 	if dense {
-		line := traffic + "  " + pingShort(st)
+		line := "  " + ux.C(ux.Yellow, ux.TruncPad(ip, 15))
+		if st.alarm {
+			line += " " + ux.C(ux.Red, "⚠")
+		}
+		line += "  " + ux.TruncPad(rateLine(r.RXBytes, r.RXPkts, iv)+"   "+upRateLine(r.TXBytes, r.TXPkts, iv), 40)
+		line += "  " + pingShort(st)
 		if short := idShort(h); short != "" {
 			line += "  " + ux.C(ux.Dim, short)
 		}
 		return []string{line}
 	}
-	lines := []string{traffic}
-	id := identityLine(h)
-	switch {
-	case id == "":
-		id = "  " + ux.C(ux.Dim, "no identity — ARP entry not found")
-	default:
-		id = "  " + id
+	return watchRow(ip, h, r, st, iv)
+}
+
+// pingCell is the fixed-width "ping Nms" cell of line 1 (never overflows:
+// "--" for a host nothing has answered yet, "✗" for a host whose last ping
+// dropped).
+func pingCell(st *hostStat) string {
+	if st.ping.count+st.ping.drops == 0 {
+		return ux.TruncPad(ux.C(ux.Dim, "ping --"), 11)
 	}
-	lines = append(lines, id)
-	if pl := pingLine(ip, st.ping); pl != "" {
-		lines = append(lines, pl)
+	if st.ping.last < 0 {
+		return ux.TruncPad(ux.C(ux.Red, "ping ✗"), 11)
+	}
+	return ux.TruncPad(ux.C(ux.Dim, fmt.Sprintf("ping %dms", st.ping.last)), 11)
+}
+
+// grade is the one-glyph health verdict shown on line 1: ·  no samples yet,
+// ✓  stable, ~  some loss or jitter, ✗  heavy loss, ⚠  alarming now.
+func grade(st *hostStat) string {
+	p := st.ping
+	if p.count+p.drops == 0 {
+		return ux.C(ux.Dim, "·")
 	}
 	if st.alarm {
-		lines = append(lines, "  "+ux.C(ux.Red, "⚠ ALARM: over threshold (rate or latency)"))
+		return ux.C(ux.Red, "⚠")
 	}
-	return lines
+	switch {
+	case p.loss() >= 10:
+		return ux.C(ux.Red, "✗")
+	case p.loss() > 2 || p.jitter() > 30:
+		return ux.C(ux.Yellow, "~")
+	default:
+		return ux.C(ux.Green, "✓")
+	}
+}
+
+// statsLine is the session health line: jitter (or a red marker when the last
+// ping dropped), loss, and the whole-watch average speeds. It is the line
+// that tells an operator which device is a good GNULTE test target.
+func statsLine(st *hostStat, iv int) string {
+	p := st.ping
+	if p.count+p.drops == 0 {
+		return ux.C(ux.Dim, "no pings yet")
+	}
+	var parts []string
+	if p.last < 0 {
+		parts = append(parts, ux.C(ux.Red, "last ✗"))
+	} else {
+		parts = append(parts, fmt.Sprintf("jitter %dms", p.jitter()))
+	}
+	parts = append(parts, fmt.Sprintf("loss %.0f%%", p.loss()))
+	parts = append(parts, fmt.Sprintf("avg ↓ %s", ux.HumanRate(bps(st.totRX, iv))))
+	parts = append(parts, fmt.Sprintf("↑ %s", ux.HumanRate(bps(st.totTX, iv))))
+	return ux.C(ux.Dim, strings.Join(parts, " · "))
 }
 
 // buildView renders one interactive frame: header strip, the host rows
@@ -183,10 +265,10 @@ func hostRowLines(ip string, h hostInfo, r traffic.Rate, st *hostStat, iv int, d
 // that do not fit scroll instead of overflowing.
 func buildView(st *viewState, hosts []string, info map[string]hostInfo, rates map[string]traffic.Rate,
 	flows []traffic.Flow, hostSet map[string]bool, stats map[string]*hostStat,
-	nic, subnet string, iv int, start time.Time, alarmOn, hasCounter bool, height int) []string {
+	env watchEnv, height int) []string {
 
 	const (
-		headerH = 3 // rule, status, blank
+		headerH = 4 // rule, status, self/gw, blank
 		footerH = 1
 		totalH  = 3 // rule, TOTAL, blank spacer
 	)
@@ -196,31 +278,37 @@ func buildView(st *viewState, hosts []string, info map[string]hostInfo, rates ma
 	}
 	talkH, detailH := paneHeights(st, flows)
 
-	dense := len(hosts) > 8
-	rows := vrows(st, hosts, info, rates, stats, iv, dense)
+	rows := vrows(st, hosts, info, rates, stats, env.iv)
 	mode := "watched set"
 	if st.auto {
 		mode = "LAN watch"
 	}
 
 	out := make([]string, 0, height)
-	ruleTxt := "  ── " + nic
-	if subnet != "" {
-		ruleTxt += " · " + subnet
+
+	// ----- header: rule, status line, self/gateway line, blank -----
+	ruleTxt := "  ── " + env.nic
+	if env.subnet != "" {
+		ruleTxt += " · " + env.subnet
 	}
 	ruleTxt += " " + strings.Repeat("─", 22)
 	out = append(out, ux.C(ux.Cyan, ruleTxt))
-	status := fmt.Sprintf("  %s  every %ds · %d host%s · %s · sort %s",
-		ux.C(ux.Bold+ux.Header, "LIVE WATCH"), iv, len(hosts), plural(len(hosts)),
-		mode, ux.C(ux.Dim, st.sortName()))
-	if alarmOn {
+	status := "  " + ux.C(ux.Bold+ux.Header, "LIVE LAN WATCH") +
+		ux.C(ux.Dim, fmt.Sprintf("   every %ds · %d host%s · %s · sort %s · %d up",
+			env.iv, len(hosts), plural(len(hosts)), mode, st.sortName(), env.up))
+	status += ux.C(ux.Dim, "  "+elapsed(env.start))
+	if env.alarmOn {
 		status += ux.C(ux.Red, "  ⚠")
 	}
-	status += ux.C(ux.Dim, "  "+elapsed(start))
-	if !hasCounter {
+	if !env.hasCounter {
 		status += ux.C(ux.Yellow, "  ¡ speeds-free")
 	}
 	out = append(out, status)
+	gw := "  self " + ux.C(ux.Header, env.selfIP)
+	if env.gwIP != "" {
+		gw += ux.C(ux.Dim, " · gw ") + ux.C(ux.Target, env.gwIP) + " " + gwCell(env.gwRTT)
+	}
+	out = append(out, gw)
 	out = append(out, "")
 
 	// ----- host rows, windowed by line budget so the cursor never leaves the
@@ -249,7 +337,7 @@ func buildView(st *viewState, hosts []string, info map[string]hostInfo, rates ma
 	if st.detail && len(rows) > 0 {
 		ci := ux.Clamp(st.cursor, 0, len(rows)-1)
 		cip := rows[ci].ip
-		out = append(out, detailLines(cip, info[cip], stats[cip], rates[cip], flows, hostSet, iv)...)
+		out = append(out, detailLines(cip, info[cip], stats[cip], rates[cip], flows, hostSet, env.iv)...)
 	}
 
 	// ----- global top talkers of this interval -----
@@ -261,7 +349,7 @@ func buildView(st *viewState, hosts []string, info map[string]hostInfo, rates ma
 		}
 		sort.Slice(flows, func(i, j int) bool { return flows[i].Total() > flows[j].Total() })
 		for _, f := range flows[:n] {
-			out = append(out, flowLine(f, hostSet, iv))
+			out = append(out, flowLine(f, hostSet, env.iv))
 		}
 	}
 
@@ -276,16 +364,17 @@ func buildView(st *viewState, hosts []string, info map[string]hostInfo, rates ma
 	}
 	out = append(out, "", ux.C(ux.Dim, "  "+strings.Repeat("─", 40)))
 	out = append(out, fmt.Sprintf("  %-17s %s",
-		ux.C(ux.Bold, "TOTAL"), ux.TruncPad(rateLine(totRX, totRXp, iv)+"    "+upRateLine(totTX, totTXp, iv), 40)))
-	if alarmOn {
-		out = append(out, ux.C(ux.Red, "  ⚠ one or more hosts are over their alarm threshold"))
-	}
+		ux.C(ux.Bold, "TOTAL"), ux.TruncPad(rateLine(totRX, totRXp, env.iv)+"    "+upRateLine(totTX, totTXp, env.iv), 46)))
 
 	// ----- footer hints -----
-	out = append(out, "  "+ux.C(ux.Dim, "↑↓ host · ⏎ detail · s sort · t talkers · a alarm-only · o settings · h help · q quit"))
+	out = append(out, "  "+ux.C(ux.Dim, "↑↓ host · ⏎ detail · s sort · t talkers · a alarm-only · o settings · g test cmd · h help · q quit"))
+	if st.gCmd != "" {
+		out = append(out, "  "+ux.C(ux.Bold+ux.Green, "⬢ "+st.gCmd)+ux.C(ux.Dim, "   (run it in another terminal)"))
+	}
 	if st.showHelp {
 		out = append(out, ux.C(ux.Dim, "  s cycles traffic → latency → address; ⏎/Tab toggles the detail pane;"))
-		out = append(out, ux.C(ux.Dim, "  o edits settings live (interval, history, alarms, beeps); Esc closes panes."))
+		out = append(out, ux.C(ux.Dim, "  o edits settings live (interval, history, alarms, beeps); hold ↑/↓ to scroll fast;"))
+		out = append(out, ux.C(ux.Dim, "  g shows the gnulte command that tests the cursor host; Esc closes panes."))
 	}
 	// Hard guarantee: never draw taller than the terminal (a very short TTY
 	// with every pane open can exhaust even the packed budget).
@@ -295,8 +384,21 @@ func buildView(st *viewState, hosts []string, info map[string]hostInfo, rates ma
 	return out
 }
 
+// gwCell renders the gateway's last RTT: "--" before the first sample, "✗"
+// after a failed ping, the green RTT otherwise.
+func gwCell(rtt int) string {
+	switch rtt {
+	case -2:
+		return ux.C(ux.Dim, "↔ --")
+	case -1:
+		return ux.C(ux.Red, "↔ ✗")
+	default:
+		return ux.C(ux.Green, "↔ "+fmt.Sprintf("%dms", rtt))
+	}
+}
+
 // paneHeights is how many fixed lines the detail and talkers panes consume,
-// worst case (a detail pane can stretch to nine lines with three flows).
+// worst case (a detail pane can stretch to eleven lines with three flows).
 func paneHeights(st *viewState, flows []traffic.Flow) (talkH, detailH int) {
 	if st.showTalk && len(flows) > 0 {
 		n := 5
@@ -306,7 +408,7 @@ func paneHeights(st *viewState, flows []traffic.Flow) (talkH, detailH int) {
 		talkH = n + 2 // blank + title + rows
 	}
 	if st.detail {
-		detailH = 9
+		detailH = 11
 	}
 	return talkH, detailH
 }
@@ -362,11 +464,12 @@ func cursorLines(lines []string) []string {
 	out := make([]string, len(lines))
 	copy(out, lines)
 	first := out[0]
-	if strings.HasPrefix(first, "  ") {
+	switch {
+	case strings.HasPrefix(first, "  "):
 		first = "▸ " + first[2:]
-	} else if strings.HasPrefix(first, " ") {
+	case strings.HasPrefix(first, " "):
 		first = "▸ " + first[1:]
-	} else {
+	default:
 		first = "▸ " + first
 	}
 	out[0] = first
@@ -374,7 +477,8 @@ func cursorLines(lines []string) []string {
 }
 
 // detailLines renders the selected host's information pane: identity, rates,
-// latency history, and the flows it is involved in this interval.
+// session averages, health verdict, latency history, the exact gnulte command
+// that would test it, and the flows it is involved in this interval.
 func detailLines(ip string, h hostInfo, st *hostStat, r traffic.Rate,
 	flows []traffic.Flow, hostSet map[string]bool, iv int) []string {
 
@@ -396,18 +500,28 @@ func detailLines(ip string, h hostInfo, st *hostStat, r traffic.Rate,
 	dl := ux.TruncPad(rateLine(r.RXBytes, r.RXPkts, iv), 24)
 	ul := ux.TruncPad(upRateLine(r.TXBytes, r.TXPkts, iv), 24)
 	peak := fmt.Sprintf("peak ↓ %s · ↑ %s", ux.HumanRate(bps(st.peakRX, iv)), ux.HumanRate(bps(st.peakTX, iv)))
-	sess := fmt.Sprintf("session ↓ %s · ↑ %s", ux.HumanRate(bps(st.totRX, iv)), ux.HumanRate(bps(st.totTX, iv)))
+	avg := fmt.Sprintf("session avg ↓ %s · ↑ %s", ux.HumanRate(bps(st.totRX, iv)), ux.HumanRate(bps(st.totTX, iv)))
 	out = append(out, "     "+ux.TruncPad(dl+"  "+ul, 50)+ux.C(ux.Dim, peak))
-	out = append(out, "     "+ux.C(ux.Dim, sess))
+	out = append(out, "     "+ux.C(ux.Dim, avg))
+
+	// Health verdict: is this device a sensible GNULTE test target right now?
+	out = append(out, "     "+grade(st)+" "+healthText(st))
 
 	// Latency line + three history sparklines from the same bounded window.
-	pl := fmt.Sprintf("ping last %dms · avg %dms · min %dms · max %dms · loss %.0f%%",
-		st.ping.last, st.ping.avg(), st.ping.min, st.ping.max, st.ping.loss())
+	lastS := fmt.Sprintf("%dms", st.ping.last)
+	if st.ping.last < 0 {
+		lastS = "✗"
+	}
+	pl := fmt.Sprintf("ping last %s · avg %dms · min %dms · max %dms · loss %.0f%% · jitter %dms",
+		lastS, st.ping.avg(), st.ping.min, st.ping.max, st.ping.loss(), st.ping.jitter())
 	out = append(out, "     "+ux.C(ux.Dim, pl))
 	spk := "  latency " + ux.C(ux.Cyan, ux.SparkRTT(st.ping.samples, 26))
 	spk += "   ↓ " + ux.C(ux.Cyan, sparkRates(st.rxHist, 12))
 	spk += "   ↑ " + ux.C(ux.Cyan, sparkRates(st.txHist, 12))
 	out = append(out, spk)
+
+	// The one-command recipe for testing this host with GNULTE.
+	out = append(out, "     "+ux.C(ux.Bold+ux.Green, "test with: gnulte -t "+ip))
 
 	// The flows this host is part of this interval, biggest first.
 	var mine []traffic.Flow
@@ -429,6 +543,26 @@ func detailLines(ip string, h hostInfo, st *hostStat, r traffic.Rate,
 		out = append(out, flowLine(f, hostSet, iv))
 	}
 	return out
+}
+
+// healthText is the plain-language pair of the grade glyph.
+func healthText(st *hostStat) string {
+	p := st.ping
+	if p.count+p.drops == 0 {
+		return ux.C(ux.Dim, "no pings yet — wait for the next interval")
+	}
+	switch {
+	case st.alarm:
+		return ux.C(ux.Red, "over an alarm threshold — check this one")
+	case p.loss() >= 10:
+		return ux.C(ux.Red, "flaky — heavy loss, poor test target")
+	case p.jitter() > 30:
+		return ux.C(ux.Yellow, "jittery — latency swings, retest before trusting")
+	case p.loss() > 2:
+		return ux.C(ux.Yellow, "some loss — watch it a bit longer")
+	default:
+		return ux.C(ux.Green, "stable — a good GNULTE test target")
+	}
 }
 
 // sparkRates maps a bounded byte-rate history to block levels, scaled so the

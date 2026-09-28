@@ -31,10 +31,12 @@
 // It is passive: it captures only frame counts and pings, and never shapes,
 // spoofs or intercepts traffic — gnulte itself is the tool for that.
 //
-// The live view is interactive: arrows move the host cursor, ⏎ opens a detail
-// pane, s re-sorts, t toggles the top talkers, a filters to alarming hosts,
-// o opens the settings editor mid-watch, and q quits. Piped runs fall back to
-// a plain per-tick transcript, and --export streams the same samples as CSV.
+// The live view is interactive: arrows move the host cursor (hold one to
+// scroll fast), ⏎ opens a detail pane with a latency sparkline and the exact
+// gnulte command to test the host (g echoes it under the footer), s re-sorts,
+// t toggles the top talkers, a filters to alarming hosts, o opens the
+// settings editor mid-watch, and q quits. Piped runs fall back to a plain
+// per-tick transcript, and --export streams the same samples as CSV.
 package main
 
 import (
@@ -63,7 +65,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "13.3"
+const version = "13.4"
 
 // hostInfo is the identity enrichment for one watched host.
 type hostInfo struct {
@@ -121,6 +123,30 @@ func (h *pinger) loss() float64 {
 		return 0
 	}
 	return float64(h.drops) * 100 / float64(att)
+}
+
+// jitter is the mean absolute deviation of the recent RTTs (the bounded
+// sample ring) — a rough gauge of how steady the link is right now. Drops are
+// not part of the ring, so loss is tracked separately.
+func (h *pinger) jitter() int64 {
+	n := len(h.samples)
+	if n == 0 {
+		return 0
+	}
+	var sum int64
+	for _, s := range h.samples {
+		sum += int64(s)
+	}
+	avg := sum / int64(n)
+	var dev int64
+	for _, s := range h.samples {
+		d := int64(s) - avg
+		if d < 0 {
+			d = -d
+		}
+		dev += d
+	}
+	return dev / int64(n)
 }
 
 // hostStat is everything a watched host accumulates for the dashboard and the
@@ -358,9 +384,80 @@ func main() {
 		alarmOn   bool
 	)
 
+	// Pings run in the background so a slow host (or a quiet one that waits
+	// out its timeout) never freezes the keyboard: each tick only spawns one
+	// ping per host that is not already in flight, and results are applied by
+	// the main loop as they land. The gateway is pinged the same way — its
+	// latency is the "is my uplink OK" line in the header.
+	const gwTag = "gw"
+	type probeResult struct {
+		ip  string // gwTag when this is the gateway's answer
+		rtt int
+	}
+	pingCh := make(chan probeResult, len(hosts)*2+4)
+	pingBusy := map[string]bool{}
+	gwBusy := false
+	gwRTT := -2 // -2 not tried yet · -1 last attempt failed · else RTT ms
+	spawnPing := func(ip string) {
+		if pingBusy[ip] {
+			return
+		}
+		pingBusy[ip] = true
+		go func() {
+			rctx, cancel := context.WithTimeout(sigCtx, timeout)
+			defer cancel()
+			rtt, _ := probe.Ping(rctx, ip, timeout)
+			select {
+			case pingCh <- probeResult{ip: ip, rtt: rtt}:
+			case <-sigCtx.Done():
+			}
+		}()
+	}
+	spawnGw := func() {
+		if gwBusy || cfg.Gateway == "" {
+			return
+		}
+		gwBusy = true
+		go func() {
+			rctx, cancel := context.WithTimeout(sigCtx, timeout)
+			defer cancel()
+			rtt, _ := probe.Ping(rctx, cfg.Gateway, timeout)
+			select {
+			case pingCh <- probeResult{ip: gwTag, rtt: rtt}:
+			case <-sigCtx.Done():
+			}
+		}()
+	}
+	drainPings := func() {
+		for {
+			select {
+			case res := <-pingCh:
+				if res.ip == gwTag {
+					gwBusy = false
+					gwRTT = res.rtt
+					continue
+				}
+				pingBusy[res.ip] = false
+				stats[res.ip].ping.add(res.rtt, histCap)
+			default:
+				return
+			}
+		}
+	}
+
+	// Key-hold state for the arrow-repeat (see holdDelay/holdRepeat below).
+	var (
+		holdKey   tui.Key
+		holdRune  rune
+		holdSince time.Time
+		holdLast  time.Time
+	)
+
 	// handleKey applies one key press to the view. ok reports whether anything
-	// changed and must be repainted; quit ends the watch.
+	// changed and must be repainted; quit ends the watch. The one-shot 'g'
+	// hint lives only until the next key.
 	handleKey := func(k tui.Key, r rune) (ok, quit bool) {
+		view.gCmd = ""
 		switch k {
 		case tui.KeyUp:
 			if view.cursor > 0 {
@@ -387,14 +484,17 @@ func main() {
 				return true, true
 			case 's', 'S':
 				view.sortMode = (view.sortMode + 1) % 3
-				view.scroll = 0
 				return true, false
 			case 't', 'T':
 				view.showTalk = !view.showTalk
 				return true, false
 			case 'a', 'A':
 				view.alarmOnly = !view.alarmOnly
-				view.scroll = 0
+				return true, false
+			case 'g', 'G':
+				if view.currentIP != "" {
+					view.gCmd = "gnulte -t " + view.currentIP
+				}
 				return true, false
 			case 'h', 'H', '?':
 				view.showHelp = !view.showHelp
@@ -446,11 +546,29 @@ func main() {
 		if scr == nil {
 			return
 		}
-		scr.Draw(buildView(view, hosts, info, lastRates, lastFlows, hostSet, stats,
-			nic, subnet, iv, sess.start, alarmOn, hasCounter, ux.Height()))
+		up := 0
+		for _, ip := range hosts {
+			if stats[ip].ping.count > 0 {
+				up++
+			}
+		}
+		env := watchEnv{
+			nic:        nic,
+			subnet:     subnet,
+			selfIP:     cfg.SelfIP,
+			gwIP:       cfg.Gateway,
+			gwRTT:      gwRTT,
+			iv:         iv,
+			start:      sess.start,
+			up:         up,
+			alarmOn:    alarmOn,
+			hasCounter: hasCounter,
+		}
+		scr.Draw(buildView(view, hosts, info, lastRates, lastFlows, hostSet, stats, env, ux.Height()))
 	}
 
 	for {
+		drainPings()
 		select {
 		case <-sigCtx.Done():
 			finish()
@@ -462,20 +580,14 @@ func main() {
 				rates = counter.Snapshot()
 				flows = counter.SnapshotFlows()
 			}
-			// One ping per host each tick (concurrently, so N hosts cost the
-			// same wall time as one) — the per-IP latency history.
-			var wg sync.WaitGroup
-			for i, ip := range hosts {
-				wg.Add(1)
-				go func(i int, ip string) {
-					defer wg.Done()
-					rctx, cancel := context.WithTimeout(sigCtx, timeout)
-					defer cancel()
-					rtt, _ := probe.Ping(rctx, ip, timeout)
-					stats[ip].ping.add(rtt, histCap)
-				}(i, ip)
+			// Kick off a fresh round of pings (one per host plus the gateway,
+			// never overlapping), then carry on — results are applied by
+			// drainPings as they land, so the keyboard never waits on a host
+			// that is slow to answer.
+			for _, ip := range hosts {
+				spawnPing(ip)
 			}
-			wg.Wait()
+			spawnGw()
 
 			alarmOn = false
 			for _, ip := range hosts {
@@ -522,11 +634,32 @@ func main() {
 		if scr != nil {
 			k, r := scr.Poll(30)
 			if k != tui.KeyNone {
+				holdKey, holdRune, holdSince, holdLast = tui.KeyNone, 0, time.Time{}, time.Time{}
 				if ok, quit := handleKey(k, r); ok {
 					drawNow()
 					if quit {
 						finish()
 						return
+					}
+					if k == tui.KeyUp || k == tui.KeyDown {
+						holdKey, holdRune, holdSince = k, r, time.Now()
+					}
+				}
+			} else if holdKey != tui.KeyNone {
+				// Raw terminals deliver exactly one press per key (no OS
+				// auto-repeat), so repeat a held arrow ourselves: after a
+				// short delay, re-apply it on the same cadence as a fast tap,
+				// stopping at the first edge or when any new key arrives —
+				// the same hold-to-scroll feel as htop.
+				now := time.Now()
+				if now.Sub(holdSince) >= holdDelay &&
+					(holdLast.IsZero() || now.Sub(holdLast) >= holdRepeat) {
+					before := view.cursor
+					if ok, _ := handleKey(holdKey, holdRune); ok && view.cursor != before {
+						holdLast = now
+						drawNow()
+					} else {
+						holdKey, holdRune = tui.KeyNone, 0 // hit an edge — stop
 					}
 				}
 			}
@@ -535,6 +668,13 @@ func main() {
 		}
 	}
 }
+
+// Hold-to-repeat timing: how long a pressed arrow is held before it starts
+// repeating, and the repeat gap after that.
+const (
+	holdDelay  = 380 * time.Millisecond
+	holdRepeat = 60 * time.Millisecond
+)
 
 // parseHosts validates and de-duplicates the comma-separated target list.
 func parseHosts(s string) []string {
@@ -747,7 +887,7 @@ func buildLines(hosts []string, info map[string]hostInfo, rates map[string]traff
 
 	out = append(out, "", ux.C(ux.Dim, "  "+strings.Repeat("─", 40)))
 	out = append(out, fmt.Sprintf("  %-16s   %s",
-		ux.C(ux.Bold, "TOTAL"), ux.TruncPad(rateLine(totRX, totRXp, iv)+"    "+upRateLine(totTX, totTXp, iv), 40)))
+		ux.C(ux.Bold, "TOTAL"), ux.TruncPad(rateLine(totRX, totRXp, iv)+"    "+upRateLine(totTX, totTXp, iv), 46)))
 	if anyAlarm {
 		out = append(out, ux.C(ux.Red, "  ⚠ one or more hosts are over their alarm threshold"))
 	}
@@ -800,25 +940,6 @@ func idShort(h hostInfo) string {
 		s = s[:24] + "…"
 	}
 	return s
-}
-
-// pingLine renders one host's latency history: last RTT, average, loss, and
-// the sparkline of every ping recorded so far.
-func pingLine(ip string, h pinger) string {
-	if h.count+h.drops == 0 {
-		return ""
-	}
-	last := "--"
-	if h.last >= 0 {
-		last = fmt.Sprintf("%dms", h.last)
-	}
-	head := fmt.Sprintf("ping %s · avg %dms · loss %.0f%%", last, h.avg(), h.loss())
-	spark := ux.SparkRTT(h.samples, 30)
-	line := "  " + ux.TruncPad(ip, 16) + "  " + ux.C(ux.Dim, head)
-	if spark != "" {
-		line += "  " + ux.C(ux.Cyan, spark)
-	}
-	return line
 }
 
 // pingShort is the dense-mode latency tail: "p 23ms · 0%".
@@ -889,11 +1010,16 @@ func dirLine(mark string, b, p int64, iv int) string {
 	if b == 0 && p == 0 {
 		return ux.C(ux.Dim, "idle")
 	}
-	tail := ""
+	s := mark + " " + ux.HumanRate(bps(b, iv))
 	if p > 0 {
-		tail = fmt.Sprintf(" (%d pkt/s)", p)
+		// Keep the packet tail only while the whole cell still fits its fixed
+		// 21-column slot — a monster rate must not push the next column.
+		t := fmt.Sprintf(" (%d pkt/s)", p)
+		if len([]rune(s))+len([]rune(t)) <= 21 {
+			s += t
+		}
 	}
-	return mark + " " + ux.HumanRate(bps(b, iv)) + tail
+	return s
 }
 
 // wrapUpReport writes the end-of-session HTML report into the report hub,

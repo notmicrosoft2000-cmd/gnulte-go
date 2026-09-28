@@ -36,20 +36,20 @@ func TestBuildLinesSparseShowsIdentityAndPing(t *testing.T) {
 	if !strings.Contains(joined, "00:11:22:33:44:55") || !strings.Contains(joined, "andrew-phone") {
 		t.Fatalf("identity row missing:\n%s", joined)
 	}
-	if !strings.Contains(joined, "avg 14ms") {
-		t.Fatalf("ping average missing:\n%s", joined)
+	if !strings.Contains(joined, "ping ✗") {
+		t.Fatalf("dropped ping marker missing:\n%s", joined)
 	}
 	if !strings.Contains(joined, "loss 2%") {
 		t.Fatalf("loss missing (41 pings, 1 drop):\n%s", joined)
 	}
-	if !strings.Contains(joined, "▂") {
-		t.Fatalf("sparkline blocks missing:\n%s", joined)
+	if !strings.Contains(joined, "avg ↓ 1.2KB/s") {
+		t.Fatalf("session-average line missing:\n%s", joined)
 	}
 	if !strings.Contains(joined, "TOP TALKERS") || !strings.Contains(joined, "8.8.8.8:443") {
 		t.Fatalf("top-talkers pane missing:\n%s", joined)
 	}
 	// The second host has no identity: the fallback note appears, not a gap.
-	if !strings.Contains(joined, "no identity") {
+	if !strings.Contains(joined, "unknown device") {
 		t.Fatalf("no-identity fallback missing:\n%s", joined)
 	}
 }
@@ -141,13 +141,72 @@ func TestFlowLineRendersBothEndpoints(t *testing.T) {
 }
 
 func TestPingLineEmptyUntilFirstPing(t *testing.T) {
-	if got := pingLine("192.0.2.1", pinger{}); got != "" {
-		t.Fatalf("pingLine should be empty before any ping, got %q", got)
+	if got := pingCell(&hostStat{}); !strings.Contains(got, "ping --") {
+		t.Fatalf("pingCell before any ping = %q, want the -- placeholder", got)
 	}
+	row := watchRow("192.0.2.1", hostInfo{}, traffic.Rate{}, &hostStat{}, 1)
+	if len(row) != 3 {
+		t.Fatalf("watchRow = %d lines, want a fixed 3", len(row))
+	}
+	if !strings.Contains(row[1], "unknown device") {
+		t.Fatalf("identity row missing placeholder: %q", row[1])
+	}
+	if !strings.Contains(row[2], "no pings yet") {
+		t.Fatalf("stats row missing ping placeholder: %q", row[2])
+	}
+	st := &hostStat{}
+	st.ping.add(20, 60)
+	if got := pingCell(st); !strings.Contains(got, "ping 20ms") {
+		t.Fatalf("pingCell = %q, want last RTT shown", got)
+	}
+}
+
+func TestPingerJitter(t *testing.T) {
 	h := pinger{}
-	h.add(20, 60)
-	if got := pingLine("192.0.2.1", h); !strings.Contains(got, "ping 20ms") {
-		t.Fatalf("pingLine = %q, want last RTT shown", got)
+	for _, rtt := range []int{10, 10, 10, 10} {
+		h.add(rtt, 60)
+	}
+	if j := h.jitter(); j != 0 {
+		t.Fatalf("steady pings jitter = %dms, want 0", j)
+	}
+	h2 := pinger{}
+	for _, rtt := range []int{0, 100} {
+		h2.add(rtt, 60)
+	}
+	if j := h2.jitter(); j != 50 {
+		t.Fatalf("swing pings jitter = %dms, want 50", j)
+	}
+}
+
+func TestGradeGlyphs(t *testing.T) {
+	empty := &hostStat{}
+	if g := grade(empty); g != "·" {
+		t.Fatalf("grade with no pings = %q, want ·", g)
+	}
+	stable := &hostStat{}
+	stable.ping.add(20, 60)
+	if g := grade(stable); g != "✓" {
+		t.Fatalf("grade stable = %q, want ✓", g)
+	}
+	alarmed := &hostStat{}
+	alarmed.ping.add(20, 60)
+	alarmed.alarm = true
+	if g := grade(alarmed); g != "⚠" {
+		t.Fatalf("grade alarming = %q, want ⚠", g)
+	}
+	lost := &hostStat{}
+	lost.ping.add(-1, 60)
+	lost.ping.add(-1, 60)
+	lost.ping.add(-1, 60)
+	lost.ping.add(-1, 60)
+	lost.ping.add(-1, 60)
+	lost.ping.add(-1, 60)
+	lost.ping.add(-1, 60)
+	lost.ping.add(-1, 60)
+	lost.ping.add(-1, 60)
+	lost.ping.add(-1, 60)
+	if g := grade(lost); g != "✗" {
+		t.Fatalf("grade with 100%% loss = %q, want ✗", g)
 	}
 }
 

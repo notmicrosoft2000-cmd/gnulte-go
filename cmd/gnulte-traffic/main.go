@@ -43,7 +43,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "13.0"
+const version = "13.1"
 
 // pinger tracks the ping history of one watched host across ticks: the last
 // RTT, running min/max/avg/loss, and the bounded sample ring that becomes the

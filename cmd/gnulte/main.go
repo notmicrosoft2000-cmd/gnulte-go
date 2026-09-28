@@ -48,7 +48,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "13.0"
+const version = "13.1"
 
 // bootLog holds the pre-run transcript (banner, confirmation, arming) so the
 // HTML report shows the full command flow, not just the monitor's own output.
@@ -70,15 +70,28 @@ func bootf(quiet bool, format string, args ...any) {
 
 // profiles mirrors the Bash toolkit's presets: latency|jitter|loss|dup|reorder|bandwidth.
 var profiles = map[string][6]int{
-	"gaming":    {1500, 300, 2, 0, 0, 0},
-	"streaming": {2500, 500, 5, 0, 0, 0},
-	"voip":      {3000, 200, 0, 0, 5, 0},
-	"web":       {2000, 400, 3, 0, 0, 0},
-	"extreme":   {5000, 1000, 10, 5, 5, 0},
-	"throttle":  {500, 200, 0, 0, 0, 512},
+	"gaming":      {1500, 300, 2, 0, 0, 0},
+	"streaming":   {2500, 500, 5, 0, 0, 0},
+	"voip":        {3000, 200, 0, 0, 5, 0},
+	"web":         {2000, 400, 3, 0, 0, 0},
+	"extreme":     {5000, 1000, 10, 5, 5, 0},
+	"throttle":    {500, 200, 0, 0, 0, 512},
+	"satellite":   {600, 40, 1, 0, 0, 0},
+	"cellular":    {150, 90, 2, 1, 0, 0},
+	"dialup":      {200, 120, 0, 0, 0, 56},
+	"congested":   {400, 350, 5, 3, 2, 0},
+	"bufferbloat": {60, 200, 0, 0, 0, 0},
+	"nightmare":   {8000, 2000, 25, 10, 10, 0},
 }
 
-const profileNames = "gaming, streaming, voip, web, extreme, throttle"
+// profileOrder fixes the display order for the numbered picker and help text
+// (map iteration order is random).
+var profileOrder = []string{
+	"gaming", "streaming", "voip", "web", "extreme", "throttle",
+	"satellite", "cellular", "dialup", "congested", "bufferbloat", "nightmare",
+}
+
+const profileNames = "gaming, streaming, voip, web, extreme, throttle, satellite, cellular, dialup, congested, bufferbloat, nightmare"
 
 func clamp(v, lo, hi int) int {
 	if v < lo {
@@ -156,7 +169,7 @@ func main() {
 	}
 	if *listProf {
 		fmt.Println("Preset impairment profiles (latency|jitter|loss|dup|reorder|bandwidth-kbps):")
-		for _, name := range []string{"gaming", "streaming", "voip", "web", "extreme", "throttle"} {
+		for _, name := range profileOrder {
 			p := profiles[name]
 			fmt.Printf("  %-10s %4dms jitter %3dms loss %2d%% dup %d%% reorder %d%% cap %5dkbps\n",
 				name, p[0], p[1], p[2], p[3], p[4], p[5])
@@ -314,7 +327,11 @@ func main() {
 			fatal(err)
 		}
 	case interactive && *targets == "" && *macArg == "" && *rangeCIDR == "":
-		targetsList = scanAndSelect(scanCtx, cfg)
+		if target, manual := manualTargetPrompt(scanCtx, cfg); manual {
+			targetsList = []string{target}
+		} else {
+			targetsList = scanAndSelect(scanCtx, cfg)
+		}
 	default:
 		var err error
 		targetsList, err = resolveTargets(sigCtx, *targets, *macArg, *rangeCIDR, *whitelist, cfg)
@@ -342,9 +359,6 @@ func main() {
 			// transcript (and therefore the HTML report) always records it.
 			bootf(!prefs.Advanced || *quiet, "  $ "+line)
 		},
-	}
-	if *rangeCIDR != "" {
-		ec.RangeStart = cfg.Gateway // gateway is never dropped in a range sweep
 	}
 	if *profile != "" {
 		p, ok := profiles[*profile]
@@ -509,7 +523,9 @@ func main() {
 		path := *reportFile
 		autoPath := path == ""
 		if autoPath {
-			path = reportdir.DefaultPath(reportdir.GNULTEGo, "gnulte-go-report")
+			// This report carries the per-target SVG latency charts, so its
+			// name says what the session covered: <date>-<time>-<targets>.
+			path = reportdir.DefaultPathCount(reportdir.GNULTEGo, "gnulte-go-scan-report", len(mon.Results))
 		}
 		// Interactive terminals are asked before a report lands in the hub;
 		// explicit --report and piped runs always write.
@@ -572,6 +588,11 @@ func resolveTargets(ctx context.Context, tAmt, tMac, rCIDR, wl string, cfg netut
 		if err != nil {
 			return nil, fmt.Errorf("invalid range: %w", err)
 		}
+		// The router is how you get in and out of the network — shaping it
+		// would knock out your own uplink — so a range sweep never includes it.
+		if cfg.Gateway != "" && !excluded[cfg.Gateway] {
+			excluded[cfg.Gateway] = true
+		}
 		// Ping sweep so the engine only spoofs devices that actually exist.
 		live := discover.PingSweep(ctx, iplist, 64)
 		for _, ip := range live {
@@ -580,6 +601,9 @@ func resolveTargets(ctx context.Context, tAmt, tMac, rCIDR, wl string, cfg netut
 			}
 		}
 		if len(list) == 0 {
+			if len(live) > 0 {
+				return nil, fmt.Errorf("all live hosts in %s were excluded (gateway, --whitelist)", rCIDR)
+			}
 			return nil, fmt.Errorf("no live hosts found in %s", rCIDR)
 		}
 	default:
@@ -911,7 +935,7 @@ Parameters:
   -b, --bandwidth KBPS  bandwidth cap in kbps (0 = unlimited)
 
 Profiles:
-      --profile NAME      apply a preset (gaming|streaming|voip|web|extreme|throttle)
+      --profile NAME      apply a preset (see --list-profiles: 12 built-in)
       --list-profiles     list the preset profiles and exit
       --random            re-roll latency/jitter/loss every second
 

@@ -20,7 +20,7 @@
 // and contains two per-tool subfolders so reports from the main toolkit and
 // the SCANLTE scanner stay organized:
 //
-//	~/GNULTE Reports/GNULTE go!/gnulte-go-report-20060102-150405.html
+//	~/GNULTE Reports/GNULTE go!/gnulte-go-scan-report-20060102-150405-2.html
 //	~/GNULTE Reports/Gnulte-scan/gnulte-scan-report-20060102-150405.html
 package reportdir
 
@@ -88,4 +88,15 @@ func DefaultPath(sub SubDir, prefix string) string {
 		return fmt.Sprintf("%s-%s.html", prefix, Timestamp())
 	}
 	return filepath.Join(dir, fmt.Sprintf("%s-%s.html", prefix, Timestamp()))
+}
+
+// DefaultPathCount is DefaultPath with the number of hosts or targets scanned
+// folded into the name: "<prefix>-<timestamp>-<count>.html", so each report
+// says what it contains at a glance (e.g. gnulte-go-scan-report-20260928-151204-3.html).
+func DefaultPathCount(sub SubDir, prefix string, count int) string {
+	dir, err := Sub(sub)
+	if err != nil {
+		return fmt.Sprintf("%s-%s-%d.html", prefix, Timestamp(), count)
+	}
+	return filepath.Join(dir, fmt.Sprintf("%s-%s-%d.html", prefix, Timestamp(), count))
 }

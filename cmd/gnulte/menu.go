@@ -255,6 +255,40 @@ func progressBar(msg string, total int, done <-chan struct{}, prog <-chan [2]int
 	}
 }
 
+// manualTargetPrompt asks, before the whole subnet is swept for the device
+// table, whether the operator would rather type an IP (or hostname) by hand.
+// The sweep stays the default on a bare Enter, so the guided flow never stalls;
+// a resolved single target skips the sweep entirely. Ctrl-D aborts as usual.
+func manualTargetPrompt(ctx context.Context, cfg netutil.Config) (target string, manual bool) {
+	fmt.Println()
+	fmt.Println("  " + c(cBold+cCyan, "Target setup:") + "  " + c(cDim, "type an IP by hand, or sweep the subnet?"))
+	fmt.Println("   1) type an IP (or hostname) manually")
+	fmt.Println("   2) sweep " + subnetCIDR(cfg.SelfIP, cfg.Netmask) + " and pick from the device list")
+	if strings.TrimSpace(prompt("  choice [2]: ")) != "1" {
+		return "", false
+	}
+	for {
+		t := strings.TrimSpace(prompt("  Target IP or hostname: "))
+		if t == "" {
+			if promptEOF {
+				return "", false
+			}
+			fmt.Println("  " + warnText("empty target — type an IP or hostname, or Ctrl-C to stop"))
+			continue
+		}
+		if net.ParseIP(t) == nil {
+			ip, err := resolveTargetName(ctx, cfg, t)
+			if err != nil {
+				fmt.Printf("  %s could not resolve %q (%v)\n", warnText(""), t, err)
+				continue
+			}
+			t = ip
+		}
+		fmt.Println("  " + okText("target: "+t))
+		return t, true
+	}
+}
+
 // scanAndSelect probes the local subnet, shows a numbered table and returns
 // the operator's selection (or the full list when 'r' is chosen).
 func scanAndSelect(ctx context.Context, cfg netutil.Config) []string {
@@ -309,6 +343,8 @@ func scanAndSelect(ctx context.Context, cfg netutil.Config) []string {
 	}
 	fmt.Println("  ──────────────────────────────────────────────────────────────────")
 	fmt.Println("  " + c(cDim, "colours by type · bright = this host · yellow = gateway | 'r' = all · 0 = exit"))
+	fmt.Println("  " + c(cDim, "For deeper identification — vendors, types, mDNS services, port scans — run"))
+	fmt.Println("  " + c(cDim, "gnulte-scan (SCANLTE: 'gnulte-scan -T') or investigate the network yourself."))
 	fmt.Println()
 
 	for {
@@ -326,9 +362,14 @@ func scanAndSelect(ctx context.Context, cfg netutil.Config) []string {
 		valid := true
 		if sel == "r" || sel == "a" || sel == "R" || sel == "A" {
 			for _, r := range rows {
-				if !r.IsSelf {
+				// The router is your way in and out of the network, not a
+				// test target: sweeping it would shape your own uplink.
+				if !r.IsSelf && r.IP != cfg.Gateway {
 					chosen = append(chosen, r.IP)
 				}
+			}
+			if cfg.Gateway != "" {
+				fmt.Println("  " + c(cDim, fmt.Sprintf("(gateway %s left out of the sweep — it is not a test target)", cfg.Gateway)))
 			}
 		} else {
 			for _, part := range strings.Split(sel, ",") {
@@ -438,10 +479,24 @@ func paramsWizard(ec *engine.Config, duration *int, beep *bool, interval *int) {
 	fmt.Println()
 	fmt.Println("  " + c(cBold+cCyan, "Parameter Configuration:") + "  " + c(cDim, "Enter keeps current values."))
 	fmt.Println()
-	fmt.Println("  " + c(cDim, "Profiles: gaming | streaming | voip | web | extreme | throttle (or 'manual')"))
-	prof := prompt("  Profile [manual]: ")
+	fmt.Println("  " + c(cBold, "Preset profiles:") + "  " + c(cDim, "pick a number or name · Enter = manual (no typing needed)"))
+	var profHelp []string
+	for i, name := range profileOrder {
+		profHelp = append(profHelp, fmt.Sprintf("%2d %s", i+1, name))
+	}
+	for i := 0; i < len(profHelp); i += 2 {
+		line := "  " + profHelp[i]
+		if i+1 < len(profHelp) {
+			line += "   " + profHelp[i+1]
+		}
+		fmt.Println(c(cDim, line))
+	}
+	prof := strings.TrimSpace(prompt("  Profile [Enter=manual]: "))
 
 	if prof != "" && prof != "manual" {
+		if n, err := strconv.Atoi(prof); err == nil && n >= 1 && n <= len(profileOrder) {
+			prof = profileOrder[n-1]
+		}
 		p, ok := profiles[prof]
 		if ok {
 			ec.LatencyMS, ec.JitterMS, ec.LossPct, ec.DupPct, ec.ReorderPct, ec.BandwidthKbps = p[0], p[1], p[2], p[3], p[4], p[5]

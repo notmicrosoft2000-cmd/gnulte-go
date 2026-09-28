@@ -45,7 +45,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "13.0"
+const version = "13.1"
 
 func main() {
 	var (

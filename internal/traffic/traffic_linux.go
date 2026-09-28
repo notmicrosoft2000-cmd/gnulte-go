@@ -10,12 +10,15 @@
 package traffic
 
 import (
+	"encoding/binary"
+	"fmt"
 	"net"
 	"sync"
 	"syscall"
 )
 
-// Counter reads frames on an interface and accumulates per-host totals.
+// Counter reads frames on an interface and accumulates per-host totals plus
+// per-conversation flow totals.
 type Counter struct {
 	fd      int
 	ifindex int
@@ -24,12 +27,22 @@ type Counter struct {
 	mu   sync.Mutex
 	host map[string]*counts
 	prev map[string]*counts
+	// flows hold cumulative conversation totals keyed "a|b" where a and b are
+	// canonical endpoints ("ip:port"); prevFlow snapshots them for deltas.
+	flows    map[string]*fcounts
+	prevFlow map[string]*fcounts
 }
 
 // counts is the cumulative lifetime traffic of one host.
 type counts struct {
 	rxB, txB int64
 	rxp, txp int64
+}
+
+// fcounts is the cumulative lifetime traffic of one endpoint conversation.
+type fcounts struct {
+	ab, ba   int64
+	abp, bap int64
 }
 
 // New opens an AF_PACKET socket bound to iface and starts the capture loop.
@@ -55,11 +68,13 @@ func New(iface string) (*Counter, error) {
 		return nil, err
 	}
 	c := &Counter{
-		fd:      fd,
-		ifindex: nif.Index,
-		closed:  make(chan struct{}),
-		host:    map[string]*counts{},
-		prev:    map[string]*counts{},
+		fd:       fd,
+		ifindex:  nif.Index,
+		closed:   make(chan struct{}),
+		host:     map[string]*counts{},
+		prev:     map[string]*counts{},
+		flows:    map[string]*fcounts{},
+		prevFlow: map[string]*fcounts{},
 	}
 	go c.loop()
 	return c, nil
@@ -83,7 +98,9 @@ func (c *Counter) loop() {
 	}
 }
 
-// parse counts one Ethernet/IPv4 frame by source and destination host.
+// parse counts one Ethernet/IPv4 frame by source and destination host, and
+// folds it into the conversation between the two endpoints (TCP/UDP ports, or
+// port 0 for other protocols).
 func (c *Counter) parse(frame []byte) {
 	// Ethernet header: dst[0:6] src[6:12] ethertype[12:14].
 	if len(frame) < 34 || frame[12] != 0x08 || frame[13] != 0x00 {
@@ -93,6 +110,17 @@ func (c *Counter) parse(frame []byte) {
 	src := net.IP(frame[ip+12 : ip+16]).String()
 	dst := net.IP(frame[ip+16 : ip+20]).String()
 	size := int64(len(frame))
+
+	// Transport ports: the IP header length field gives the L4 offset. Only
+	// TCP (6) and UDP (17) have ports; everything else gets port 0.
+	var sport, dport uint16
+	proto := frame[ip+9]
+	if proto == 6 || proto == 17 {
+		if l4 := ip + int(frame[ip]&0x0f)*4; len(frame) >= l4+4 {
+			sport = binary.BigEndian.Uint16(frame[l4 : l4+2])
+			dport = binary.BigEndian.Uint16(frame[l4+2 : l4+4])
+		}
+	}
 
 	c.mu.Lock()
 	out := c.host[src]
@@ -109,7 +137,33 @@ func (c *Counter) parse(frame []byte) {
 	}
 	in.rxB += size
 	in.rxp++
+
+	se, de := endpoint(src, sport), endpoint(dst, dport)
+	a, b := se, de
+	if a > b {
+		a, b = b, a
+	}
+	fc := c.flows[a+"|"+b]
+	if fc == nil {
+		fc = &fcounts{}
+		c.flows[a+"|"+b] = fc
+	}
+	if se < de { // A is src: frame travels A→B
+		fc.ab += size
+		fc.abp++
+	} else { // B is src: frame travels B→A
+		fc.ba += size
+		fc.bap++
+	}
 	c.mu.Unlock()
+}
+
+// endpoint names one side of a conversation as "ip:port".
+func endpoint(ip string, port uint16) string {
+	if port == 0 {
+		return ip + ":0"
+	}
+	return fmt.Sprintf("%s:%d", ip, port)
 }
 
 // Snapshot returns the traffic since the previous snapshot, per IPv4 host,
@@ -137,12 +191,92 @@ func (c *Counter) Snapshot() map[string]Rate {
 				r.RXBytes, r.TXBytes, r.RXPkts, r.TXPkts = cur.rxB, cur.txB, cur.rxp, cur.txp
 			}
 			r.clamp()
-			next[k] = cur
+			// prev must be a copy: parse() keeps mutating c.host[k] in place,
+			// so sharing the struct would make every delta read zero.
+			cp := *cur
+			next[k] = &cp
 		}
 		out[k] = r
 	}
 	c.prev = next
 	return out
+}
+
+// SnapshotFlows returns the traffic in each conversation since the previous
+// call, fresh for each interval (this is what the dashboard paints). A flow
+// only appears once it has carried bytes in the interval — quiet conversations
+// drop out; use FlowTotals for the whole-session picture.
+func (c *Counter) SnapshotFlows() []Flow {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]Flow, 0, len(c.flows))
+	next := make(map[string]*fcounts, len(c.flows))
+	for k, cur := range c.flows {
+		a, b := splitFlowKey(k)
+		p := c.prevFlow[k]
+		var f Flow
+		if p != nil {
+			f.AB, f.BA = cur.ab-p.ab, cur.ba-p.ba
+			f.ABp, f.BAp = cur.abp-p.abp, cur.bap-p.bap
+		} else {
+			f.AB, f.BA = cur.ab, cur.ba
+			f.ABp, f.BAp = cur.abp, cur.bap
+		}
+		f.A, f.B = a, b
+		f.clamp()
+		if f.Total() > 0 {
+			out = append(out, f)
+		}
+		// prevFlow must be a copy (same aliasing hazard as Snapshot's host
+		// map): parse() keeps mutating c.flows[k] in place.
+		cp := *cur
+		next[k] = &cp
+	}
+	c.prevFlow = next
+	return out
+}
+
+// FlowTotals returns every conversation's cumulative volume for the whole
+// session (this is what the end-of-session report tables with). Idle
+// conversations are included — total bytes are total bytes.
+func (c *Counter) FlowTotals() []Flow {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]Flow, 0, len(c.flows))
+	for k, cur := range c.flows {
+		a, b := splitFlowKey(k)
+		out = append(out, Flow{
+			A: a, B: b,
+			AB: cur.ab, BA: cur.ba,
+			ABp: cur.abp, BAp: cur.bap,
+		})
+	}
+	return out
+}
+
+// splitFlowKey undoes the "a|b" canonical flow key.
+func splitFlowKey(k string) (a, b string) {
+	for i := 0; i < len(k); i++ {
+		if k[i] == '|' {
+			return k[:i], k[i+1:]
+		}
+	}
+	return k, ""
+}
+
+func (f *Flow) clamp() {
+	if f.AB < 0 {
+		f.AB = 0
+	}
+	if f.BA < 0 {
+		f.BA = 0
+	}
+	if f.ABp < 0 {
+		f.ABp = 0
+	}
+	if f.BAp < 0 {
+		f.BAp = 0
+	}
 }
 
 func (r *Rate) clamp() {

@@ -150,7 +150,29 @@ func (e *editor) run() {
 				c.TrafficSec = clamp(n, 1, 10)
 				return nil
 			},
-			"refresh interval for the gnulte-traffic window (1-10)", "1s"),
+			"refresh interval for the GNULTE-LAN watch window (1-10)", "1s"),
+		row("lan alarm rate (kbps)", itemInt,
+			func(c Config) string { return orOff(fmt.Sprintf("%dkbps", c.AlarmRateKbps)) },
+			func(c *Config, v string) error {
+				n, err := strconv.Atoi(v)
+				if err != nil {
+					return fmt.Errorf("kilobits per second, 0-1000000 (0 = off)")
+				}
+				c.AlarmRateKbps = clamp(n, 0, 1000000)
+				return nil
+			},
+			"GNULTE-LAN: mark any host whose down/up speed exceeds this (0 = off)", "0"),
+		row("lan alarm latency (ms)", itemInt,
+			func(c Config) string { return orOff(fmt.Sprintf("%dms", c.AlarmLatencyMs)) },
+			func(c *Config, v string) error {
+				n, err := strconv.Atoi(v)
+				if err != nil {
+					return fmt.Errorf("milliseconds, 0-60000 (0 = off)")
+				}
+				c.AlarmLatencyMs = clamp(n, 0, 60000)
+				return nil
+			},
+			"GNULTE-LAN: mark any host whose average ping exceeds this (0 = off)", "0"),
 		head("SCANLTE SCAN"),
 		row("scan threads", itemInt,
 			func(c Config) string { return fmt.Sprintf("%d", c.ScanThreads) },
@@ -458,6 +480,15 @@ func (e *editor) handleEdit(key tui.Key, r rune) {
 func orAuto(s string) string {
 	if s == "" {
 		return "auto"
+	}
+	return s
+}
+
+// orOff renders zeroed thresholds as "off" so the editor reads naturally while
+// the jog/parse machinery still extracts the numeric 0 for ±1 nudging.
+func orOff(s string) string {
+	if strings.HasPrefix(s, "0") {
+		return "off"
 	}
 	return s
 }

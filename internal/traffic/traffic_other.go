@@ -25,3 +25,13 @@ func (c *Counter) Close() {}
 func (c *Counter) Snapshot() map[string]Rate {
 	return map[string]Rate{}
 }
+
+// SnapshotFlows always returns an empty set.
+func (c *Counter) SnapshotFlows() []Flow {
+	return nil
+}
+
+// FlowTotals always returns an empty set.
+func (c *Counter) FlowTotals() []Flow {
+	return nil
+}

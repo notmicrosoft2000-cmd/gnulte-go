@@ -218,7 +218,7 @@ func quickRef() {
 	fmt.Println("    gnulte --no-sound                                   silence the ping beeps")
 	fmt.Println("    gnulte --scan / --dupcheck                          discovery tools")
 	fmt.Println("    gnulte --settings                                 edit saved defaults")
-	fmt.Println("    gnulte-traffic -i wlan0 -t 192.168.1.1,192.168.1.50   live per-host speed")
+	fmt.Println("    gnulte-lan -i wlan0 -t 192.168.1.1,192.168.1.50   live LAN watch (speed + top talkers)")
 	fmt.Println("  " + c(cDim, "  With no targeting flags, the guided menu opens below."))
 	fmt.Println(c(cDim, "  ─────────────────────────────────────────────────"))
 	fmt.Println()
@@ -586,13 +586,13 @@ const (
 )
 
 // trafficWindowChoice asks how to watch multiple targets: the combined console
-// dashboard, one traffic & speed monitor window, or one separate window per
-// target (tabs in terminal emulators that support them).
+// dashboard, one GNULTE-LAN watch window, or one separate window per target
+// (tabs in terminal emulators that support them).
 func trafficWindowChoice() watchMode {
 	fmt.Println()
 	fmt.Println(c(cCyan+cBold, " Two or more targets selected — how do you want to watch them?"))
 	fmt.Println("   1) all targets in this console dashboard (default)")
-	fmt.Println("   2) traffic & speed monitor in one separate window")
+	fmt.Println("   2) GNULTE-LAN watch in one separate window")
 	fmt.Println("   3) one separate window per target (tabs)")
 	sel := strings.TrimSpace(prompt("   choice [1/2/3]: "))
 	fmt.Println()
@@ -606,13 +606,13 @@ func trafficWindowChoice() watchMode {
 	}
 }
 
-// launchTrafficWindow detaches a gnulte-traffic window for the watched targets
-// so the two views can be compared side by side. It warns rather than failing
+// launchTrafficWindow detaches a gnulte-lan window for the watched targets so
+// the two views can be compared side by side. It warns rather than failing
 // when no terminal emulator is available.
 func launchTrafficWindow(interval int, iface string, targets []string) {
 	bin := trafficBinary()
 	if bin == "" {
-		fmt.Println("  " + warnText("gnulte-traffic is not installed — run the traffic monitor separately (gnulte-traffic -i ... -t ...)"))
+		fmt.Println("  " + warnText("gnulte-lan is not installed — run the LAN watch separately (gnulte-lan -i ... -t ...)"))
 		return
 	}
 	args := []string{bin, "-i", iface, "-t", strings.Join(targets, ",")}
@@ -628,16 +628,16 @@ func launchTrafficWindow(interval int, iface string, targets []string) {
 		fmt.Println("  " + warnText("no terminal emulator found — add $TERMINAL (e.g. export TERMINAL='xterm -e') to enable the separate window"))
 		return
 	}
-	fmt.Println("  " + okText("Traffic monitor opened in a separate window — "+strings.Join(targets, ", ")))
+	fmt.Println("  " + okText("GNULTE-LAN watch opened in a separate window — "+strings.Join(targets, ", ")))
 }
 
-// launchTrafficWindows detaches one gnulte-traffic terminal window per target,
+// launchTrafficWindows detaches one gnulte-lan terminal window per target,
 // so each target gets a focused monitor of its own (tabs where the terminal
 // emulator supports them). Warns rather than failing mid-way.
 func launchTrafficWindows(interval int, iface string, targets []string) {
 	bin := trafficBinary()
 	if bin == "" {
-		fmt.Println("  " + warnText("gnulte-traffic is not installed — run the traffic monitor separately (gnulte-traffic -i ... -t ...)"))
+		fmt.Println("  " + warnText("gnulte-lan is not installed — run the LAN watch separately (gnulte-lan -i ... -t ...)"))
 		return
 	}
 	startedAny := false
@@ -658,19 +658,19 @@ func launchTrafficWindows(interval int, iface string, targets []string) {
 		startedAny = true
 	}
 	if startedAny {
-		fmt.Println("  " + okText(fmt.Sprintf("One traffic monitor window per target opened (%d/%d) — Ctrl+C in any window closes it.",
+		fmt.Println("  " + okText(fmt.Sprintf("One GNULTE-LAN watch window per target opened (%d/%d) — Ctrl+C in any window closes it.",
 			len(targets), len(targets))))
 	}
 }
 
-// trafficBinary locates the installed gnulte-traffic binary (directly beside
-// the running gnulte or in PATH).
+// trafficBinary locates the installed gnulte-lan binary (directly beside the
+// running gnulte or in PATH).
 func trafficBinary() string {
-	if p, err := exec.LookPath("gnulte-traffic"); err == nil {
+	if p, err := exec.LookPath("gnulte-lan"); err == nil {
 		return p
 	}
 	if exe, err := os.Executable(); err == nil {
-		p := filepath.Join(filepath.Dir(exe), "gnulte-traffic")
+		p := filepath.Join(filepath.Dir(exe), "gnulte-lan")
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}

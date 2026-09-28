@@ -48,7 +48,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "13.1"
+const version = "13.2"
 
 // bootLog holds the pre-run transcript (banner, confirmation, arming) so the
 // HTML report shows the full command flow, not just the monitor's own output.
@@ -143,7 +143,7 @@ func main() {
 		resetSafe   = flag.Bool("reset-safety", false, "remove the acceptance record and exit")
 		showVer     = flag.Bool("version", false, "print version and exit")
 		settingsArg = flag.Bool("settings", false, "open the settings editor (saved defaults) and exit")
-		trafficWin  = flag.Bool("traffic-window", false, "with 2+ targets, open the traffic & speed monitor in a separate terminal window")
+		trafficWin  = flag.Bool("traffic-window", false, "with 2+ targets, open the GNULTE-LAN watch in a separate terminal window")
 	)
 	flag.StringVar(ifaceArg, "interface", "", "network interface (default: auto-detect)")
 	flag.StringVar(targets, "target", "", "target IP(s), comma-separated")
@@ -433,9 +433,9 @@ func main() {
 	}
 
 	// With two or more targets the operator can watch them two ways: the
-	// console dashboard (default) or a dedicated traffic & speed monitor in
-	// its own terminal window, so the two stay side by side. Three windows
-	// open one monitor per target.
+	// console dashboard (default) or a dedicated GNULTE-LAN watch in its own
+	// terminal window, so the two stay side by side. Three windows open one
+	// monitor per target.
 	openTraffic := false
 	mode := watchDashboard
 	if len(targetsList) >= 2 && interactive && !*quiet {
@@ -940,7 +940,7 @@ Profiles:
       --random            re-roll latency/jitter/loss every second
 
 Watch:
-      --traffic-window    with 2+ targets, open the traffic & speed monitor
+      --traffic-window    with 2+ targets, open the GNULTE-LAN watch
                           in a separate terminal window
   -q, --quiet             results only
 

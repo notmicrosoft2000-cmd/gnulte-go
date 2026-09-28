@@ -15,8 +15,8 @@ go build -o gnulte ./cmd/gnulte
 echo "== building gnulte-wifi (cmd/gnulte-wifi) =="
 go build -o gnulte-wifi ./cmd/gnulte-wifi
 
-echo "== building gnulte-traffic (cmd/gnulte-traffic) =="
-go build -o gnulte-traffic ./cmd/gnulte-traffic
+echo "== building gnulte-lan (cmd/gnulte-lan) =="
+go build -o gnulte-lan ./cmd/gnulte-lan
 
 echo "== building gnulte-devices (cmd/gnulte-devices) =="
 go build -o gnulte-devices ./cmd/gnulte-devices
@@ -25,4 +25,4 @@ echo "== running tests =="
 go test ./...
 go vet ./...
 
-echo "== done: ./gnulte-scan ./gnulte ./gnulte-wifi ./gnulte-traffic ./gnulte-devices =="
+echo "== done: ./gnulte-scan ./gnulte ./gnulte-wifi ./gnulte-lan ./gnulte-devices =="

@@ -52,7 +52,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "13.1"
+const version = "13.2"
 
 // scanPrefs holds the technical-tuning settings so deepScan and buildRows can
 // honor the SCANLTE knobs (probe retries, uptime, rogue flag, confidence,

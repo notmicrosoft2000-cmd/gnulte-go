@@ -17,10 +17,11 @@
 
 // Package traffic measures live per-host traffic on an interface. A raw
 // AF_PACKET socket (root required) reads every frame and accumulates
-// bytes/packets per IPv4 host, so the monitor can show a live down/up counter
-// per target — iftop-style — without touching iptables. If the socket cannot
-// be opened (not root, unusual interface), the monitor simply runs without
-// counters: they are a garnish, not a dependency.
+// bytes/packets per IPv4 host — and per host-to-host conversation (protocol
+// ports) — so the monitor can show a live down/up counter per target and a
+// top-talkers list, iftop-style, without touching iptables. If the socket
+// cannot be opened (not root, unusual interface), the monitor simply runs
+// without counters: they are a garnish, not a dependency.
 package traffic
 
 // Rate is the traffic a single host moved between two Snapshot calls.
@@ -32,3 +33,22 @@ type Rate struct {
 	TXBytes int64
 	TXPkts  int64
 }
+
+// Flow is the traffic between two endpoints between two SnapshotFlows calls.
+// An endpoint is named "ip:port" (port 0 for protocols without ports, e.g.
+// ICMP). A and B are always in canonical order (A is the lexicographically
+// smaller endpoint), so a conversation keeps one identity no matter which end
+// speaks first:
+//
+//	A → B bytes land in AB, B → A bytes land in BA.
+type Flow struct {
+	A   string // canonical first endpoint "ip:port"
+	B   string // canonical second endpoint "ip:port"
+	AB  int64  // bytes A→B during the interval
+	BA  int64  // bytes B→A during the interval
+	ABp int64  // packets A→B during the interval
+	BAp int64  // packets B→A during the interval
+}
+
+// Total returns the combined volume of the conversation in both directions.
+func (f Flow) Total() int64 { return f.AB + f.BA }

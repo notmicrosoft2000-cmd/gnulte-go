@@ -17,11 +17,11 @@
 
 // Package reportdir provides the shared "GNULTE Reports" hub where every tool
 // files its post-test HTML report. The hub lives in the user's home directory
-// and contains two per-tool subfolders so reports from the main toolkit and
-// the SCANLTE scanner stay organized:
+// and contains per-tool subfolders so reports stay organized:
 //
 //	~/GNULTE Reports/GNULTE go!/gnulte-go-scan-report-20060102-150405-2.html
 //	~/GNULTE Reports/Gnulte-scan/gnulte-scan-report-20060102-150405.html
+//	~/GNULTE Reports/GNULTE-LAN/gnulte-lan-report-20060102-150405-2.html
 package reportdir
 
 import (
@@ -39,6 +39,8 @@ const (
 	GNULTEGo SubDir = "GNULTE go!"
 	// GnulteScan is the destination for the gnulte-scan (SCANLTE) reports.
 	GnulteScan SubDir = "Gnulte-scan"
+	// GNULTELan is the destination for the gnulte-lan (GNULTE-LAN) reports.
+	GNULTELan SubDir = "GNULTE-LAN"
 )
 
 // Hub returns the hub directory (e.g. ~/GNULTE Reports). It does not create
@@ -57,7 +59,7 @@ func Hub() (string, bool) {
 // never create junk directories in the user's home.
 func Sub(sub SubDir) (string, error) {
 	switch sub {
-	case GNULTEGo, GnulteScan:
+	case GNULTEGo, GnulteScan, GNULTELan:
 	default:
 		return "", fmt.Errorf("unknown report folder %q", sub)
 	}

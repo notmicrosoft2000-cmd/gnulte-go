@@ -31,15 +31,17 @@ import (
 
 // Config is the merged default set shared by the GNULTE tools.
 type Config struct {
-	Interface    string `json:"interface"`      // preferred NIC (auto-detect when empty)
-	IntervalSec  int    `json:"interval_sec"`   // monitor + traffic refresh, 1-60
-	TimeoutMs    int    `json:"timeout_ms"`     // per-ping timeout, 100-60000
-	Beeps        bool   `json:"beeps"`          // latency-pitched ping beeps
-	HTMLReport   bool   `json:"html_report"`    // write the post-test HTML report
-	ScanThreads  int    `json:"scan_threads"`   // parallel ping workers, 1-512
-	WifiCount    int    `json:"wifi_count"`     // 802.11 frames per burst, 1-256
-	WifiDelaySec int    `json:"wifi_delay_sec"` // seconds between bursts, 1-60
-	TrafficSec   int    `json:"traffic_sec"`    // gnulte-traffic update interval, 1-10
+	Interface      string `json:"interface"`        // preferred NIC (auto-detect when empty)
+	IntervalSec    int    `json:"interval_sec"`     // monitor + traffic refresh, 1-60
+	TimeoutMs      int    `json:"timeout_ms"`       // per-ping timeout, 100-60000
+	Beeps          bool   `json:"beeps"`            // latency-pitched ping beeps
+	HTMLReport     bool   `json:"html_report"`      // write the post-test HTML report
+	ScanThreads    int    `json:"scan_threads"`     // parallel ping workers, 1-512
+	WifiCount      int    `json:"wifi_count"`       // 802.11 frames per burst, 1-256
+	WifiDelaySec   int    `json:"wifi_delay_sec"`   // seconds between bursts, 1-60
+	TrafficSec     int    `json:"traffic_sec"`      // gnulte-lan watch update interval, 1-10
+	AlarmRateKbps  int    `json:"alarm_rate_kbps"`  // gnulte-lan: mark hosts above this rate (kbps), 0=off
+	AlarmLatencyMs int    `json:"alarm_latency_ms"` // gnulte-lan: mark hosts above this avg RTT (ms), 0=off
 
 	// SCANLTE technical tuning (v12).
 	ProbeRetries int  `json:"probe_retries"` // deep-scan retries per open port, 1-5
@@ -65,15 +67,17 @@ type Config struct {
 // Default returns the built-in defaults, used when no config file exists.
 func Default() Config {
 	return Config{
-		Interface:    "",
-		IntervalSec:  1,
-		TimeoutMs:    1000,
-		Beeps:        true,
-		HTMLReport:   true,
-		ScanThreads:  64,
-		WifiCount:    64,
-		WifiDelaySec: 5,
-		TrafficSec:   1,
+		Interface:      "",
+		IntervalSec:    1,
+		TimeoutMs:      1000,
+		Beeps:          true,
+		HTMLReport:     true,
+		ScanThreads:    64,
+		WifiCount:      64,
+		WifiDelaySec:   5,
+		TrafficSec:     1,
+		AlarmRateKbps:  0,
+		AlarmLatencyMs: 0,
 
 		ProbeRetries: 1,
 		OSConfidence: true,
@@ -152,6 +156,8 @@ func (c *Config) Sanitize() {
 	c.WifiCount = clamp(c.WifiCount, 1, 256)
 	c.WifiDelaySec = clamp(c.WifiDelaySec, 1, 60)
 	c.TrafficSec = clamp(c.TrafficSec, 1, 10)
+	c.AlarmRateKbps = clamp(c.AlarmRateKbps, 0, 1000000)
+	c.AlarmLatencyMs = clamp(c.AlarmLatencyMs, 0, 60000)
 	c.ProbeRetries = clamp(c.ProbeRetries, 1, 5)
 	c.WifiJitterMs = clamp(c.WifiJitterMs, 0, 100)
 	c.History = clamp(c.History, 10, 240)

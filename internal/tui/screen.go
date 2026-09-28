@@ -78,3 +78,8 @@ func (s *Screen) Draw(lines []string) {
 
 // Key blocks until a single key press is decoded.
 func (s *Screen) Key() (Key, rune) { return s.keys.read() }
+
+// Poll waits up to maxWaitMs for a key press and returns KeyNone on timeout.
+// Tick-driven dashboards use it so arrows and toggles can be handled without a
+// dedicated input goroutine.
+func (s *Screen) Poll(maxWaitMs int64) (Key, rune) { return s.keys.poll(maxWaitMs) }

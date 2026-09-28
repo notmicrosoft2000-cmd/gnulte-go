@@ -32,6 +32,8 @@ func newKeyStream(fd int) *keyStream { return &keyStream{} }
 
 func (k *keyStream) read() (Key, rune) { return KeyNone, 0 }
 
+func (k *keyStream) poll(maxWaitMs int64) (Key, rune) { return KeyNone, 0 }
+
 // StdinTTY is platform-independent terminal detection.
 func StdinTTY() bool {
 	fi, err := os.Stdin.Stat()

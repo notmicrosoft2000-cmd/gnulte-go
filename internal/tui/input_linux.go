@@ -22,6 +22,7 @@ package tui
 import (
 	"os"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -96,6 +97,57 @@ func (k *keyStream) read() (Key, rune) {
 			continue
 		}
 		k.pending = append(k.pending, buf[:nr]...)
+	}
+}
+
+// poll waits up to maxWaitMs for a full key press and returns KeyNone on
+// timeout, so a tick-driven dashboard can fold key handling into its loop
+// without ever blocking it. Decoding is identical to read — queued arrow
+// sequences are still consumed atomically and a lone ESC is resolved after its
+// short grace beat (bounded by the caller's deadline).
+func (k *keyStream) poll(maxWaitMs int64) (Key, rune) {
+	buf := make([]byte, 16)
+	deadline := time.Now().Add(time.Duration(maxWaitMs) * time.Millisecond)
+	for {
+		for len(k.pending) == 0 {
+			rem := time.Until(deadline).Milliseconds()
+			if rem <= 0 {
+				return KeyNone, 0
+			}
+			if nr := readChunk(k.fd, buf, rem); nr > 0 {
+				k.pending = append(k.pending, buf[:nr]...)
+			} else {
+				return KeyNone, 0
+			}
+		}
+		key, rn, n, more := parseKey(k.pending)
+		if n > 0 {
+			k.pending = k.pending[n:]
+		} else if !more {
+			k.pending = nil
+		}
+		if key != KeyNone {
+			return key, rn
+		}
+		if !more {
+			continue // dropped an ignored control byte; keep draining
+		}
+		// ESC is waiting to grow into an arrow: one short beat, bounded by
+		// the caller's deadline so a lone Escape never stalls the loop.
+		wait := int64(40)
+		if rem := time.Until(deadline).Milliseconds(); rem < wait {
+			wait = rem
+			if wait < 1 {
+				k.pending = nil
+				return KeyEsc, 0
+			}
+		}
+		if nr := readChunk(k.fd, buf, wait); nr > 0 {
+			k.pending = append(k.pending, buf[:nr]...)
+		} else {
+			k.pending = nil
+			return KeyEsc, 0
+		}
 	}
 }
 

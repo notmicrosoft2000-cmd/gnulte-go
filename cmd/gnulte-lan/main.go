@@ -15,18 +15,26 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-// Command gnulte-lan is GNULTE's live LAN watch. It opens a raw AF_PACKET
-// socket (root), repaints a full-screen dashboard of every watched host's
-// down/up speed, packet rate and latency every second, labels each row with
-// the device identity the discovery engine found (MAC, vendor, type,
-// hostname), tracks who is talking to whom (top talkers, iftop-style), and
-// files a polished HTML report in the user's report hub when the watch ends.
+// Command gnulte-lan is GNULTE's live LAN watch — the observation half of the
+// toolkit. Tell it what to watch and it answers three questions live:
 //
-// Run it with no arguments and it discovers the whole LAN itself (the router
-// is skipped — shaping your own uplink is not a watch); pass -t to focus one
-// or several hosts. It is passive: it captures only frame counts. It mirrors
-// the ospf-like spirit of the rest of the toolkit: scan first, watch what you
-// asked for, and leave a report behind.
+//  1. What is on the network? With no -t it discovers the whole LAN in a few
+//     seconds (your host and the router are skipped), and every row is
+//     labelled with the device identity the discovery engine found: MAC,
+//     vendor, device type, hostname.
+//  2. How are they doing? Per host it repaints down/up speed, packet rate and
+//     latency every interval, with history sparklines.
+//  3. Who is talking to whom? A passive per-interval flow engine lists the
+//     top conversations, and lightweight rate/latency thresholds raise an
+//     audible alarm when a host crosses the line.
+//
+// It is passive: it captures only frame counts and pings, and never shapes,
+// spoofs or intercepts traffic — gnulte itself is the tool for that.
+//
+// The live view is interactive: arrows move the host cursor, ⏎ opens a detail
+// pane, s re-sorts, t toggles the top talkers, a filters to alarming hosts,
+// o opens the settings editor mid-watch, and q quits. Piped runs fall back to
+// a plain per-tick transcript, and --export streams the same samples as CSV.
 package main
 
 import (
@@ -55,7 +63,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "13.2"
+const version = "13.3"
 
 // hostInfo is the identity enrichment for one watched host.
 type hostInfo struct {
@@ -178,9 +186,17 @@ func main() {
 		noReport  = flag.Bool("no-report", false, "skip the end-of-session HTML report")
 		alarmRate = flag.Int("alarm-rate", 0, "alarm hosts above N kbps (0 = settings)")
 		alarmLat  = flag.Int("alarm-latency-ms", 0, "alarm hosts above N ms average ping (0 = settings)")
-		quiet     = flag.Bool("q", false, "quiet: no banner")
+		quiet     = flag.Bool("q", false, "quiet: no banner, plain transcript")
 		showVer   = flag.Bool("version", false, "print version and exit")
 	)
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "%s\n\nUsage: gnulte-lan [flags]\n\n", purpose())
+		flag.PrintDefaults()
+		fmt.Fprintf(flag.CommandLine.Output(), "\nExamples:\n"+
+			"  gnulte-lan                 watch the whole LAN (auto-discovery)\n"+
+			"  gnulte-lan -t 192.168.1.20 watch one host\n"+
+			"  gnulte-lan --duration 60 --export watch.csv --alarm-rate 500\n")
+	}
 	flag.Parse()
 
 	if *showVer {
@@ -194,23 +210,10 @@ func main() {
 	} else {
 		fmt.Fprintf(os.Stderr, "gnulte-lan: %v\n", err)
 	}
-	iv := ux.Clamp(cfgLoaded.TrafficSec, 1, 10)
-	if *interval > 0 {
-		iv = ux.Clamp(*interval, 1, 10)
-	}
-	histCap := ux.Clamp(cfgLoaded.History, 10, 240)
-	if *history > 0 {
-		histCap = ux.Clamp(*history, 10, 240)
-	}
-	timeout := time.Duration(ux.Clamp(cfgLoaded.TimeoutMs, 100, 60000)) * time.Millisecond
-	alarmRateKbps := ux.Clamp(cfgLoaded.AlarmRateKbps, 0, 1000000)
-	if *alarmRate > 0 {
-		alarmRateKbps = ux.Clamp(*alarmRate, 0, 1000000)
-	}
-	alarmLatencyMs := ux.Clamp(cfgLoaded.AlarmLatencyMs, 0, 60000)
-	if *alarmLat > 0 {
-		alarmLatencyMs = ux.Clamp(*alarmLat, 0, 60000)
-	}
+	// Live-tunable knobs from settings plus CLI overrides, re-clamped after a
+	// mid-watch edit (a nonzero flag always beats saved settings).
+	iv, histCap, alarmRateKbps, alarmLatencyMs, timeout :=
+		configLive(cfgLoaded, *interval, *history, *alarmRate, *alarmLat)
 
 	// Administrator-privilege handshake: counting packets needs a raw socket.
 	if os.Geteuid() != 0 && os.Getenv("GNULTE_AS_ROOT") != "1" {
@@ -288,7 +291,11 @@ func main() {
 		counter.Snapshot() // baseline so the first tick shows a real rate
 	}
 
-	// Boot notes print before the raw view takes over the screen.
+	// Banner and boot notes stay in the scrollback once the live view takes
+	// over the alternate screen, exactly like the parent gnulte tool.
+	if !*quiet {
+		printBanner()
+	}
 	if *duration > 0 {
 		fmt.Printf("  watching for %d seconds — Ctrl+C stops early\n", *duration)
 	}
@@ -307,27 +314,25 @@ func main() {
 		}
 		fmt.Fprintln(f, "# time,host,down_bps,up_bps,down_pkts,up_pkts,rtt_ms,loss_pct")
 		exp = f
-		defer f.Close()
 	}
 
-	leave := func() {}
-	inView := false
+	// Live terminal: the raw-mode full-screen watch with arrow-key navigation.
+	// Piped runs keep the plain per-tick transcript below.
+	var scr *tui.Screen
 	if !*quiet && ux.TTY() {
-		var ok bool
-		if leave, ok = tui.EnterView(); ok {
-			inView = true
-			tui.RegisterCleanup(leave) // Ctrl+C during the view restores the screen
+		if s, err := tui.Open(); err == nil {
+			scr = s
+			tui.RegisterCleanup(scr.Close) // Ctrl+C during the view restores the screen
 			if hasCounter {
 				tui.RegisterCleanup(counter.Close) // and never leaves the socket open
 			}
 		}
 	}
-	var once sync.Once
-	safeLeave := func() { once.Do(leave) }
-	defer safeLeave()
 	if hasCounter {
 		defer counter.Close()
 	}
+
+	view := &viewState{showTalk: true, auto: subnet != ""}
 
 	stats := make(map[string]*hostStat, len(hosts))
 	for _, ip := range hosts {
@@ -345,19 +350,110 @@ func main() {
 
 	tick := time.NewTicker(time.Duration(iv) * time.Second)
 	defer tick.Stop()
+
+	// The last tick's data, kept so keys can redraw between ticks.
+	var (
+		lastRates map[string]traffic.Rate
+		lastFlows []traffic.Flow
+		alarmOn   bool
+	)
+
+	// handleKey applies one key press to the view. ok reports whether anything
+	// changed and must be repainted; quit ends the watch.
+	handleKey := func(k tui.Key, r rune) (ok, quit bool) {
+		switch k {
+		case tui.KeyUp:
+			if view.cursor > 0 {
+				view.cursor--
+				return true, false
+			}
+		case tui.KeyDown:
+			if view.cursor+1 < view.count {
+				view.cursor++
+				return true, false
+			}
+		case tui.KeyEnter, tui.KeyTab:
+			view.detail = !view.detail
+			return true, false
+		case tui.KeyEsc:
+			if view.detail {
+				view.detail = false
+				return true, false
+			}
+			return true, true
+		case tui.KeyRune:
+			switch r {
+			case 'q', 'Q':
+				return true, true
+			case 's', 'S':
+				view.sortMode = (view.sortMode + 1) % 3
+				view.scroll = 0
+				return true, false
+			case 't', 'T':
+				view.showTalk = !view.showTalk
+				return true, false
+			case 'a', 'A':
+				view.alarmOnly = !view.alarmOnly
+				view.scroll = 0
+				return true, false
+			case 'h', 'H', '?':
+				view.showHelp = !view.showHelp
+				return true, false
+			case 'o', 'O':
+				if scr != nil {
+					scr.Close()
+					scr = nil
+					updated, eerr := settings.Edit(cfgLoaded)
+					if eerr == nil {
+						cfgLoaded = updated
+						if serr := settings.Save(cfgLoaded); serr != nil {
+							fmt.Fprintf(os.Stderr, "gnulte-lan: settings: %v\n", serr)
+						}
+						iv, histCap, alarmRateKbps, alarmLatencyMs, timeout =
+							configLive(cfgLoaded, *interval, *history, *alarmRate, *alarmLat)
+						tick.Reset(time.Duration(iv) * time.Second)
+					}
+					if s, err := tui.Open(); err == nil {
+						scr = s
+						tui.RegisterCleanup(scr.Close)
+					}
+					return true, false
+				}
+			}
+		}
+		return false, false
+	}
+
+	finish := func() {
+		if scr != nil {
+			scr.Close()
+			scr = nil
+		}
+		if exp != nil {
+			exp.Close()
+			exp = nil
+		}
+		sess.end = time.Now()
+		if hasCounter {
+			sess.flows = counter.FlowTotals()
+		}
+		if !*noReport {
+			wrapUpReport(sess, cfgLoaded.HTMLReport)
+		}
+	}
+
+	drawNow := func() {
+		if scr == nil {
+			return
+		}
+		scr.Draw(buildView(view, hosts, info, lastRates, lastFlows, hostSet, stats,
+			nic, subnet, iv, sess.start, alarmOn, hasCounter, ux.Height()))
+	}
+
 	for {
 		select {
 		case <-sigCtx.Done():
-			if inView {
-				safeLeave()
-			}
-			sess.end = time.Now()
-			if hasCounter {
-				sess.flows = counter.FlowTotals()
-			}
-			if !*noReport {
-				wrapUpReport(sess, cfgLoaded.HTMLReport)
-			}
+			finish()
 			return
 		case <-tick.C:
 			var rates map[string]traffic.Rate
@@ -381,7 +477,7 @@ func main() {
 			}
 			wg.Wait()
 
-			alarmOn := false
+			alarmOn = false
 			for _, ip := range hosts {
 				st := stats[ip]
 				r := rates[ip]
@@ -400,10 +496,13 @@ func main() {
 			if alarmOn && cfgLoaded.Beeps {
 				sound.Beep(720, 80*time.Millisecond)
 			}
+			lastRates, lastFlows = rates, flows
 
+			// The transcript (plain, ANSI-free) is what travels into the HTML
+			// report and the scrollback in non-interactive runs.
 			lines := buildLines(hosts, info, rates, flows, hostSet, stats, nic, iv)
-			if inView {
-				tui.DrawFrame(os.Stdout, ux.Width(), fitScreen(lines, ux.Height()))
+			if scr != nil {
+				drawNow()
 			} else {
 				for _, ln := range lines {
 					fmt.Println(ln)
@@ -416,6 +515,23 @@ func main() {
 			if capLines := 3000; len(sess.log) > capLines {
 				sess.log = sess.log[len(sess.log)-capLines:]
 			}
+		default:
+		}
+
+		// Between ticks, fold key presses into the loop without blocking it.
+		if scr != nil {
+			k, r := scr.Poll(30)
+			if k != tui.KeyNone {
+				if ok, quit := handleKey(k, r); ok {
+					drawNow()
+					if quit {
+						finish()
+						return
+					}
+				}
+			}
+		} else {
+			time.Sleep(40 * time.Millisecond)
 		}
 	}
 }
@@ -608,40 +724,12 @@ func buildLines(hosts []string, info map[string]hostInfo, rates map[string]traff
 		if st.alarm {
 			anyAlarm = true
 		}
-
-		label := ux.TruncPad(ip, 16)
-		key := "  " + ux.C(ux.Yellow, label)
+		rows := hostRowLines(ip, info[ip], r, st, iv, dense)
 		if first {
-			key = "▸ " + ux.C(ux.Yellow, label)
+			rows = cursorLines(rows)
 			first = false
 		}
-		dl := rateLine(r.RXBytes, r.RXPkts, iv)
-		ul := upRateLine(r.TXBytes, r.TXPkts, iv)
-		traffic := fmt.Sprintf("%s %s", key, ux.TruncPad(dl+"   "+ul, 40))
-
-		if dense {
-			short := idShort(info[ip])
-			pl := "  " + pingShort(st)
-			out = append(out, traffic+pl+"  "+ux.C(ux.Dim, short))
-			continue
-		}
-		out = append(out, traffic)
-		id := identityLine(info[ip])
-		switch {
-		case st.alarm:
-			id = "  " + ux.C(ux.Red, "⚠ ") + id
-		case id == "":
-			id = "  " + ux.C(ux.Dim, "no identity — ARP entry not found")
-		default:
-			id = "  " + id
-		}
-		out = append(out, id)
-		if pl := pingLine(ip, st.ping); pl != "" {
-			out = append(out, pl)
-		}
-		if st.alarm {
-			out = append(out, "  "+ux.C(ux.Red, "⚠ ALARM: over threshold (rate or latency)"))
-		}
+		out = append(out, rows...)
 	}
 
 	// Top talkers of the interval, best five conversations by combined volume.
@@ -808,18 +896,6 @@ func dirLine(mark string, b, p int64, iv int) string {
 	return mark + " " + ux.HumanRate(bps(b, iv)) + tail
 }
 
-// fitScreen trims a dashboard too tall for the terminal, replacing the excess
-// with a tally line instead of letting raw mode scroll.
-func fitScreen(lines []string, height int) []string {
-	if height < 6 || len(lines) <= height {
-		return lines
-	}
-	head := lines[:height-1]
-	tail := fmt.Sprintf("  ▾ %d more lines — shrink the watch (-t fewer hosts) or widen the terminal",
-		len(lines)-len(head))
-	return append(head, ux.C(ux.Dim, tail))
-}
-
 // wrapUpReport writes the end-of-session HTML report into the report hub,
 // asking first when a human is at the keyboard.
 func wrapUpReport(sess *lanSession, htmlDefault bool) {
@@ -848,6 +924,30 @@ func wrapUpReport(sess *lanSession, htmlDefault bool) {
 		return
 	}
 	fmt.Printf("  Report: %s\n", path)
+}
+
+// configLive clamps settings (History, TrafficSec, TimeoutMs, alarm thresholds)
+// into the dashboards' operating ranges. Nonzero flag values win over the
+// saved settings so --interval/--history/--alarm-* keep their documented edge.
+func configLive(c settings.Config, intervalFlag, historyFlag, alarmRateFlag, alarmLatencyFlag int) (iv, histCap, alarmRateKbps, alarmLatencyMs int, timeout time.Duration) {
+	iv = ux.Clamp(c.TrafficSec, 1, 10)
+	if intervalFlag > 0 {
+		iv = ux.Clamp(intervalFlag, 1, 10)
+	}
+	histCap = ux.Clamp(c.History, 10, 240)
+	if historyFlag > 0 {
+		histCap = ux.Clamp(historyFlag, 10, 240)
+	}
+	timeout = time.Duration(ux.Clamp(c.TimeoutMs, 100, 60000)) * time.Millisecond
+	alarmRateKbps = ux.Clamp(c.AlarmRateKbps, 0, 1000000)
+	if alarmRateFlag > 0 {
+		alarmRateKbps = ux.Clamp(alarmRateFlag, 0, 1000000)
+	}
+	alarmLatencyMs = ux.Clamp(c.AlarmLatencyMs, 0, 60000)
+	if alarmLatencyFlag > 0 {
+		alarmLatencyMs = ux.Clamp(alarmLatencyFlag, 0, 60000)
+	}
+	return
 }
 
 func fatal(err error) {

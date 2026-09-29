@@ -174,6 +174,9 @@ func cleanPrefix(s string) string {
 // multicast-DNS .local lookup when the LAN has no reverse zone (the common
 // case). Both are time-bounded so a quiet network cannot stall a scan.
 func Hostname(ctx context.Context, ip string) string {
+	if ctx.Err() != nil {
+		return "" // already stopping; do not start a lookup at all
+	}
 	dctx, cancel := context.WithTimeout(ctx, 600*time.Millisecond)
 	r, err := net.DefaultResolver.LookupAddr(dctx, ip)
 	cancel()
@@ -191,6 +194,10 @@ func Hostname(ctx context.Context, ip string) string {
 // bit asks the owner to reply straight to our socket, so we do not need to
 // join the group to hear it.
 func reverseMDNS(ctx context.Context, ip string) (string, bool) {
+	limit, ok := boundUntil(ctx, 800*time.Millisecond)
+	if !ok {
+		return "", false
+	}
 	ip4 := net.ParseIP(ip)
 	if ip4 == nil || ip4.To4() == nil {
 		return "", false
@@ -210,18 +217,27 @@ func reverseMDNS(ctx context.Context, ip string) (string, bool) {
 		return "", false
 	}
 	defer conn.Close()
-	deadline, has := ctx.Deadline()
-	if !has {
-		deadline = time.Now().Add(800 * time.Millisecond)
-	}
-	_ = conn.SetDeadline(deadline)
+	_ = conn.SetWriteDeadline(limit)
 	if _, err := conn.Write(b.Bytes()); err != nil {
 		return "", false
 	}
 	buf := make([]byte, 4096)
 	for {
+		// Read in slices with a context re-check: this runs once per host, so
+		// a fixed deadline would make Ctrl+C in a live sweep wait out the
+		// remaining hosts one after another.
+		if time.Now().After(limit) {
+			return "", false
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(shortRead))
 		n, err := conn.Read(buf)
 		if err != nil {
+			if ne, isNet := err.(net.Error); isNet && ne.Timeout() {
+				if ctx.Err() != nil {
+					return "", false
+				}
+				continue
+			}
 			return "", false
 		}
 		if name, ok := mdnsPTR(buf[:n]); ok {
@@ -284,6 +300,26 @@ func mdnsPTR(pkt []byte) (string, bool) {
 	return "", false
 }
 
+// boundUntil returns the earlier of the context's deadline and now+d, and
+// reports false when the context is already done. A context that carries only
+// cancellation and no deadline must still end the wait promptly: falling back
+// to a flat d leaves a Ctrl+C in a live watch unanswered for the whole window,
+// once per host.
+func boundUntil(ctx context.Context, d time.Duration) (time.Time, bool) {
+	if ctx.Err() != nil {
+		return time.Time{}, false
+	}
+	limit := time.Now().Add(d)
+	if dl, has := ctx.Deadline(); has && dl.Before(limit) {
+		return dl, true
+	}
+	return limit, true
+}
+
+// shortRead bounds a single read inside a wait loop, so the loop can re-check
+// the context often enough for a cancel to be noticed at once without spinning.
+const shortRead = 50 * time.Millisecond
+
 // BrowseMDNS works through the whole candidate list at once to name hosts that
 // ignored a one-by-one query: it fires a reverse-PTR probe at every address,
 // joins the multicast group, then listens briefly for PTR and A records. The
@@ -307,11 +343,11 @@ func BrowseMDNS(ctx context.Context, ips []string) map[string]string {
 	}
 	defer conn.Close()
 
-	deadline, has := ctx.Deadline()
-	if !has {
-		deadline = time.Now().Add(700 * time.Millisecond)
+	limit, ok := boundUntil(ctx, 700*time.Millisecond)
+	if !ok {
+		return names
 	}
-	_ = conn.SetDeadline(deadline)
+	_ = conn.SetWriteDeadline(limit)
 
 	for _, ip := range ips {
 		if names[ip] != "" {
@@ -322,8 +358,21 @@ func BrowseMDNS(ctx context.Context, ips []string) map[string]string {
 
 	buf := make([]byte, 4096)
 	for {
+		// Read in short slices rather than parking on one deadline: the
+		// context can be cancelled at any moment, and only a re-check between
+		// reads notices it.
+		if time.Now().After(limit) {
+			break
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(shortRead))
 		n, _, err := conn.ReadFromUDP(buf)
 		if err != nil {
+			if ne, isNet := err.(net.Error); isNet && ne.Timeout() {
+				if ctx.Err() != nil {
+					break // asked to stop
+				}
+				continue // slice elapsed, keep listening until the limit
+			}
 			break
 		}
 		for _, rr := range mdnsRRs(buf[:n]) {
@@ -447,14 +496,31 @@ func ServiceLabels(ctx context.Context, ips []string) map[string][]string {
 
 	var rrs []mdnsRR
 	collect := func(q []byte) {
-		_ = conn.SetDeadline(time.Now().Add(serviceBudget(ctx)))
+		budget := serviceBudget(ctx)
+		if budget <= 0 {
+			return // the caller is stopping
+		}
+		limit := time.Now().Add(budget)
+		_ = conn.SetWriteDeadline(limit)
 		if _, err := conn.Write(q); err != nil {
 			return
 		}
 		buf := make([]byte, 8192)
 		for {
+			// Sliced reads with a context re-check, so an interrupt ends the
+			// listen instead of sitting out the phase budget.
+			if time.Now().After(limit) {
+				return
+			}
+			_ = conn.SetReadDeadline(time.Now().Add(shortRead))
 			n, _, err := conn.ReadFromUDP(buf)
 			if err != nil {
+				if ne, isNet := err.(net.Error); isNet && ne.Timeout() {
+					if ctx.Err() != nil {
+						return
+					}
+					continue
+				}
 				return
 			}
 			rrs = append(rrs, mdnsRRs(buf[:n])...)
@@ -572,8 +638,13 @@ func listenMDNS() (*net.UDPConn, error) {
 }
 
 // serviceBudget bounds one phase of the service probe by the context's
-// deadline, defaulting to 900ms on a context without one.
+// deadline, defaulting to 900ms on a context without one. A context that is
+// already cancelled yields zero, which is how the caller learns to stop
+// instead of listening out a phase nobody is waiting for.
 func serviceBudget(ctx context.Context) time.Duration {
+	if ctx.Err() != nil {
+		return 0
+	}
 	if dl, ok := ctx.Deadline(); ok {
 		if rem := time.Until(dl); rem > 0 && rem < 900*time.Millisecond {
 			return rem
@@ -707,6 +778,10 @@ func mdnsRRs(pkt []byte) []mdnsRR {
 // mDNS still answer this. Bound to a second when no reply arrives; nil result
 // is not an error.
 func NetBIOSName(ctx context.Context, ip string) string {
+	limit, ok := boundUntil(ctx, 900*time.Millisecond)
+	if !ok {
+		return ""
+	}
 	raddr, err := net.ResolveUDPAddr("udp4", net.JoinHostPort(ip, "137"))
 	if err != nil {
 		return ""
@@ -720,18 +795,26 @@ func NetBIOSName(ctx context.Context, ip string) string {
 		}
 	}
 	defer conn.Close()
-	deadline, has := ctx.Deadline()
-	if !has {
-		deadline = time.Now().Add(900 * time.Millisecond)
-	}
-	_ = conn.SetDeadline(deadline)
+	_ = conn.SetWriteDeadline(limit)
 	if _, err := conn.WriteToUDP(nbstatQuery(), raddr); err != nil {
 		return ""
 	}
 	buf := make([]byte, 1024)
 	for {
+		// Short reads with a context re-check, so an interrupt ends the wait
+		// instead of running out the full second per host.
+		if time.Now().After(limit) {
+			return ""
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(shortRead))
 		n, _, err := conn.ReadFromUDP(buf)
 		if err != nil {
+			if ne, isNet := err.(net.Error); isNet && ne.Timeout() {
+				if ctx.Err() != nil {
+					return ""
+				}
+				continue
+			}
 			return ""
 		}
 		if name, ok := nbstatReply(buf[:n]); ok {

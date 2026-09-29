@@ -37,8 +37,10 @@ import (
 // ethPArp is the Ethernet type for ARP.
 const ethPArp = 0x0806
 
-// ResolveMAC returns the MAC address of the local interface.
-func (sp *Spoofer) LocalMAC() net.HardwareAddr { return sp.ourMAC }
+// ResolveMAC returns the MAC address of the local interface. It is a platform
+// accessor so this file can stay buildable off Linux, where the field holding
+// the address does not exist.
+func (sp *Spoofer) LocalMAC() net.HardwareAddr { return sp.localMAC() }
 
 // BuildARPReply crafts a complete Ethernet+ARP reply frame (padded to the
 // 60-byte minimum): dag = toMAC, src = localMAC, ARP op 2 with the claim that
@@ -91,7 +93,7 @@ func ParseARPRequest(frame []byte) (fromMAC net.HardwareAddr, fromIP, askedIP ne
 
 // IsLocal reports whether a MAC belongs to us (avoids answering our own echo).
 func (sp *Spoofer) IsLocal(mac net.HardwareAddr) bool {
-	return equalMAC(mac, sp.ourMAC)
+	return equalMAC(mac, sp.localMAC())
 }
 
 func equalMAC(a, b net.HardwareAddr) bool {

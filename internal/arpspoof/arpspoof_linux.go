@@ -40,6 +40,9 @@ type Spoofer struct {
 
 // Open binds a raw AF_PACKET socket to the interface and resolves the local
 // MAC/IPv4 it will claim frames come from. Needs root/CAP_NET_RAW.
+// localMAC backs the cross-platform LocalMAC/IsLocal helpers in arpspoof.go.
+func (sp *Spoofer) localMAC() net.HardwareAddr { return sp.ourMAC }
+
 func Open(iface string) (*Spoofer, error) {
 	nif, err := net.InterfaceByName(iface)
 	if err != nil {

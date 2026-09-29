@@ -277,6 +277,12 @@ func EnrichHostnames(ctx context.Context, rows []Row) {
 		if rows[i].Hostname != "" {
 			continue
 		}
+		// Each NetBIOS query costs a round trip, and the loop is serial, so a
+		// cancelled sweep would otherwise keep asking one host after another
+		// long after the operator asked to stop.
+		if ctx.Err() != nil {
+			return
+		}
 		if n := ident.NetBIOSName(ctx, rows[i].IP); n != "" {
 			rows[i].Hostname = n
 		}

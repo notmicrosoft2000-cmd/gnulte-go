@@ -32,9 +32,9 @@ type Spoofer struct{}
 
 func Open(iface string) (*Spoofer, error) { return nil, errOther }
 
-func (sp *Spoofer) LocalMAC() net.HardwareAddr { return nil }
-
-func (sp *Spoofer) IsLocal(mac net.HardwareAddr) bool { return false }
+// localMAC backs LocalMAC/IsLocal off Linux. There is no socket, so no address
+// of our own exists to report.
+func (sp *Spoofer) localMAC() net.HardwareAddr { return nil }
 
 func (sp *Spoofer) SendReply(toMAC net.HardwareAddr, toIP, claimedIP net.IP) error {
 	return errOther

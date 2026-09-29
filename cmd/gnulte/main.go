@@ -48,7 +48,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "15.0"
+const version = "16.0"
 
 // bootLog holds the pre-run transcript (banner, confirmation, arming) so the
 // HTML report shows the full command flow, not just the monitor's own output.
@@ -124,6 +124,7 @@ func main() {
 		listProf    = flag.Bool("list-profiles", false, "list preset profiles and exit")
 		randomArg   = flag.Bool("random", false, "randomize latency/jitter/loss every second")
 		exportArg   = flag.String("export", "", "stream per-second results to a CSV file")
+		noteArg     = flag.String("note", "", "label this session (shown in the console header and the report)")
 		dupcheckArg = flag.Bool("dupcheck", false, "scan the LAN for duplicate IPs / ARP conflicts and exit")
 		reportFile  = flag.String("report", "", "write the post-test HTML report (full log history) to FILE")
 		noReport    = flag.Bool("no-report", false, "skip writing the post-test HTML report")
@@ -288,6 +289,9 @@ func main() {
 		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 		select {
 		case <-ch:
+			// A forced exit must still put the terminal back the way it was,
+			// otherwise the user's shell comes back mute and un-typable.
+			tui.RunCleanups()
 			fmt.Fprintln(os.Stderr, "\ngnulte: forced exit on second interrupt — state restore interrupted.")
 			os.Exit(130)
 		case <-time.After(8 * time.Second):
@@ -481,6 +485,7 @@ func main() {
 		ExportFile: *exportArg,
 		Iface:      cfg.Interface,
 		Impairment: impairmentString(&ec, *profile),
+		Label:      *noteArg,
 		TCPPorts:   ux.SplitPorts(*probePorts),
 		History:    prefs.History,
 	}
@@ -525,10 +530,19 @@ func main() {
 		if !q.Found {
 			return
 		}
-		plain := fmt.Sprintf("  netem live · delayed %d · reordered %d · dropped %d · backlog %dp · delay %dms",
+		// metrics is the bare reading; the monitor's dashboard footer adds
+		// its own "netem live ·" label, so only the facts are filed there.
+		metrics := fmt.Sprintf("delayed %d · reordered %d · dropped %d · backlog %dp · delay %dms",
 			q.Delayed, q.Reordered, q.Dropped, q.Backlog, q.DelayMs)
-		fmt.Println(c(cDim, plain+"  (shaping telemetry)"))
+		plain := "  netem live · " + metrics
+		// In the multi-target dashboard the line renders inside the frame
+		// footer (session stats + netem live); the standalone print below is
+		// only for the scrolling single-target console log.
+		if len(targetsList) < 2 {
+			fmt.Println(c(cDim, plain+"  (shaping telemetry)"))
+		}
 		mon.Note(plain)
+		mon.SetNetem(metrics)
 	}
 	if mon.OnTick != nil {
 		prev := mon.OnTick
@@ -999,6 +1013,8 @@ Advanced:
       --sound             beep per ping result, pitch scales with latency (default: on)
       --no-sound          disable the per-ping beeps
       --export FILE       stream per-second results to a CSV file
+      --note TEXT         label this session (shown in the console header
+                          and the report, e.g. --note gaming-test-3)
       --report FILE       write the post-test HTML report (full log history)
       --no-report         skip writing the post-test HTML report (written by default)
       --probe-ports PORTS TCP fallback probe ports when ICMP is filtered (default 443,80,53)

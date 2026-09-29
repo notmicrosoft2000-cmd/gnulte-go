@@ -452,12 +452,16 @@ func buildView(st *viewState, hosts []string, info map[string]hostInfo, rates ma
 
 	switch st.screen {
 	case scrTalkers:
+		st.count = len(hosts)
 		out = append(out, talkersLines(hosts, info, rates, stats, flows, hostSet, env, height-overhead)...)
 	case scrFlows:
+		st.count = len(flows)
 		out = append(out, flowsLines(flows, hostSet, stats, env, height-overhead)...)
 	case scrArp:
+		st.count = len(env.neigh)
 		out = append(out, arpLines(st, hosts, info, stats, env, height-overhead)...)
 	case scrMap:
+		st.count = len(hosts) + 1 // devices plus the gateway hub
 		out = append(out, mapLines(hosts, info, rates, stats, flows, hostSet, env, height-overhead)...)
 	default:
 		// ----- host rows, windowed by line budget so the cursor never leaves
@@ -1026,15 +1030,19 @@ func arpLines(st *viewState, hosts []string, info map[string]hostInfo,
 func footerHint(st *viewState) string {
 	switch st.screen {
 	case scrTalkers:
-		return "  talkers · 1/3/4/5 screens · ↑↓ host · ⏎ gnulte · Tab/d detail · x save · q quit"
+		return fmt.Sprintf("  talkers · %d ranked · 1/3/4/5 screens · ↑↓ host · ⏎ gnulte · Tab/d detail · x save · q quit", st.count)
 	case scrFlows:
-		return "  flows · 1/2/4/5 screens · ↑↓ host · ⏎ gnulte · Tab/d detail · x save · q quit"
+		return fmt.Sprintf("  flows · %d pairs · 1/2/4/5 screens · ↑↓ host · ⏎ gnulte · Tab/d detail · x save · q quit", st.count)
 	case scrArp:
-		return "  neighbours · 1/2/3/5 screens · ↑↓ host · ⏎ gnulte · Tab/d detail · x save · q quit"
+		return fmt.Sprintf("  neighbours · %d · 1/2/3/5 screens · ↑↓ host · ⏎ gnulte · Tab/d detail · x save · q quit", st.count)
 	case scrMap:
-		return "  map · 1/2/3/4 screens · live edges pulsing · x save devices · h help · q quit"
+		return fmt.Sprintf("  map · %d nodes · 1/2/3/4 screens · edges = live flows · pulse = busiest link · x save devices · h help · q quit", st.count)
 	default:
-		return "  ↑↓ host · ⏎ test with gnulte · Tab/d detail · s sort · a alarm-only · 2-5 screens · x save devices · o settings · h help · q quit"
+		filter := ""
+		if st.alarmOnly {
+			filter = " · alarming only"
+		}
+		return fmt.Sprintf("  hosts · %d shown%s · ↑↓ host · ⏎ test with gnulte · Tab/d detail · s sort · a alarm-only · 2-5 screens · x save devices · o settings · h help · q quit", st.count, filter)
 	}
 }
 

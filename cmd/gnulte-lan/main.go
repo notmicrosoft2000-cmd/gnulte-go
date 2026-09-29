@@ -74,7 +74,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "15.0"
+const version = "16.0"
 
 // hostInfo is the identity enrichment for one watched host.
 type hostInfo struct {
@@ -378,8 +378,9 @@ func main() {
 	var scr *tui.Screen
 	if !*quiet && ux.TTY() {
 		if s, err := tui.Open(); err == nil {
+			// tui.Open registers scr.Close itself, so an interrupt (or a
+			// forced exit) always puts the screen back.
 			scr = s
-			tui.RegisterCleanup(scr.Close) // Ctrl+C during the view restores the screen
 			if hasCounter {
 				tui.RegisterCleanup(counter.Close) // and never leaves the socket open
 			}
@@ -482,14 +483,6 @@ func main() {
 		}
 	}
 
-	// Key-hold state for the arrow-repeat (see holdDelay/holdRepeat below).
-	var (
-		holdKey   tui.Key
-		holdRune  rune
-		holdSince time.Time
-		holdLast  time.Time
-	)
-
 	// handleKey applies one key press to the view. ok reports whether anything
 	// changed and must be repainted; quit ends the watch. Handoff hints and
 	// save confirmations live in view.gCmd until the next key.
@@ -591,7 +584,6 @@ func main() {
 					}
 					if s, err := tui.Open(); err == nil {
 						scr = s
-						tui.RegisterCleanup(scr.Close)
 					}
 					return true, false
 				}
@@ -721,35 +713,25 @@ func main() {
 		}
 
 		// Between ticks, fold key presses into the loop without blocking it.
+		// There is deliberately NO app-side hold-repeat: a raw terminal sends
+		// no key-up event, so an app-side "still held?" repeat cannot tell a
+		// held key from a single tap — it made one tap scroll forever (each
+		// tick re-applied the arrow until it hit an edge). Every physical
+		// press delivers exactly one sequence, and a held key repeats as fresh
+		// sequences from the OS, so a tap moves one row and holding scrolls at
+		// the system repeat rate. A short drain applies queued taps immediately
+		// instead of stacking them behind the interval tick.
 		if scr != nil {
-			k, r := scr.Poll(30)
-			if k != tui.KeyNone {
-				holdKey, holdRune, holdSince, holdLast = tui.KeyNone, 0, time.Time{}, time.Time{}
+			for n := 0; n < 64; n++ {
+				k, r := scr.Poll(2)
+				if k == tui.KeyNone {
+					break
+				}
 				if ok, quit := handleKey(k, r); ok {
 					drawNow()
 					if quit {
 						finish()
 						return
-					}
-					if k == tui.KeyUp || k == tui.KeyDown {
-						holdKey, holdRune, holdSince = k, r, time.Now()
-					}
-				}
-			} else if holdKey != tui.KeyNone {
-				// Raw terminals deliver exactly one press per key (no OS
-				// auto-repeat), so repeat a held arrow ourselves: after a
-				// short delay, re-apply it on the same cadence as a fast tap,
-				// stopping at the first edge or when any new key arrives —
-				// the same hold-to-scroll feel as htop.
-				now := time.Now()
-				if now.Sub(holdSince) >= holdDelay &&
-					(holdLast.IsZero() || now.Sub(holdLast) >= holdRepeat) {
-					before := view.cursor
-					if ok, _ := handleKey(holdKey, holdRune); ok && view.cursor != before {
-						holdLast = now
-						drawNow()
-					} else {
-						holdKey, holdRune = tui.KeyNone, 0 // hit an edge — stop
 					}
 				}
 			}
@@ -758,13 +740,6 @@ func main() {
 		}
 	}
 }
-
-// Hold-to-repeat timing: how long a pressed arrow is held before it starts
-// repeating, and the repeat gap after that.
-const (
-	holdDelay  = 380 * time.Millisecond
-	holdRepeat = 60 * time.Millisecond
-)
 
 // parseHosts validates and de-duplicates the comma-separated target list.
 func parseHosts(s string) []string {

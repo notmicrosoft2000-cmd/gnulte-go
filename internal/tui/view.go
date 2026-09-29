@@ -19,6 +19,7 @@ package tui
 
 import (
 	"os"
+	"sync"
 
 	"gnulte-go/internal/ux"
 )
@@ -27,10 +28,16 @@ import (
 // can redraw in place without scrolling the scrollback or flashing the shell
 // prompt. The returned function restores the primary buffer; ok is false when
 // the output is not a live terminal (piped runs fall back to plain lines).
+//
+// The cleanup is idempotent. A caller defers it on the normal path *and*
+// registers it with RegisterCleanup, so one Ctrl+C restores the screen twice
+// over — and a second buffer switch lands in the middle of whatever the tool
+// prints next.
 func EnterView() (cleanup func(), ok bool) {
 	if !ux.TTY() {
 		return func() {}, false
 	}
 	os.Stdout.WriteString("\033[?1049h")
-	return func() { os.Stdout.WriteString("\033[?1049l") }, true
+	var once sync.Once
+	return func() { once.Do(func() { os.Stdout.WriteString("\033[?1049l") }) }, true
 }

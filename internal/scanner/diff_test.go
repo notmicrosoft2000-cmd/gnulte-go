@@ -105,3 +105,27 @@ func TestDeltaChangesNarrowsToMovement(t *testing.T) {
 		}
 	}
 }
+
+func TestDeltaChangeIPsSorted(t *testing.T) {
+	d := Delta{
+		"10.0.0.1": DeltaAlive,
+		"10.0.0.10": DeltaNew,
+		"10.0.0.2": DeltaGone,
+		"10.0.0.3": DeltaChanged,
+	}
+	got := d.ChangeIPs()
+	want := []string{"10.0.0.10", "10.0.0.2", "10.0.0.3"}
+	if len(got) != len(want) {
+		t.Fatalf("ChangeIPs = %v, want %v (alive excluded)", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("ChangeIPs[%d] = %q, want %q (byte-sorted)", i, got[i], want[i])
+		}
+	}
+	for _, ip := range got {
+		if ip == "10.0.0.1" {
+			t.Errorf("alive host leaked into ChangeIPs: %v", got)
+		}
+	}
+}

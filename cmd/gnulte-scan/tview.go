@@ -99,7 +99,7 @@ func interactiveTable(rows []discover.Row, log []string, watchEvery int, rescan 
 	}
 	defer scr.Close()
 
-	t := &tvTable{rows: rows, sortBy: sortIP, detail: -1, log: log, watchEvery: watchEvery}
+	t := &tvTable{rows: rows, sortBy: sortIP, detail: -1, log: log, watchEvery: watchEvery, rescanable: rescan != nil}
 	if watchEvery > 0 && rescan != nil {
 		watchCh := make(chan []discover.Row, 2)
 		go func() {
@@ -277,6 +277,18 @@ func interactiveTable(rows []discover.Row, log []string, watchEvery int, rescan 
 						t.build()
 					}
 				}
+			case 'r', 'R':
+				// Manual re-scan: fold a fresh sweep in right now, so the
+				// operator need not wait for the next watch interval. Same
+				// apply path as the background watcher.
+				if rescan != nil {
+					if next := rescan(); len(next) > 0 {
+						t.applyDelta(next)
+						if s := t.delta.Summary(); s != "no change" {
+							t.log = append(t.log, "  watch: "+s)
+						}
+					}
+				}
 			}
 		}
 	}
@@ -352,8 +364,10 @@ type tvTable struct {
 	// --watch live re-scan (v15 "Live Interconnection"): the table re-scans
 	// every watchEvery seconds and marks how each host moved since the last
 	// sweep. delta maps an IP to its movement; GONE hosts stay visible,
-	// dimmed, so disappearances are never silently forgotten.
+	// dimmed, so disappearances are never silently forgotten. v16 adds a
+	// manual 'r' re-scan whenever a sweep function is available.
 	watchEvery int
+	rescanable bool
 	delta      scanner.Delta
 	watchCh    chan []discover.Row // nil when not watching
 }
@@ -471,11 +485,20 @@ func (t *tvTable) draw(scr *tui.Screen) {
 	if t.desc {
 		dir = "desc"
 	}
-	status := fmt.Sprintf("sort %s (%s) · %d/%d shown · colour = type · ↑↓ move · ⏎ details · / filter · s sort · q quit",
-		sortName, dir, len(t.view), len(t.rows))
+	// Data first, key hints last: the frame pads/truncates each line to the
+	// terminal width, so anything appended past ~120 columns is silently cut.
+	// Putting the live-watch state up front keeps it visible on narrow windows.
+	status := fmt.Sprintf("sort %s (%s) · %d/%d shown", sortName, dir, len(t.view), len(t.rows))
 	if t.watchEvery > 0 {
 		status += fmt.Sprintf(" · Δ live watch every %ds", t.watchEvery)
 	}
+	if t.delta != nil {
+		status += " · ▲ new ▼ gone ~ changed"
+	}
+	if t.rescanable {
+		status += " · r rescan"
+	}
+	status += " · colour = type · ↑↓ move · ⏎ details · / filter · s sort · q quit"
 	if t.filterEdit {
 		status = "filter: " + string(t.filter) + "▌   (⏎ apply · esc clear)"
 	}

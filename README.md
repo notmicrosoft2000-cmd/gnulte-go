@@ -1,16 +1,16 @@
 # GNULTE · Go edition
 
-> **v15.0 — “Live Interconnection”** · the GNU LAN Network Testing Environment, rewritten in pure Go
+> **v16.0 — “Steady Hands”** · the GNU LAN Network Testing Environment, rewritten in pure Go
 > (standard library only, no external dependencies)
 
-![version](https://img.shields.io/badge/version-15.0-62a0ea)
+![version](https://img.shields.io/badge/version-16.0-62a0ea)
 ![language](https://img.shields.io/badge/Go-1.21-00ADD8)
 ![platform](https://img.shields.io/badge/platform-Linux-9cf)
 ![tests](https://img.shields.io/badge/tests-go%20vet%20%2B%20go%20test-2ea44f)
 ![license](https://img.shields.io/badge/license-GPL--3.0--or--later-%23c0392b)
 [![website](https://img.shields.io/badge/website-GNULTE%20site-1d3a5c)](https://notmicrosoft2000-cmd.github.io/gnulte/)
 
-![GNULTE v15.0 — Live Interconnection](social-preview.png)
+![GNULTE v16.0 — Steady Hands](social-preview.png)
 
 GNULTE is a suite of focused Linux tools for measuring how devices behave when
 their network misbehaves — on networks you own or are explicitly authorised to
@@ -28,28 +28,41 @@ toolkit shares one live view of your network.
 | `gnulte-devices` | no | Instant ARP/neighbour inventory — vendors, mDNS hostnames, type guesses, HTML reports |
 | `gnulte-wifi` | **yes** | Targeted 802.11 deauthentication for authorised Wi-Fi disassociation testing — per-frame jitter, rotating reason codes, channel hopping |
 
-## Live Interconnection (v15)
+## Steady Hands (v16)
 
-One shared device store (`~/.config/gnulte-go/devices.json`) wires the five
-tools together — **one watch feeds the whole toolkit**:
+A stability release. The base is still v15's **Live Interconnection** — one
+shared device store (`~/.config/gnulte-go/devices.json`) wiring the five tools
+together — with the sharp edges filed off and a few things added:
 
-- **gnulte-lan screen 5 — the map.** Devices become nodes; live flows become
-  edges that pulse (`▸`) as traffic moves, re-arranged to a stable layout
-  every tick. Like FLOWS it needs the raw capture socket, announced with an
-  explicit `⛔ needs the capture socket (root)` gate otherwise.
-- **Handoff.** Press `⏎` (or `g`) on a host and `gnulte -t <ip>` opens against
-  it in a fresh terminal — or prints the exact command when no terminal
-  emulator is found. The detail pane moved to `Tab`/`d`.
-- **Live shaping telemetry.** While a run is live, the dashboard reads the
-  kernel queue (`tc -s qdisc`) and shows `netem live · delayed … · reordered …
-  · dropped … · backlog … · delay …` — the impairment landing on real packets.
-- **Targets from the watch.** `w` in the target menu picks devices straight
-  from the shared store; gnulte-scan’s `-T` Summary cross-references the same
-  store (`known from last LAN watch`).
-- **Live re-scan.** `gnulte-scan --watch 5` re-discovers every N seconds and
-  prints exactly what moved — `▲` new · `▼` gone · `~` changed — and the `-T`
-  browser runs the same cadence, marks each row, and adds `/` filter focus
-  plus `v` vendor filtering.
+- **Ctrl+C exits cleanly instead of killing the run.** A shared signal handler
+  was racing each tool's own graceful shutdown and winning with a hard
+  `os.Exit(130)`, so the first Ctrl+C cut a run dead mid-teardown. It now
+  restores the screen and terminal on the first signal and lets the shutdown
+  finish, forcing the exit only on a *second* Ctrl+C or after a grace period.
+  This was not cosmetic: the old hard kill skipped `sess.Stop()`, leaving
+  targets with a poisoned ARP cache and no connectivity.
+- **A live watch stops when you tell it to.** The name-identification waits
+  (reverse DNS, mDNS, NetBIOS) bounded themselves by a *deadline* but never
+  checked for *cancellation* — exactly what `signal.NotifyContext` produces —
+  so interrupting a scan mid-sweep took **10.9s** to respond. Every wait now
+  ends at once. Measured: **0.00s**.
+- **Honest sampling cadence.** The gap is measured from when a reading lands,
+  not from when the probe started, so a target that takes two seconds to answer
+  still gets its full one-second gap instead of the next probe firing the
+  instant the slow one returns. A run also starts measuring immediately.
+- **gnulte-lan arrows do one thing.** The phantom-repeat bug is gone: holding
+  an arrow key no longer scoots the cursor dozens of rows past where you
+  pointed it. Two quick taps still queue and drain as two moves.
+- **`gnulte --note TEXT`.** Label a run at launch; the note rides into the
+  console header and the report.
+- **`gnulte-scan --watch N --json`.** One JSON object per sweep on stdout
+  (`{"kind":"baseline"}`, then `{"kind":"delta"}` with the movement), narrative
+  to stderr — so `gnulte-scan --watch 5 --json | jq` is a working motion
+  sensor. Mutually exclusive with `-q`/`--yaml`/`--csv`.
+- **Quick scan.** `r` re-scans on demand in the `-T` browser, with a
+  `▲ new ▼ gone ~ changed` legend on the status line. Devices the shared store
+  already knows are marked `*` in the target picker, and you can select by
+  keyword (`Mobile`, `@hostname`).
 
 ## Install
 

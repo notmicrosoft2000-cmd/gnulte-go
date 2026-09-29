@@ -195,6 +195,14 @@ type Monitor struct {
 	Iface      string
 	Impairment string
 
+	// Label decorates the console header and report with a short session
+	// name (the --note flag), e.g. "gaming-test-3".
+	Label string
+
+	// Start is bound when Run begins; the dashboard footer shows the elapsed
+	// session time.
+	Start time.Time
+
 	// TCPPorts are the fallback probe ports tried when the target does not
 	// answer ICMP echo (many hosts and firewalls filter it). Defaults to
 	// 443, 80, 53 when empty. A TCP SYN/ACK or RST both prove the host is alive
@@ -215,6 +223,12 @@ type Monitor struct {
 	// OnTick is invoked once per second while the monitor runs.
 	OnTick func()
 
+	// sampleFn takes one measurement. It is a field only so tests can drive
+	// the sampling loops with a probe of a chosen duration; nil means sample.
+	// The cadence the loops enforce around it is exactly what has to hold for
+	// a slow target, so it is worth being able to test that directly.
+	sampleFn func(ctx context.Context, ip string) (RTT, string, bool)
+
 	// Traffic counts live per-host bytes/packets on Iface when the interface
 	// name is known and the raw socket can be opened (root). It upgrades the
 	// console with a down/up rate per target; without it, the console simply
@@ -228,6 +242,11 @@ type Monitor struct {
 	// mu guards stats[i]/lastNote[i] writes from the per-target goroutines
 	// against the dashboard reader in the main loop.
 	mu sync.Mutex
+
+	// netem is the latest live shaping-telemetry summary for the dashboard
+	// footer ("" = the OnTick hook has not reported yet). Written via SetNetem
+	// from the monitor's own loop; read under mu in renderDashboard.
+	netem string
 
 	// Results is filled once Run returns.
 	Results []Result
@@ -256,6 +275,16 @@ func (m *Monitor) rec(line string) {
 // line and then file the matching plain line here.
 func (m *Monitor) Note(line string) {
 	m.rec(line)
+}
+
+// SetNetem files the latest live shaping-telemetry summary so the dashboard
+// footer can render it inside the frame, next to the session totals. OnTick
+// hooks call it from the monitor's own loop, so it needs no lock of its own
+// (the footer reads it under mu, safe on any scheduling).
+func (m *Monitor) SetNetem(line string) {
+	m.mu.Lock()
+	m.netem = line
+	m.mu.Unlock()
 }
 
 func (m *Monitor) publish(ip string, st *Stats) {
@@ -329,6 +358,9 @@ func (m *Monitor) probePorts() []int {
 // is not misread as offline. It returns the RTT, a human note ("ttl=64",
 // "tcp:443 4ms") and whether the target answered at all.
 func (m *Monitor) sample(ctx context.Context, ip string) (rtt RTT, note string, ok bool) {
+	if m.sampleFn != nil {
+		return m.sampleFn(ctx, ip)
+	}
 	rtt, ttl := PingOnce(ctx, ip, m.timeout())
 	if rtt >= 0 {
 		if ttl > 0 {
@@ -346,6 +378,7 @@ func (m *Monitor) sample(ctx context.Context, ip string) (rtt RTT, note string, 
 // Run blocks until ctx is cancelled. Renders console-log history for one
 // target or a live dashboard for several.
 func (m *Monitor) Run(ctx context.Context) error {
+	m.Start = time.Now()
 	if err := m.openExport(); err != nil {
 		return err
 	}
@@ -402,6 +435,9 @@ func (m *Monitor) printHeader() {
 	if m.Impairment != "" {
 		line(fmt.Sprintf("  impairment  %s", m.Impairment), fmt.Sprintf("  impairment  %s", m.Impairment))
 	}
+	if m.Label != "" {
+		line(fmt.Sprintf("  note        %s", m.Label), fmt.Sprintf("  note        %s", m.Label))
+	}
 	line(fmt.Sprintf("  session     %s", bits), fmt.Sprintf("  session     %s", bits))
 	if len(m.Targets) > 1 && !m.Quiet && stdinIsTTY() {
 		hint := "  ↑/↓ pick the target you hear · Ctrl+C stop"
@@ -414,86 +450,107 @@ func (m *Monitor) printHeader() {
 		"══════════════════════════════════════════════════════════════")
 }
 
+// waitInterval is the rest half of the sampling cadence. It reports false once
+// the context is done, so callers can fold their shutdown into the same place.
+//
+// The gap is deliberately measured from the moment a sample *finishes* rather
+// than from a fixed tick. A ticker starts the next sample on schedule, so any
+// probe slower than the interval leaves its tick already queued and the next
+// one fires the instant the slow probe lands: a 2-second probe silently turns
+// a 1-second cadence into back-to-back probes. Sampling, showing, then waiting
+// the full interval keeps the promised gap on screen however long the host
+// takes to answer — and a host that stops answering costs its timeout, not the
+// whole rest of the loop.
+func waitInterval(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		d = time.Second
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
 // runSingle prints each sample as a permanent log line (matches the Bash
 // single-target console-log style), with a summary line every 10 samples.
 func (m *Monitor) runSingle(ctx context.Context, ip string) error {
 	st := &Stats{Samples: []int{}}
-	tick := time.NewTicker(m.Interval)
-	defer tick.Stop()
 	seq := 0
 	prev := RTT(-1)
 	for {
-		select {
-		case <-ctx.Done():
+		// honour an interrupt without bouncing through another ping
+		if ctx.Err() != nil {
 			m.singleSummary(ip, st)
 			m.publish(ip, st)
 			return nil
-		case <-tick.C:
-			// honour an interrupt without bouncing through another ping
-			select {
-			case <-ctx.Done():
-				m.singleSummary(ip, st)
-				m.publish(ip, st)
-				return nil
-			default:
+		}
+		rtt, note, ok := m.sample(ctx, ip)
+		seq++
+		m.exportCSV(ip, rtt)
+		st.Last = rtt
+		now := time.Now().Format("15:04:05")
+		if !ok {
+			st.Drops++
+			plain := fmt.Sprintf("  #%03d [%s] ✗ %-16s %10s  %s  %s",
+				seq, now, ip, "unreachable", "timeout",
+				fmt.Sprintf("(no reply in %ds)", int(m.timeout()/time.Second)))
+			if !m.Quiet {
+				fmt.Printf("  %s [%s] %s %-16s %10s  %s %s\n",
+					segColor(seq), now, tickMark(false), ip,
+					paint(cRed+cBold, "unreachable"), paint(cDim, "timeout"),
+					dim(fmt.Sprintf("(no reply in %ds)", int(m.timeout()/time.Second))))
+				m.rec(plain)
 			}
-			rtt, note, ok := m.sample(ctx, ip)
-			seq++
-			m.exportCSV(ip, rtt)
-			st.Last = rtt
-			now := time.Now().Format("15:04:05")
-			if !ok {
-				st.Drops++
-				plain := fmt.Sprintf("  #%03d [%s] ✗ %-16s %10s  %s  %s",
-					seq, now, ip, "unreachable", "timeout",
-					fmt.Sprintf("(no reply in %ds)", int(m.timeout()/time.Second)))
-				if !m.Quiet {
-					fmt.Printf("  %s [%s] %s %-16s %10s  %s %s\n",
-						segColor(seq), now, tickMark(false), ip,
-						paint(cRed+cBold, "unreachable"), paint(cDim, "timeout"),
-						dim(fmt.Sprintf("(no reply in %ds)", int(m.timeout()/time.Second))))
-					m.rec(plain)
-				}
-				if m.Sound {
-					sound.PingResult(0, false)
-				}
-			} else {
-				st.Count++
-				st.Total += int64(rtt)
-				if st.Min == 0 || int64(rtt) < st.Min {
-					st.Min = int64(rtt)
-				}
-				if int64(rtt) > st.Max {
-					st.Max = int64(rtt)
-				}
-				st.Samples = append(st.Samples, rtt)
-				m.trimHistory(st)
-				if !m.Quiet {
-					if note == "" {
-						note = "—"
-					}
-					if strings.HasPrefix(note, "tcp:") {
-						note += dim("  (icmp silent)")
-					}
-					line, plainLine := m.singleLine(seq, now, ip, rtt, note, prev)
-					if tr := m.rateText(ip); tr != "" {
-						line += "  " + paint(cCyan, tr)
-						plainLine += "  " + tr
-					}
-					fmt.Println(line)
-					m.rec(plainLine)
-				}
-				if m.Sound {
-					sound.PingResult(rtt, true)
-				}
-				prev = rtt
+			if m.Sound {
+				sound.PingResult(0, false)
 			}
-			if st.attempts()%10 == 0 {
-				m.singleSummary(ip, st)
+		} else {
+			st.Count++
+			st.Total += int64(rtt)
+			if st.Min == 0 || int64(rtt) < st.Min {
+				st.Min = int64(rtt)
 			}
-			if m.OnTick != nil {
-				m.OnTick()
+			if int64(rtt) > st.Max {
+				st.Max = int64(rtt)
 			}
+			st.Samples = append(st.Samples, rtt)
+			m.trimHistory(st)
+			if !m.Quiet {
+				if note == "" {
+					note = "—"
+				}
+				if strings.HasPrefix(note, "tcp:") {
+					note += dim("  (icmp silent)")
+				}
+				line, plainLine := m.singleLine(seq, now, ip, rtt, note, prev)
+				if tr := m.rateText(ip); tr != "" {
+					line += "  " + paint(cCyan, tr)
+					plainLine += "  " + tr
+				}
+				fmt.Println(line)
+				m.rec(plainLine)
+			}
+			if m.Sound {
+				sound.PingResult(rtt, true)
+			}
+		}
+		prev = rtt
+		if st.attempts()%10 == 0 {
+			m.singleSummary(ip, st)
+		}
+		if m.OnTick != nil {
+			m.OnTick()
+		}
+		// The sample is on screen; now give it the full interval before
+		// the next one, so the gap stays a gap even when the host is slow.
+		if !waitInterval(ctx, m.Interval) {
+			m.singleSummary(ip, st)
+			m.publish(ip, st)
+			return nil
 		}
 	}
 }
@@ -575,8 +632,14 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 	// Arrow-key selection. The reader forces the selection to the first host
 	// when the terminal cannot be switched raw, so beeps always have a target.
 	keyboard := len(m.Targets) > 1 && !m.Quiet && stdinIsTTY()
-	restore := enableKeyboard(len(m.Targets), &m.sel)
+	restore, keyboardActive := enableKeyboard(len(m.Targets), &m.sel)
 	defer restore()
+	if keyboardActive {
+		// Raw input is invisible in the terminal's eyes: a process killed
+		// here leaves a shell with no echo and no working Enter. The restore
+		// has to be reachable from the last-resort cleanups too.
+		tui.RegisterCleanup(restore)
+	}
 
 	// Flicker-free dashboard: switch to the terminal's alternate buffer and
 	// repaint the whole frame in one flush every tick, so there is no per-line
@@ -597,63 +660,61 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 		wg.Add(1)
 		go func(i int, ip string) {
 			defer wg.Done()
-			tick := time.NewTicker(m.Interval)
-			defer tick.Stop()
 			for {
-				select {
-				case <-ctx.Done():
+				// Same cadence rule as the single-target console: sample,
+				// paint, then wait the full interval. A ticker would let a
+				// slow target's overdue tick fire the instant its probe
+				// lands, which is exactly when the row is least useful.
+				if ctx.Err() != nil {
 					return
-				case <-tick.C:
-					select {
-					case <-ctx.Done():
-						return
-					default:
+				}
+				rtt, note, ok := m.sample(ctx, ip)
+				m.exportCSV(ip, rtt)
+				m.mu.Lock()
+				lastNote[i] = note
+				stats[i].Last = rtt
+				if ok {
+					stats[i].Count++
+					stats[i].Total += int64(rtt)
+					if stats[i].Min == 0 || int64(rtt) < stats[i].Min {
+						stats[i].Min = int64(rtt)
 					}
-					rtt, note, ok := m.sample(ctx, ip)
-					m.exportCSV(ip, rtt)
-					m.mu.Lock()
-					lastNote[i] = note
-					stats[i].Last = rtt
+					if int64(rtt) > stats[i].Max {
+						stats[i].Max = int64(rtt)
+					}
+					stats[i].Samples = append(stats[i].Samples, rtt)
+					m.trimHistory(stats[i])
+				} else {
+					stats[i].Drops++
+				}
+				m.mu.Unlock()
+				// Beep every sample of the host the arrows have selected,
+				// pitched by its latency — the sound mirrors what the
+				// selected target's link is doing right now.
+				if m.Sound && int(atomic.LoadInt32(&m.sel)) == i {
+					sound.PingResult(rtt, ok)
+				}
+				if !m.Quiet {
+					// History line: one permanent row per sample so the
+					// report carries the whole log, not just the snapshot.
+					mark, rttS := "✓", "—"
 					if ok {
-						stats[i].Count++
-						stats[i].Total += int64(rtt)
-						if stats[i].Min == 0 || int64(rtt) < stats[i].Min {
-							stats[i].Min = int64(rtt)
-						}
-						if int64(rtt) > stats[i].Max {
-							stats[i].Max = int64(rtt)
-						}
-						stats[i].Samples = append(stats[i].Samples, rtt)
-						m.trimHistory(stats[i])
+						rttS = fmt.Sprintf("%dms", rtt)
 					} else {
-						stats[i].Drops++
+						mark = "✗"
 					}
-					m.mu.Unlock()
-					// Beep every sample of the host the arrows have selected,
-					// pitched by its latency — the sound mirrors what the
-					// selected target's link is doing right now.
-					if m.Sound && int(atomic.LoadInt32(&m.sel)) == i {
-						sound.PingResult(rtt, ok)
+					noteS := note
+					if !ok {
+						noteS = "unreachable"
 					}
-					if !m.Quiet {
-						// History line: one permanent row per sample so the
-						// report carries the whole log, not just the snapshot.
-						mark, rttS := "✓", "—"
-						if ok {
-							rttS = fmt.Sprintf("%dms", rtt)
-						} else {
-							mark = "✗"
-						}
-						noteS := note
-						if !ok {
-							noteS = "unreachable"
-						}
-						if noteS == "" {
-							noteS = "—"
-						}
-						m.rec(fmt.Sprintf("  [%s] %s %-16s %10s  %s",
-							time.Now().Format("15:04:05"), mark, ip, rttS, noteS))
+					if noteS == "" {
+						noteS = "—"
 					}
+					m.rec(fmt.Sprintf("  [%s] %s %-16s %10s  %s",
+						time.Now().Format("15:04:05"), mark, ip, rttS, noteS))
+				}
+				if !waitInterval(ctx, m.Interval) {
+					return
 				}
 			}
 		}(i, ip)
@@ -759,6 +820,27 @@ func (m *Monitor) renderDashboard(stats []*Stats, lastNote []string, keyboard, v
 		}
 		lines = append(lines, fmt.Sprintf("      %-16s min %s · max %s · jitter ±%dms %s %s",
 			"", mn, mx, st.jitter(), tcpNote, spark))
+	}
+	// Session footer: elapsed time, running totals across the targets, and the
+	// latest live shaping telemetry the OnTick hook filed (netem live · …).
+	okN, dropN := 0, 0
+	for _, st := range stats {
+		okN += st.Count
+		dropN += st.Drops
+	}
+	el := "…"
+	if !m.Start.IsZero() {
+		el = time.Since(m.Start).Round(time.Second).String()
+	}
+	loss := 0.0
+	if okN+dropN > 0 {
+		loss = float64(dropN) * 100 / float64(okN+dropN)
+	}
+	sess := fmt.Sprintf("  session %s · %d host(s) · %d ok · %d lost (%.0f%%)",
+		el, len(m.Targets), okN, dropN, loss)
+	lines = append(lines, dim(sess))
+	if m.netem != "" {
+		lines = append(lines, dim("  netem live · "+m.netem))
 	}
 	lines = append(lines, fmt.Sprintf("  [%s]", time.Now().Format("15:04:05")))
 

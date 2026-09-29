@@ -8,6 +8,6 @@
 package monitor
 
 // enableKeyboard is a no-op off Linux: selection stays at the first target.
-func enableKeyboard(targets int, sel *int32) func() {
-	return func() {}
+func enableKeyboard(targets int, sel *int32) (restore func(), active bool) {
+	return func() {}, false
 }

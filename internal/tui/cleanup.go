@@ -22,21 +22,52 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 )
 
+// exitGrace is how long the first interrupt is left to the tool's own graceful
+// shutdown (cancel the session, tear the shaping tree down, print the summary)
+// before this package ends the process itself. It matches the watchdog gnulte
+// arms for the same reason, so the two never disagree about who gives up first.
+var exitGrace = 8 * time.Second
+
 // RegisterCleanup queues a terminal-restore action (leaving the alternate
-// buffer, undoing raw mode) that runs when the process is interrupted. The
-// first registration installs a SIGINT/SIGTERM handler so a Ctrl+C during a
-// full-screen view never leaves the user's terminal stranded.
+// buffer, undoing raw mode) that runs when the process is interrupted.
+//
+// The first interrupt only puts the screen back — it does not exit. Every
+// GNULTE tool installs its own SIGINT handler (signal.NotifyContext) and the
+// first signal reaches it as well, so that is the code that decides how the
+// session ends: a monitor returns, the shaping tree is torn down, the summary
+// is printed. Exiting here instead would race that shutdown, and in practice
+// won, killing the process mid-restore and leaving the terminal in raw mode
+// with the network still shaped. This handler is the safety net for the cases
+// where the graceful path never finishes: a second interrupt, or a grace period
+// that runs out.
 func RegisterCleanup(f func()) {
+	if f == nil {
+		return
+	}
+	// Each registration runs at most once, so restoring eagerly on the first
+	// interrupt cannot double-run an action that the caller also defers.
+	var once sync.Once
+	wrapped := func() { once.Do(f) }
 	mu.Lock()
-	cleanups = append(cleanups, f)
+	cleanups = append(cleanups, wrapped)
 	mu.Unlock()
 	sigOnce.Do(func() {
-		ch := make(chan os.Signal, 1)
+		ch := make(chan os.Signal, 2)
 		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 		go func() {
 			<-ch
+			RunCleanups()
+			select {
+			case <-ch:
+				// Second interrupt: the shutdown is stuck, and the screen is
+				// already sane, so leaving now is the safest option left.
+			case <-time.After(exitGrace):
+			}
+			// Anything registered while the shutdown was in flight (a new
+			// dashboard) still has to be undone before the process goes.
 			RunCleanups()
 			os.Exit(130)
 		}()

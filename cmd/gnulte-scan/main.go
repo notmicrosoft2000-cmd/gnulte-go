@@ -28,6 +28,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net"
@@ -52,7 +53,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "15.0"
+const version = "16.0"
 
 // scanPrefs holds the technical-tuning settings so deepScan and buildRows can
 // honor the SCANLTE knobs (probe retries, uptime, rogue flag, confidence,
@@ -120,14 +121,24 @@ func main() {
 		ux.Out = os.Stderr
 	}
 
-	// The --watch live re-scan owns the console, so it refuses machine modes
-	// that would either swallow the delta lines or scatter them into a stream.
+	// The --watch live re-scan owns the console. Plain mode prints the delta
+	// narrative; --json turns it into a machine feed of one JSON object per change
+	// (pair with jq/sk to script a live-ping). The other machine formats and -q
+	// would swallow the movement, so they are refused.
+	if *watchArg < 0 {
+		fatal(fmt.Errorf("--watch needs a positive interval in seconds"))
+	}
 	if *watchArg > 0 {
-		if exporting || *quiet {
-			fatal(fmt.Errorf("--watch re-scans the live console, so it cannot be combined with -q or --json/--yaml/--csv"))
+		if *quiet {
+			fatal(fmt.Errorf("--watch re-scans the live console, so it cannot be combined with -q"))
 		}
-		if *watchArg < 0 {
-			fatal(fmt.Errorf("--watch needs a positive interval in seconds"))
+		if *asYAML || *asCSV {
+			fatal(fmt.Errorf("--watch machine output is JSON only — combine --watch with --json (not --yaml/--csv)"))
+		}
+		// One sweep per tick, one JSON object per change — nothing else on
+		// stdout, like every other machine mode.
+		if *asJSON {
+			ux.Out = os.Stderr
 		}
 	}
 
@@ -395,9 +406,14 @@ func main() {
 		}
 	}
 
+	// Machine-mode live watch: a JSON-lines feed of exactly what changed each
+	// interval (baseline first, then one object per sweep with movement).
+	// stdout stays pure JSON — the console narrative already lives on stderr.
+	machineWatch := *watchArg > 0 && *asJSON
+
 	exported := false
 	switch {
-	case *asJSON:
+	case *asJSON && !machineWatch:
 		err = out.JSON(os.Stdout, rows)
 		exported = true
 	case *asYAML:
@@ -437,8 +453,18 @@ func main() {
 	// With -T the interactive screen already owns the watch, so this loop is
 	// skipped (it would otherwise keep the process alive after the user quit).
 	if *watchArg > 0 && !screenTookOver {
-		sess.pl(ux.C(ux.Dim, fmt.Sprintf("  Δ watching every %ds — live rescan, Ctrl+C to stop", *watchArg)),
-			fmt.Sprintf("  watch every %ds", *watchArg))
+		if !machineWatch {
+			sess.pl(ux.C(ux.Dim, fmt.Sprintf("  Δ watching every %ds — live rescan, Ctrl+C to stop", *watchArg)),
+				fmt.Sprintf("  watch every %ds", *watchArg))
+		} else {
+			base := map[string]any{
+				"kind":  "baseline",
+				"ts":    time.Now().UTC().Format(time.RFC3339),
+				"hosts": len(rows),
+			}
+			b, _ := json.Marshal(base)
+			fmt.Println(string(b))
+		}
 		prev := rows
 		ticker := time.NewTicker(time.Duration(*watchArg) * time.Second)
 		defer ticker.Stop()
@@ -451,9 +477,45 @@ func main() {
 				next := watchSweep()
 				d := scanner.Diff(prev, next)
 				if s := d.Summary(); s != "no change" {
-					sess.pl(ux.C(ux.Yellow, "  "+s), "  "+s)
-					for _, ln := range d.Changes() {
-						sess.pl("  "+ln, "  "+strings.TrimSpace(ln))
+					if machineWatch {
+						// One JSON object per sweep with movement. Evenside
+						// rows carry the newest state; GONE rows use the last
+						// known identity from the previous sweep.
+						info := map[string]discover.Row{}
+						for _, r := range prev {
+							info[r.IP] = r
+						}
+						for _, r := range next {
+							info[r.IP] = r
+						}
+						type chg struct {
+							Kind     string `json:"kind"`
+							IP       string `json:"ip"`
+							Hostname string `json:"hostname,omitempty"`
+							Vendor   string `json:"vendor,omitempty"`
+							Type     string `json:"type,omitempty"`
+							MAC      string `json:"mac,omitempty"`
+						}
+						changes := []chg{}
+						for _, ip := range d.ChangeIPs() {
+							r := info[ip]
+							changes = append(changes, chg{d[ip].String(), ip, r.Hostname, r.Vendor, r.Type, r.MAC})
+						}
+						obj := map[string]any{
+							"kind":    "delta",
+							"ts":      time.Now().UTC().Format(time.RFC3339),
+							"summary": s,
+							"changes": changes,
+						}
+						b, merr := json.Marshal(obj)
+						if merr == nil {
+							fmt.Println(string(b))
+						}
+					} else {
+						sess.pl(ux.C(ux.Yellow, "  "+s), "  "+s)
+						for _, ln := range d.Changes() {
+							sess.pl("  "+ln, "  "+strings.TrimSpace(ln))
+						}
 					}
 				}
 				prev = next
@@ -548,6 +610,12 @@ func subnetString(cfg netutil.Config) string {
 func buildRows(ctx context.Context, live []string, neighbors map[string]string, cfg netutil.Config) []discover.Row {
 	rows := make([]discover.Row, 0, len(live))
 	for _, ip := range live {
+		// Each host costs a reverse-DNS and an mDNS probe, and this loop is
+		// serial. After a stop request there is nothing to gain from starting
+		// the next one, and the caller is waiting on it.
+		if ctx.Err() != nil {
+			break
+		}
 		mac := neighbors[ip]
 		vendor := discover.VendorFor(mac)
 		host := discover.ResolveHost(ctx, ip)
@@ -708,7 +776,8 @@ Options:
   -q, --quiet             results only, no header/summary
       --sound             play a tone for the result
       --watch N           re-scan every N seconds, marking NEW/GONE/CHANGED hosts
-                          live (Live Interconnection; needs the console, not -q/--json)
+                          live (Live Interconnection); with --json it streams a
+                          JSON-lines delta feed (baseline + per-sweep changes)
       --report FILE       write the post-test HTML report (full log history)
       --no-report         skip writing the HTML report (written by default)
       --settings          open the settings editor (saved defaults) and exit

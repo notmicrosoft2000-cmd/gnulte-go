@@ -20,25 +20,27 @@ import (
 
 // enableKeyboard puts stdin into raw input mode and starts a reader that moves
 // *sel with the up/down arrows (and the vim-style j/k) within the target list.
-// The returned function restores the terminal and stops the reader. When the
-// terminal cannot be switched (piped stdin), the reader forces the selection
-// to target 0 and a no-op restore is returned.
-func enableKeyboard(targets int, sel *int32) func() {
+// The returned function restores the terminal and stops the reader; active
+// reports whether the terminal was actually switched, so callers can also
+// register the restore as a last-resort cleanup. When the terminal cannot be
+// switched (piped stdin), the reader forces the selection to target 0 and a
+// no-op restore is returned.
+func enableKeyboard(targets int, sel *int32) (restore func(), active bool) {
 	if targets <= 1 {
-		return func() {}
+		return func() {}, false
 	}
 	fd := int(os.Stdin.Fd())
 	var old syscall.Termios
 	if _, _, errno := syscall.Syscall6(syscall.SYS_IOCTL, uintptr(fd), syscall.TCGETS,
 		uintptr(unsafe.Pointer(&old)), 0, 0, 0); errno != 0 {
-		return func() {}
+		return func() {}, false
 	}
 	raw := old
 	raw.Iflag &^= syscall.ICRNL | syscall.IXON | syscall.ISTRIP
 	raw.Lflag &^= syscall.ICANON | syscall.ECHO
 	if _, _, errno := syscall.Syscall6(syscall.SYS_IOCTL, uintptr(fd), syscall.TCSETS,
 		uintptr(unsafe.Pointer(&raw)), 0, 0, 0); errno != 0 {
-		return func() {}
+		return func() {}, false
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -53,7 +55,7 @@ func enableKeyboard(targets int, sel *int32) func() {
 			_, _, _ = syscall.Syscall6(syscall.SYS_IOCTL, uintptr(fd), syscall.TCSETS,
 				uintptr(unsafe.Pointer(&old)), 0, 0, 0)
 		})
-	}
+	}, true
 }
 
 // keyReader polls stdin and translates the up/down arrows (ESC [ A/B) plus the

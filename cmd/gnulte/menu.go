@@ -323,6 +323,18 @@ func scanAndSelect(ctx context.Context, cfg netutil.Config) []string {
 	}
 	out.SortByIP(rows)
 
+	// Devices this watch environment already knows about — the shared store
+	// written by gnulte-lan's 'x save' and read by gnulte-scan — get a '*'
+	// mark, so the quick scan's table ties straight back into their identity
+	// instead of asking the sweep to re-baptise everything.
+	known := map[string]bool{}
+	storeRecs, slerr := inventory.Load()
+	if slerr == nil {
+		for _, rec := range storeRecs {
+			known[rec.IP] = true
+		}
+	}
+
 	fmt.Println(c(cBold, "Device List:"))
 	fmt.Println(c(cDim, "  #  IP Address        Hostname         Type         Vendor"))
 	fmt.Println("  ──────────────────────────────────────────────────────────────────")
@@ -336,6 +348,14 @@ func scanAndSelect(ctx context.Context, cfg netutil.Config) []string {
 			mark = "G"
 			numCol = cTarget
 		}
+		if known[r.IP] {
+			mark = "*"
+			if r.IsSelf {
+				mark = "S*"
+			} else if r.IP == cfg.Gateway {
+				mark = "G*"
+			}
+		}
 		num := c(numCol, fmt.Sprintf("%-2d%s", i+1, mark))
 		ipc := c(ux.DeviceIPCode(r.IsSelf, r.Type), fmt.Sprintf("%-16s", r.IP))
 		hostc := c(cDim, fmt.Sprintf("%-16s", truncate(r.Hostname, 16)))
@@ -343,7 +363,12 @@ func scanAndSelect(ctx context.Context, cfg netutil.Config) []string {
 		fmt.Printf("  %s %s %s %s %s\n", num, ipc, hostc, typc, truncate(r.Vendor, 18))
 	}
 	fmt.Println("  ──────────────────────────────────────────────────────────────────")
-	fmt.Println("  " + c(cDim, "colours by type · bright = this host · yellow = gateway | 'r' = all · 0 = exit"))
+	legend := "colours by type · bright = this host · yellow = gateway | 'r' = all · 0 = exit"
+	if len(known) > 0 {
+		legend += " · * = known from the last LAN watch"
+	}
+	fmt.Println("  " + c(cDim, legend))
+	fmt.Println("  " + c(cDim, "pick by number list · type · vendor · @hostname — e.g. '2,7', 'phone', 'xiaomi', '@office'"))
 	fmt.Println("  " + c(cDim, "For deeper identification — vendors, types, mDNS services, port scans — run"))
 	fmt.Println("  " + c(cDim, "gnulte-scan (SCANLTE: 'gnulte-scan -T') or investigate the network yourself."))
 	if store, err := inventory.Load(); err == nil && len(store) > 0 {
@@ -384,13 +409,47 @@ func scanAndSelect(ctx context.Context, cfg netutil.Config) []string {
 		} else {
 			for _, part := range strings.Split(sel, ",") {
 				part = strings.TrimSpace(part)
-				n, err := strconv.Atoi(part)
-				if err != nil || n < 1 || n > len(rows) {
-					fmt.Printf("  %s invalid selection: %s\n", warnText(""), part)
+				if part == "" {
+					continue
+				}
+				// A pure number is the 1-based row index from the table.
+				if n, err := strconv.Atoi(part); err == nil {
+					if n < 1 || n > len(rows) {
+						fmt.Printf("  %s invalid selection: %s\n", warnText(""), part)
+						valid = false
+						break
+					}
+					chosen = append(chosen, rows[n-1].IP)
+					continue
+				}
+				// Quick-scan keywords: a device type, a vendor substring, or
+				// '@' + a hostname fragment picks every matching device —
+				// e.g. 'phone', 'xiaomi', '@office'. Like 'r', the router and
+				// this host are never swept this way.
+				match := 0
+				for _, row := range rows {
+					if row.IsSelf || row.IP == cfg.Gateway {
+						continue
+					}
+					if strings.HasPrefix(part, "@") {
+						if strings.Contains(strings.ToLower(row.Hostname), strings.ToLower(part[1:])) {
+							chosen = append(chosen, row.IP)
+							match++
+						}
+						continue
+					}
+					hay := strings.ToLower(row.Type + "|" + row.Vendor + "|" + row.Hostname)
+					if strings.Contains(hay, strings.ToLower(part)) {
+						chosen = append(chosen, row.IP)
+						match++
+					}
+				}
+				if match == 0 {
+					fmt.Printf("  %s '%s' matched no device (number, type, vendor or @hostname works)\n", warnText(""), part)
 					valid = false
 					break
 				}
-				chosen = append(chosen, rows[n-1].IP)
+				fmt.Printf("  %s '%s' → %d device(s)\n", okText(""), part, match)
 			}
 		}
 		if !valid || len(chosen) == 0 {

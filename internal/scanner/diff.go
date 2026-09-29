@@ -173,6 +173,19 @@ func (d Delta) Lines() []string {
 	return out
 }
 
+// ChangeIPs returns the IPs that moved (NEW, GONE, CHANGED), sorted — the
+// machine feed's stable change order.
+func (d Delta) ChangeIPs() []string {
+	ips := make([]string, 0, len(d)/4+1)
+	for ip, s := range d {
+		if s != DeltaAlive {
+			ips = append(ips, ip)
+		}
+	}
+	sort.Strings(ips)
+	return ips
+}
+
 // Changes narrows Lines to the movement only — NEW, GONE and CHANGED — so a
 // live watcher's console shows exactly what the network did, not the hundreds
 // of hosts that simply stayed alive.

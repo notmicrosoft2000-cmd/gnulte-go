@@ -36,6 +36,7 @@ import (
 
 	"gnulte-go/internal/discover"
 	"gnulte-go/internal/engine"
+	"gnulte-go/internal/inventory"
 	"gnulte-go/internal/netutil"
 	"gnulte-go/internal/out"
 	"gnulte-go/internal/ux"
@@ -345,6 +346,9 @@ func scanAndSelect(ctx context.Context, cfg netutil.Config) []string {
 	fmt.Println("  " + c(cDim, "colours by type · bright = this host · yellow = gateway | 'r' = all · 0 = exit"))
 	fmt.Println("  " + c(cDim, "For deeper identification — vendors, types, mDNS services, port scans — run"))
 	fmt.Println("  " + c(cDim, "gnulte-scan (SCANLTE: 'gnulte-scan -T') or investigate the network yourself."))
+	if store, err := inventory.Load(); err == nil && len(store) > 0 {
+		fmt.Println("  " + c(cYellow, "'w' = target devices from the last LAN watch ("+inventory.Summary(store)+")"))
+	}
 	fmt.Println()
 
 	for {
@@ -360,7 +364,13 @@ func scanAndSelect(ctx context.Context, cfg netutil.Config) []string {
 		}
 		var chosen []string
 		valid := true
-		if sel == "r" || sel == "a" || sel == "R" || sel == "A" {
+		if sel == "w" || sel == "W" {
+			// Live Interconnection: pick targets saved by gnulte-lan's watch.
+			chosen = pickFromStore(cfg)
+			if chosen == nil {
+				valid = false
+			}
+		} else if sel == "r" || sel == "a" || sel == "R" || sel == "A" {
 			for _, r := range rows {
 				// The router is your way in and out of the network, not a
 				// test target: sweeping it would shape your own uplink.
@@ -397,6 +407,82 @@ func scanAndSelect(ctx context.Context, cfg netutil.Config) []string {
 		fmt.Println()
 		fmt.Printf("  %s selected %d device(s): %s\n\n", okText(""), len(uniq), strings.Join(uniq, ", "))
 		return uniq
+	}
+}
+
+// pickFromStore offers the shared cross-tool device store
+// (~/.config/gnulte-go/devices.json, written by gnulte-lan's watch and read by
+// gnulte-scan) as a target picker — the Live Interconnection handoff in
+// reverse. It is useful even when the live sweep misses quiet hosts: the store
+// remembers what the watch saw. Returns the chosen IPs, or nil on cancel.
+func pickFromStore(cfg netutil.Config) []string {
+	recs, err := inventory.Load()
+	if err != nil {
+		fmt.Println("  " + c(cDim, "device store unreadable: "+err.Error()))
+		return nil
+	}
+	var rows []inventory.Record
+	for _, r := range recs {
+		if r.IP == cfg.SelfIP || r.IP == cfg.Gateway {
+			continue // the router is your uplink, not a target
+		}
+		rows = append(rows, r)
+	}
+	if len(rows) == 0 {
+		fmt.Println("  " + c(cDim, "no saved watch devices to target (self and the gateway are never targets)"))
+		return nil
+	}
+	fmt.Println(c(cBold, "Last LAN watch ("+inventory.Path()+"):"))
+	fmt.Println(c(cDim, "  #  IP Address        Name            Last seen"))
+	fmt.Println("  ──────────────────────────────────────────────────────────────")
+	for i, r := range rows {
+		name := r.Host
+		if name == "" {
+			name = r.Vendor
+		}
+		if name == "" {
+			name = r.Kind
+		}
+		seen := r.LastSeen
+		if len(seen) > 10 {
+			seen = seen[:10] // RFC3339 → date-ish
+		}
+		fmt.Printf("  %s %s %s %s\n",
+			c(cYellow, fmt.Sprintf("%-2d", i+1)),
+			c(ux.DeviceIPCode(r.IsSelf, r.Kind), fmt.Sprintf("%-16s", r.IP)),
+			c(cDim, fmt.Sprintf("%-16s", truncate(name, 16))),
+			c(cDim, seen))
+	}
+	fmt.Println("  " + c(cDim, "0 = back"))
+	for {
+		fmt.Print(c(cDim, "Enter device number(s) (comma-separated): "))
+		if !stdinReader().Scan() {
+			promptEOF = true
+			return nil
+		}
+		sel := strings.TrimSpace(stdinReader().Text())
+		if sel == "0" {
+			return nil
+		}
+		var chosen []string
+		valid := true
+		for _, part := range strings.Split(sel, ",") {
+			part = strings.TrimSpace(part)
+			n, err := strconv.Atoi(part)
+			if err != nil || n < 1 || n > len(rows) {
+				fmt.Printf("  %s invalid selection: %s\n", warnText(""), part)
+				valid = false
+				break
+			}
+			chosen = append(chosen, rows[n-1].IP)
+		}
+		if !valid || len(chosen) == 0 {
+			continue
+		}
+		fmt.Println()
+		fmt.Printf("  %s selected %d device(s) from the watch store: %s\n\n",
+			okText(""), len(chosen), strings.Join(chosen, ", "))
+		return chosen
 	}
 }
 

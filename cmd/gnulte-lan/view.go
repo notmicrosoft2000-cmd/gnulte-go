@@ -40,6 +40,11 @@ import (
 //	3 FLOWS     per-conversation pairs A ⇄ B (needs the root capture socket)
 //	4 ARP       the neighbour table: MAC · vendor · type · host · live RTT
 //
+// v15 adds screen 5, the Live Interconnection map:
+//
+//	5 MAP       gateway · self · every device as a node; live pairs as edges
+//	             (needs the root capture socket), busiest link pulsing
+//
 // Rows scale with terminal width (compact 2-line < 78 cols, normal 3-line,
 // wide 4-line ≥ 116 cols) and every host keeps one stable hue across screens
 // so you can follow a device by colour alone.
@@ -50,6 +55,7 @@ const (
 	scrTalkers
 	scrFlows
 	scrArp
+	scrMap
 )
 
 // screenLabel is the mode tag shown in the header status line.
@@ -61,6 +67,8 @@ func screenLabel(s int) string {
 		return "FLOWS"
 	case scrArp:
 		return "ARP"
+	case scrMap:
+		return "MAP"
 	default:
 		return "HOSTS"
 	}
@@ -135,6 +143,7 @@ type watchEnv struct {
 	hasCounter  bool // raw capture socket live (root)
 	width       int  // terminal columns, for layoutFor
 	neigh       map[string]string
+	pulse       bool // map screen: highlight the busiest link this draw
 }
 
 // vrow is one host row with its sort keys and rendered lines precomputed.
@@ -448,6 +457,8 @@ func buildView(st *viewState, hosts []string, info map[string]hostInfo, rates ma
 		out = append(out, flowsLines(flows, hostSet, stats, env, height-overhead)...)
 	case scrArp:
 		out = append(out, arpLines(st, hosts, info, stats, env, height-overhead)...)
+	case scrMap:
+		out = append(out, mapLines(hosts, info, rates, stats, flows, hostSet, env, height-overhead)...)
 	default:
 		// ----- host rows, windowed by line budget so the cursor never leaves
 		// the screen and the frame never overflows a short terminal -----
@@ -494,11 +505,11 @@ func buildView(st *viewState, hosts []string, info map[string]hostInfo, rates ma
 	// ----- footer hints -----
 	out = append(out, "  "+ux.C(ux.Dim, footerHint(st)))
 	if st.gCmd != "" {
-		out = append(out, "  "+ux.C(ux.Bold+ux.Green, "⬢ "+st.gCmd)+ux.C(ux.Dim, "   (run it in another terminal)"))
+		out = append(out, "  "+ux.C(ux.Bold+ux.Green, "⬢ "+st.gCmd))
 	}
 	if st.showHelp {
 		out = append(out, ux.C(ux.Dim, "  1 hosts · 2 talkers (ranked ↓/↑ + whom each talks to) · 3 flows (pairs, root socket)"))
-		out = append(out, ux.C(ux.Dim, "  4 ARP neighbours · s cycles sort · ⏎/Tab detail · o settings · Esc closes panes / back to hosts"))
+		out = append(out, ux.C(ux.Dim, "  4 ARP neighbours · 5 map (interconnection, root socket) · s sort · ⏎ test with gnulte · Tab/d detail · x save devices"))
 	}
 	// Hard guarantee: never draw taller than the terminal (a very short TTY
 	// with every pane open can exhaust even the packed budget).
@@ -743,6 +754,210 @@ func flowsLines(flows []traffic.Flow, hostSet map[string]bool, stats map[string]
 	return out
 }
 
+// mapLines is screen 5: the Live Interconnection map. The gateway is the hub,
+// this machine is the second node, every watched device is a node card, and
+// the pairs seen this interval are the edges — the busiest one pulses. The
+// edges come from the raw capture socket, so without it the screen gates
+// exactly like FLOWS.
+func mapLines(hosts []string, info map[string]hostInfo, rates map[string]traffic.Rate,
+	stats map[string]*hostStat, flows []traffic.Flow, hostSet map[string]bool,
+	env watchEnv, budget int) []string {
+
+	if !env.hasCounter {
+		return gateLines("MAP",
+			"live edges need the raw AF_PACKET socket, which is not open here — the map shows who talks to whom via live flows.")
+	}
+	out := []string{
+		"  " + ux.C(ux.Bold, "INTERCONNECTION MAP") + ux.C(ux.Dim, "  every device a node · every live pair an edge · ▸ pulses the busiest link"),
+		"",
+	}
+
+	// Hub cards: the gateway and this machine.
+	gwTxt, gwName := "◇ " + ux.C(ux.Yellow, "no gateway"), " (none detected)"
+	if env.gwIP != "" {
+		gwTxt = "  ◇ " + ux.C(ux.Yellow, env.gwIP)
+		gwName = " " + gwCell(env.gwRTT)
+		if mac := env.neigh[env.gwIP]; mac != "" {
+			if v := discover.VendorFor(mac); v != "" {
+				gwName = " · " + v + gwName
+			}
+		}
+	}
+	out = append(out, gwTxt+ux.C(ux.Dim, gwName))
+	out = append(out, "  ◉ "+ux.C(ux.Cyan, env.selfIP)+ux.C(ux.Dim, "  · this machine ("+env.nic+")"))
+	out = append(out, "  "+ux.C(ux.Dim, "┃"))
+	out = append(out, "  "+ux.C(ux.Dim, "┌──┼──┐   every device below reaches the net through the gateway"))
+
+	// Node cloud: watched devices, hue-coloured exactly like the other screens.
+	nodes := mapNodes(hosts, info, stats, env)
+	out = append(out, "  "+ux.C(ux.Dim, "devices (hue = the same per-device colour as every screen)"))
+	grid := mapGrid(nodes, env)
+	for _, line := range grid {
+		if len(out) >= budget {
+			out = append(out, ux.C(ux.Dim, "  ▾ more devices below — resize the terminal"))
+			return capMap(out, budget)
+		}
+		out = append(out, line)
+	}
+
+	// Edges: this interval's pairs that stay inside the map's own world.
+	var edges []traffic.Flow
+	for _, f := range flows {
+		if mapEndpHost(f.A, hostSet, env) && mapEndpHost(f.B, hostSet, env) {
+			edges = append(edges, f)
+		}
+	}
+	out = append(out, "")
+	out = append(out, "  "+ux.C(ux.Bold, "LIVE EDGES")+ux.C(ux.Dim, fmt.Sprintf("  %d pair(s) this interval · edge = A ⇄ B ↓ rate ↑ rate", len(edges))))
+	if len(edges) == 0 {
+		out = append(out, ux.C(ux.Dim, "  no live pairs this interval — the map is quiet"))
+	} else {
+		for _, line := range mapLinks(edges, stats, env) {
+			if len(out) >= budget {
+				out = append(out, ux.C(ux.Dim, "  ▾ more edges below — resize the terminal"))
+				break
+			}
+			out = append(out, line)
+		}
+	}
+	return capMap(out, budget)
+}
+
+// capMap guarantees the map body never exceeds its line budget.
+func capMap(out []string, budget int) []string {
+	if budget < 1 {
+		return nil
+	}
+	if len(out) > budget {
+		out = append(out[:budget-1], ux.C(ux.Dim, "  ▾ cut — resize the terminal to see the rest"))
+	}
+	return out
+}
+
+// mapNode is one device card on the map screen.
+type mapNode struct {
+	ip   string
+	name string
+	hue  int
+}
+
+// mapNodes builds the node set: every watched host except this machine and the
+// gateway (which have their own hub cards), in IP order.
+func mapNodes(hosts []string, info map[string]hostInfo, stats map[string]*hostStat, env watchEnv) []mapNode {
+	var nodes []mapNode
+	for _, ip := range hosts {
+		if ip == env.selfIP || (env.gwIP != "" && ip == env.gwIP) {
+			continue
+		}
+		name := nameOf(info[ip])
+		if name == "" {
+			name = "(no identity)"
+		}
+		nodes = append(nodes, mapNode{ip: ip, name: name, hue: stats[ip].color})
+	}
+	sort.Slice(nodes, func(i, j int) bool { return ipLess(nodes[i].ip, nodes[j].ip) })
+	return nodes
+}
+
+// mapGrid lays the node cards out in width-scaled columns: one on narrow
+// terminals, two on a normal window, three when wide. Every column card is
+// exactly as tall as its mates, so the grid always forms clean rows.
+func mapGrid(nodes []mapNode, env watchEnv) []string {
+	cols := 1
+	if env.width >= 116 {
+		cols = 3
+	} else if env.width >= 78 {
+		cols = 2
+	}
+	if len(nodes) < cols {
+		cols = len(nodes)
+	}
+	if cols <= 0 {
+		return nil
+	}
+	compact := cols == 1 && env.width < 78
+	// One card line each on compact terminals, two otherwise.
+	all := make([][]string, 0, len(nodes))
+	for _, n := range nodes {
+		glyph := ux.C(ux.Hue(n.hue), "●")
+		if compact {
+			all = append(all, []string{"  " + glyph + " " + ux.C(ux.Hue(n.hue), ux.TruncPad(n.ip, 15)) + ux.C(ux.Dim, " · "+ux.TruncPad(n.name, 40))})
+			continue
+		}
+		all = append(all, []string{
+			"  " + glyph + " " + ux.C(ux.Hue(n.hue), ux.TruncPad(n.ip, 15)),
+			"    " + ux.C(ux.Dim, ux.TruncPad(n.name, 16)),
+		})
+	}
+	var out []string
+	for r := 0; r < len(all); r += cols {
+		chunk := all[r : r+min(cols, len(all)-r)]
+		rows := 1
+		if !compact {
+			rows = 2
+		}
+		for i := 0; i < rows; i++ {
+			var line string
+			for c, card := range chunk {
+				if c > 0 {
+					line += "   "
+				}
+				if i < len(card) {
+					line += card[i]
+				}
+			}
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// mapLinks renders the top live pairs as the map's edge list, with a pulse
+// marker on the busiest one when pulse is set.
+func mapLinks(edges []traffic.Flow, stats map[string]*hostStat, env watchEnv) []string {
+	srt := append([]traffic.Flow(nil), edges...)
+	sort.Slice(srt, func(i, j int) bool { return srt[i].Total() > srt[j].Total() })
+	maxLinks := 6
+	if env.width < 116 {
+		maxLinks = 4
+	}
+	if env.width < 78 {
+		maxLinks = 3
+	}
+	var out []string
+	for i, f := range srt {
+		if i >= maxLinks {
+			break
+		}
+		mark := "  "
+		if i == 0 && env.pulse {
+			mark = ux.C(ux.Cyan, "▸ ")
+		}
+		line := mark + ipCell(endpointHost(f.A), flowHue(stats, f.A), 15) +
+			ux.C(ux.Dim, " ⇄ ") + ipCell(endpointHost(f.B), flowHue(stats, f.B), 15) +
+			ux.C(ux.Dim, "  ↓ ") + ux.TruncPad(ux.C(ux.Dim, ux.HumanRate(bps(f.AB, env.iv))), 11) +
+			ux.C(ux.Dim, " ↑ ") + ux.TruncPad(ux.C(ux.Dim, ux.HumanRate(bps(f.BA, env.iv))), 11)
+		out = append(out, line)
+	}
+	return out
+}
+
+// flowHue looks the endpoint host's palette slot up, for the edge list — the
+// same colour the host's node card wears.
+func flowHue(stats map[string]*hostStat, e string) int {
+	if s := stats[endpointHost(e)]; s != nil {
+		return s.color
+	}
+	return 0
+}
+
+// mapEndpHost reports whether a flow endpoint is a node the map draws: this
+// machine, the gateway, or a watched host.
+func mapEndpHost(e string, hostSet map[string]bool, env watchEnv) bool {
+	ip := endpointHost(e)
+	return ip == env.selfIP || (env.gwIP != "" && ip == env.gwIP) || hostSet[ip]
+}
+
 // arpLines is screen 4: the neighbour table from /proc/net/arp, refreshed
 // live. Every known MAC gets its vendor and (when it is a watched host) its
 // live ping and health grade; the router and this machine appear too, dimmed.
@@ -811,13 +1026,15 @@ func arpLines(st *viewState, hosts []string, info map[string]hostInfo,
 func footerHint(st *viewState) string {
 	switch st.screen {
 	case scrTalkers:
-		return "  talkers · 1/3/4 screens · ↑↓ host · ⏎ detail · h help · q quit"
+		return "  talkers · 1/3/4/5 screens · ↑↓ host · ⏎ gnulte · Tab/d detail · x save · q quit"
 	case scrFlows:
-		return "  flows · 1/2/4 screens · ↑↓ host · ⏎ detail · h help · q quit"
+		return "  flows · 1/2/4/5 screens · ↑↓ host · ⏎ gnulte · Tab/d detail · x save · q quit"
 	case scrArp:
-		return "  neighbours · 1/2/3 screens · ↑↓ host · ⏎ detail · h help · q quit"
+		return "  neighbours · 1/2/3/5 screens · ↑↓ host · ⏎ gnulte · Tab/d detail · x save · q quit"
+	case scrMap:
+		return "  map · 1/2/3/4 screens · live edges pulsing · x save devices · h help · q quit"
 	default:
-		return "  ↑↓ host · ⏎ detail · s sort · a alarm-only · g test cmd · 2-4 screens · o settings · h help · q quit"
+		return "  ↑↓ host · ⏎ test with gnulte · Tab/d detail · s sort · a alarm-only · 2-5 screens · x save devices · o settings · h help · q quit"
 	}
 }
 

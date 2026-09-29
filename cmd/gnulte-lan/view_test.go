@@ -137,7 +137,7 @@ func TestBuildViewHasCursorAndFooter(t *testing.T) {
 	if !strings.Contains(all, "▸") {
 		t.Fatalf("frame missing cursor marker:\n%s", all)
 	}
-	if !strings.Contains(all, "↑↓ host · ⏎ detail · s sort") {
+	if !strings.Contains(all, "↑↓ host · ⏎ test with gnulte") {
 		t.Fatalf("frame missing key hints:\n%s", all)
 	}
 	if !strings.Contains(all, "LIVE LAN WATCH") {
@@ -200,7 +200,7 @@ func TestBuildViewNeverExceedsHeight(t *testing.T) {
 		{A: "192.168.100.13:443", B: "151.101.1.69:443", AB: 1000, BA: 200, ABp: 5, BAp: 2},
 		{A: "192.168.100.13:443", B: "192.168.100.40:53", AB: 400, BA: 300, ABp: 4, BAp: 4},
 	}
-	for _, sc := range []int{scrHosts, scrTalkers, scrFlows, scrArp} {
+	for _, sc := range []int{scrHosts, scrTalkers, scrFlows, scrArp, scrMap} {
 		for _, h := range []int{10, 12, 18, 24, 40} {
 			st := &viewState{detail: true, showHelp: true, screen: sc}
 			env := watchEnv{nic: "wlan0", subnet: "192.168.100.0/24", iv: 1, start: time.Now(),
@@ -440,10 +440,140 @@ func TestFooterHintsPerScreen(t *testing.T) {
 	if !strings.Contains(footerHint(&viewState{screen: scrHosts}), "↑↓ host") {
 		t.Fatal("hosts footer lost the host navigation hints")
 	}
-	for _, sc := range []int{scrTalkers, scrFlows, scrArp} {
+	for _, sc := range []int{scrTalkers, scrFlows, scrArp, scrMap} {
 		if !strings.Contains(footerHint(&viewState{screen: sc}), "q quit") {
 			t.Fatalf("screen %d footer missing quit hint", sc)
 		}
+	}
+}
+
+// mapTestEnv builds a small watched world for the map tests: three hosts
+// (self .207, gateway .1, one device), hues assigned in appearance order.
+func mapTestEnv(width int, counter bool) (hosts []string, info map[string]hostInfo,
+	rates map[string]traffic.Rate, stats map[string]*hostStat, flows []traffic.Flow,
+	hostSet map[string]bool, env watchEnv) {
+
+	hosts = []string{"192.168.100.13", "192.168.100.40"}
+	info = map[string]hostInfo{
+		"192.168.100.13": {IP: "192.168.100.13", MAC: "A4:83:E7:12:34:56", Vendor: "Xiaomi", Host: "phone", Type: "Phone"},
+		"192.168.100.40": {IP: "192.168.100.40", MAC: "B4:2E:99:11:22:33", Vendor: "ACME", Host: "laptop", Type: "Laptop"},
+	}
+	rates = map[string]traffic.Rate{}
+	stats = map[string]*hostStat{
+		"192.168.100.13": {color: 0},
+		"192.168.100.40": {color: 1},
+	}
+	flows = []traffic.Flow{
+		{A: "192.168.100.13:443", B: "192.168.100.40:12345", AB: 5_000_000, BA: 300_000, ABp: 50, BAp: 30},
+		{A: "192.168.100.13:443", B: "192.168.100.1:443", AB: 100_000, BA: 400_000, ABp: 10, BAp: 8},
+	}
+	hostSet = map[string]bool{"192.168.100.13": true, "192.168.100.40": true}
+	env = watchEnv{nic: "wlan0", subnet: "192.168.100.0/24", selfIP: "192.168.100.207",
+		gwIP: "192.168.100.1", gwRTT: 3, iv: 1, hasCounter: counter, width: width,
+		neigh: map[string]string{"192.168.100.1": "28:30:AC:AA:BB:CC"}}
+	return
+}
+
+// TestMapLinesGatesWithoutSocket: the map needs the capture socket for its
+// edges and must explain itself with the same gate the FLOWS screen uses.
+func TestMapLinesGatesWithoutSocket(t *testing.T) {
+	hosts, info, rates, stats, flows, hostSet, env := mapTestEnv(100, false)
+	out := mapLines(hosts, info, rates, stats, flows, hostSet, env, 30)
+	all := strings.Join(out, "\n")
+	if !strings.Contains(all, "⛔") || !strings.Contains(all, "sudo gnulte-lan") {
+		t.Fatalf("map without socket must gate:\n%s", all)
+	}
+	if strings.Contains(all, "LIVE EDGES") {
+		t.Fatal("gated map must not render edges")
+	}
+}
+
+// TestMapLinesRendersNodesAndEdges: with the socket live the map draws the
+// gateway + self hub cards, every device as a hue node, and the interval's
+// pairs as edges with the busiest one pulsing.
+func TestMapLinesRendersNodesAndEdges(t *testing.T) {
+	hosts, info, rates, stats, flows, hostSet, env := mapTestEnv(120, true)
+	env.pulse = true
+	out := mapLines(hosts, info, rates, stats, flows, hostSet, env, 40)
+	all := strings.Join(out, "\n")
+	for _, want := range []string{
+		"INTERCONNECTION MAP", "192.168.100.1", "192.168.100.207",
+		"192.168.100.13", "192.168.100.40", "LIVE EDGES", "phone", "laptop",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("map missing %q:\n%s", want, all)
+		}
+	}
+	if !strings.Contains(all, "▸") {
+		t.Errorf("busiest edge should pulse with ▸:\n%s", all)
+	}
+	if len(out) > 40 {
+		t.Fatalf("map exceeded budget: %d lines", len(out))
+	}
+}
+
+// TestMapGridColumns scales the node cards to the terminal width.
+func TestMapGridColumns(t *testing.T) {
+	hosts, info, _, stats, _, _, _ := mapTestEnv(120, true)
+	nodes := mapNodes(hosts, info, stats, watchEnv{selfIP: "192.168.100.207", gwIP: "192.168.100.1"})
+	if len(nodes) != 2 {
+		t.Fatalf("node set = %d, want 2 (self and gateway excluded)", len(nodes))
+	}
+	for _, n := range nodes {
+		if n.hue != 0 && n.hue != 1 {
+			t.Errorf("node hue = %d, want the hostStat slot", n.hue)
+		}
+	}
+	// 3 columns on a wide terminal: 2 nodes → single row, 2 lines per card.
+	wide := mapGrid(nodes, watchEnv{width: 120})
+	if len(wide) != 2 {
+		t.Fatalf("wide grid lines = %d, want 2 (one row of 2-line cards)", len(wide))
+	}
+	// 1 column on a narrow terminal: compact one-line cards.
+	narrow := mapGrid(nodes, watchEnv{width: 70})
+	if len(narrow) != 2 {
+		t.Fatalf("narrow grid lines = %d, want 2 (one per node)", len(narrow))
+	}
+	for _, line := range narrow {
+		if ux.RuneLen(ux.StripAnsi(line)) > 78 {
+			t.Fatalf("narrow grid line over 78 cols: %q", line)
+		}
+	}
+}
+
+// TestMapLinksPulseFree: without the pulse flag every edge line is plain.
+func TestMapLinksPulseFree(t *testing.T) {
+	_, _, _, stats, flows, hostSet, env := mapTestEnv(100, true)
+	env.pulse = false
+	edges := []traffic.Flow{}
+	for _, f := range flows {
+		if mapEndpHost(f.A, hostSet, env) && mapEndpHost(f.B, hostSet, env) {
+			edges = append(edges, f)
+		}
+	}
+	if len(edges) == 0 {
+		t.Fatal("expected at least one map edge")
+	}
+	lines := mapLinks(edges, stats, env)
+	if strings.Contains(strings.Join(lines, "\n"), "▸") {
+		t.Fatalf("pulse must be off without the flag:\n%v", lines)
+	}
+}
+
+// TestMapEndpHost filters edges to the map's own world.
+func TestMapEndpHost(t *testing.T) {
+	_, _, _, _, _, hostSet, env := mapTestEnv(100, true)
+	if !mapEndpHost("192.168.100.13:443", hostSet, env) {
+		t.Fatal("watched host must be on the map")
+	}
+	if !mapEndpHost("192.168.100.1:443", hostSet, env) {
+		t.Fatal("gateway must be on the map")
+	}
+	if !mapEndpHost("192.168.100.207:80", hostSet, env) {
+		t.Fatal("self must be on the map")
+	}
+	if mapEndpHost("8.8.8.8:53", hostSet, env) {
+		t.Fatal("an outside host must not be on the map")
 	}
 }
 

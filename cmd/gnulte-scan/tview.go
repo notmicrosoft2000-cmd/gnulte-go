@@ -18,12 +18,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"gnulte-go/internal/discover"
+	"gnulte-go/internal/inventory"
+	"gnulte-go/internal/scanner"
 	"gnulte-go/internal/settings"
 	"gnulte-go/internal/tui"
 	"gnulte-go/internal/ux"
@@ -83,7 +87,11 @@ const (
 // editor as a modal page. It returns the rows in the final display order so
 // the caller can reuse them for the report snapshot. terminate reports whether
 // the user quit by 'q' (making the caller skip the plain table too).
-func interactiveTable(rows []discover.Row, log []string) (final []discover.Row, quit bool) {
+//
+// With watchEvery > 0 (the --watch flag) a background goroutine re-scans the
+// network every N seconds and the table marks how each host moved: ▲ NEW,
+// ▼ GONE, ~ CHANGED. GONE hosts stay on screen so departures are visible.
+func interactiveTable(rows []discover.Row, log []string, watchEvery int, rescan func() []discover.Row, wctx context.Context) (final []discover.Row, quit bool) {
 	scr, err := tui.Open()
 	if err != nil {
 		// Not a live terminal: fall back to the classic table.
@@ -91,11 +99,48 @@ func interactiveTable(rows []discover.Row, log []string) (final []discover.Row, 
 	}
 	defer scr.Close()
 
-	t := &tvTable{rows: rows, sortBy: sortIP, detail: -1, log: log}
+	t := &tvTable{rows: rows, sortBy: sortIP, detail: -1, log: log, watchEvery: watchEvery}
+	if watchEvery > 0 && rescan != nil {
+		watchCh := make(chan []discover.Row, 2)
+		go func() {
+			timer := time.NewTicker(time.Duration(watchEvery) * time.Second)
+			defer timer.Stop()
+			for {
+				select {
+				case <-wctx.Done():
+					return
+				case <-timer.C:
+					next := rescan()
+					if len(next) == 0 {
+						continue
+					}
+					select {
+					case watchCh <- next:
+					default: // a slow re-scan must not clog the loop
+					}
+				}
+			}
+		}()
+		t.watchCh = watchCh
+	}
 	t.build()
 	for {
 		t.draw(scr)
-		key, r := scr.Key()
+		key, r := scr.Poll(250)
+		if key == tui.KeyNone {
+			// Between keys, apply any fresh sweep that landed.
+			if t.watchCh != nil {
+				select {
+				case next := <-t.watchCh:
+					t.applyDelta(next)
+					if s := t.delta.Summary(); s != "no change" {
+						t.log = append(t.log, "  watch: "+s)
+					}
+				default:
+				}
+			}
+			continue
+		}
 		if t.tab == tabDevices && t.filterEdit {
 			if t.handleFilterKey(key, r) {
 				continue
@@ -221,6 +266,17 @@ func interactiveTable(rows []discover.Row, log []string) (final []discover.Row, 
 			case '/':
 				t.filterEdit = true
 				t.filter = nil
+			case 'v', 'V':
+				// Vendor filter: pre-seed the filter with the current cursor
+				// host's vendor so re-scanning isolates one maker's devices.
+				if len(t.view) > 0 {
+					v := t.view[t.cursor].r.Vendor
+					if v != "" {
+						t.filter = []rune(v)
+						t.filterEdit = true
+						t.build()
+					}
+				}
 			}
 		}
 	}
@@ -293,6 +349,13 @@ type tvTable struct {
 	log    []string
 	logOff int
 	tab    int
+	// --watch live re-scan (v15 "Live Interconnection"): the table re-scans
+	// every watchEvery seconds and marks how each host moved since the last
+	// sweep. delta maps an IP to its movement; GONE hosts stay visible,
+	// dimmed, so disappearances are never silently forgotten.
+	watchEvery int
+	delta      scanner.Delta
+	watchCh    chan []discover.Row // nil when not watching
 }
 
 // build applies the filter, sorts the view, and clamps the cursor.
@@ -357,6 +420,38 @@ func (t *tvTable) finalRows() []discover.Row {
 	return out
 }
 
+// applyDelta folds a fresh sweep into the table: hosts that disappeared stay
+// visible with the ▼ GONE mark (so a device dropping off is never silently
+// forgotten), everything still alive is replaced by its newest state, and the
+// movement map feeds the ▲/~ markers and summary.
+func (t *tvTable) applyDelta(next []discover.Row) {
+	if len(next) == 0 {
+		return
+	}
+	d := scanner.Diff(t.rows, next)
+	gone := make([]discover.Row, 0, 4)
+	for _, r := range t.rows {
+		if d[r.IP] == scanner.DeltaGone {
+			gone = append(gone, r)
+		}
+	}
+	merged := make([]discover.Row, 0, len(next)+len(gone))
+	merged = append(merged, gone...)
+	merged = append(merged, next...)
+	t.rows = merged
+	t.delta = d
+	t.build()
+}
+
+// deltaMark is the one-character live-change marker for a row: blank for
+// hosts that simply stayed alive, ▲ new, ▼ gone, ~ changed.
+func (t *tvTable) deltaMark(ip string) string {
+	if t.delta == nil {
+		return " "
+	}
+	return t.delta[ip].Mark()
+}
+
 // draw renders one frame (table, detail, log or summary) in a single flush.
 func (t *tvTable) draw(scr *tui.Screen) {
 	if t.tab == tabLog {
@@ -378,6 +473,9 @@ func (t *tvTable) draw(scr *tui.Screen) {
 	}
 	status := fmt.Sprintf("sort %s (%s) · %d/%d shown · colour = type · ↑↓ move · ⏎ details · / filter · s sort · q quit",
 		sortName, dir, len(t.view), len(t.rows))
+	if t.watchEvery > 0 {
+		status += fmt.Sprintf(" · Δ live watch every %ds", t.watchEvery)
+	}
 	if t.filterEdit {
 		status = "filter: " + string(t.filter) + "▌   (⏎ apply · esc clear)"
 	}
@@ -489,6 +587,32 @@ func (t *tvTable) summaryLines() []string {
 	lines = append(lines, fmt.Sprintf("    hosts w/ ARP MAC   %d", countMACs(t.rows)))
 	lines = append(lines, fmt.Sprintf("    mDNS services      %d", svcTotal))
 	lines = append(lines, fmt.Sprintf("    flagged (rogue?)   %d", flagged))
+	// Live Interconnection: the shared cross-tool device store (written by
+	// gnulte-lan) tells the scan how much of today's table it already knew.
+	if recs, err := inventory.Load(); err == nil && len(recs) > 0 {
+		known := 0
+		onNet := map[string]bool{}
+		for _, r := range t.rows {
+			onNet[r.IP] = true
+		}
+		for _, r := range recs {
+			if onNet[r.IP] {
+				known++
+			}
+		}
+		lines = append(lines, " ")
+		lines = append(lines, ux.C(ux.Cyan, "  device store"))
+		lines = append(lines, fmt.Sprintf("    known from last LAN watch   %s", inventory.Summary(recs)))
+		lines = append(lines, fmt.Sprintf("    still on this network today %d/%d", known, len(recs)))
+	}
+	if t.delta != nil {
+		newN, goneN, changedN, _ := t.delta.Counts()
+		if newN+goneN+changedN > 0 {
+			lines = append(lines, " ")
+			lines = append(lines, ux.C(ux.Cyan, "  live change"))
+			lines = append(lines, fmt.Sprintf("    Δ new %d · gone %d · changed %d", newN, goneN, changedN))
+		}
+	}
 	if len(osSeen) > 0 {
 		lines = append(lines, " ")
 		lines = append(lines, ux.C(ux.Cyan, "  OS fingerprint"))
@@ -613,7 +737,7 @@ func (t *tvTable) rowLine(v tvRow, wIp, wMac, wVen, wHost, wTyp, wOs, loose int,
 		dim = ""
 	}
 	s := " "
-	num := fmt.Sprintf("%-3d%s", t.index(v)+1, statusMark(v.r))
+	num := fmt.Sprintf("%-2d%s%s", t.index(v)+1, t.deltaMark(v.r.IP), statusMark(v.r))
 	return cell(ux.Green, num, 4) + s +
 		cell(ux.DeviceIPCode(v.r.IsSelf, v.typ), v.ip, wIp) + s +
 		cell(dim, v.mac, wMac) + s +

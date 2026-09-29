@@ -250,6 +250,14 @@ func (m *Monitor) rec(line string) {
 	m.Log = append(m.Log, line)
 }
 
+// Note records one plain line into the session history (so it reaches the
+// HTML report) without printing anything. It is the official side-channel for
+// OnTick hooks like the live shaping telemetry, which print their own console
+// line and then file the matching plain line here.
+func (m *Monitor) Note(line string) {
+	m.rec(line)
+}
+
 func (m *Monitor) publish(ip string, st *Stats) {
 	cp := *st
 	cp.Samples = append([]int(nil), st.Samples...)

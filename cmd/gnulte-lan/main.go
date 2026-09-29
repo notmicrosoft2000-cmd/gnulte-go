@@ -31,14 +31,17 @@
 // It is passive: it captures only frame counts and pings, and never shapes,
 // spoofs or intercepts traffic — gnulte itself is the tool for that.
 //
-// The live view is a four-screen console: arrows move the host cursor (hold
-// one to scroll fast), ⏎ opens a detail pane with a latency sparkline, the
-// exact gnulte command to test the host (g echoes it under the footer), and
-// the number keys (or t/f/n) switch screens — 1 hosts, 2 talkers ranked by
-// rate with bars and peers, 3 per-pair conversation flows (needs the root
-// capture socket), 4 the ARP neighbour table. s re-sorts, a filters to
-// alarming hosts, o opens the settings editor mid-watch, h expands the hints
-// and q quits. Every host keeps one stable hue across screens so you can
+// The live view is a five-screen console: arrows move the host cursor (hold
+// one to scroll fast), ⏎ tests the selected host with gnulte (g echoes the
+// exact command under the footer, or opens a terminal), Tab/d toggles a
+// detail pane with a latency sparkline, and the number keys (or t/f/n/m)
+// switch screens — 1 hosts, 2 talkers ranked by rate with bars and peers,
+// 3 per-pair conversation flows (needs the root capture socket), 4 the ARP
+// neighbour table, 5 the live interconnection map (devices as nodes, live
+// pairs as edges — also needs the root capture socket). s re-sorts, a
+// filters to alarming hosts, x folds the watch into the shared device store,
+// o opens the settings editor mid-watch, h expands the hints and q quits.
+// Every host keeps one stable hue across screens so you can
 // follow a device by colour. Piped runs fall back to a plain per-tick
 // transcript, and --export streams the same samples as CSV.
 package main
@@ -60,6 +63,7 @@ import (
 	"time"
 
 	"gnulte-go/internal/discover"
+	"gnulte-go/internal/inventory"
 	"gnulte-go/internal/netutil"
 	"gnulte-go/internal/probe"
 	"gnulte-go/internal/reportdir"
@@ -70,7 +74,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "13.5"
+const version = "15.0"
 
 // hostInfo is the identity enrichment for one watched host.
 type hostInfo struct {
@@ -414,6 +418,7 @@ func main() {
 		lastRates map[string]traffic.Rate
 		lastFlows []traffic.Flow
 		alarmOn   bool
+		dbSaved   bool // the watch was folded into the shared device store (x / quit)
 	)
 
 	// Pings run in the background so a slow host (or a quiet one that waits
@@ -486,8 +491,8 @@ func main() {
 	)
 
 	// handleKey applies one key press to the view. ok reports whether anything
-	// changed and must be repainted; quit ends the watch. The one-shot 'g'
-	// hint lives only until the next key.
+	// changed and must be repainted; quit ends the watch. Handoff hints and
+	// save confirmations live in view.gCmd until the next key.
 	handleKey := func(k tui.Key, r rune) (ok, quit bool) {
 		view.gCmd = ""
 		switch k {
@@ -501,7 +506,16 @@ func main() {
 				view.cursor++
 				return true, false
 			}
-		case tui.KeyEnter, tui.KeyTab:
+		case tui.KeyEnter:
+			// Live Interconnection handoff: open gnulte against the selected
+			// host in a fresh terminal (falls back to printing the command).
+			if view.currentIP != "" && (view.screen == scrHosts || view.screen == scrTalkers) {
+				view.gCmd = handoffGNULTE(nic, view.currentIP)
+				return true, false
+			}
+			view.detail = !view.detail
+			return true, false
+		case tui.KeyTab:
 			view.detail = !view.detail
 			return true, false
 		case tui.KeyEsc:
@@ -541,10 +555,22 @@ func main() {
 			case '4', 'n', 'N':
 				view.screen = scrArp
 				return true, false
+			case '5', 'm', 'M':
+				view.screen = scrMap
+				view.detail = false
+				return true, false
 			case 'g', 'G':
 				if view.currentIP != "" {
-					view.gCmd = "gnulte -t " + view.currentIP
+					view.gCmd = handoffGNULTE(nic, view.currentIP)
 				}
+				return true, false
+			case 'd', 'D':
+				view.detail = !view.detail
+				return true, false
+			case 'x', 'X':
+				view.gCmd = saveWatchToDB(hosts, info, cfg.SelfIP, cfg.Gateway)
+				dbSaved = true
+				sess.log = append(sess.log, ux.StripAnsi(view.gCmd))
 				return true, false
 			case 'h', 'H', '?':
 				view.showHelp = !view.showHelp
@@ -587,6 +613,14 @@ func main() {
 		if hasCounter {
 			sess.flows = counter.FlowTotals()
 		}
+		// Live Interconnection: fold the final watch into the shared device
+		// store so gnulte and gnulte-scan can pick the hosts up later.
+		if !dbSaved {
+			if msg := saveWatchToDB(hosts, info, cfg.SelfIP, cfg.Gateway); msg != "" {
+				sess.log = append(sess.log, ux.StripAnsi(msg))
+			}
+			dbSaved = true
+		}
 		if !*noReport {
 			wrapUpReport(sess, cfgLoaded.HTMLReport)
 		}
@@ -618,6 +652,7 @@ func main() {
 			hasCounter: hasCounter,
 			width:      ux.Width(),
 			neigh:      lastNeigh,
+			pulse:      view.screen == scrMap && time.Now().Unix()%2 == 0,
 		}
 		scr.Draw(buildView(view, hosts, info, lastRates, lastFlows, hostSet, stats, env, ux.Height()))
 	}
@@ -917,6 +952,68 @@ func bps(bytes int64, iv int) int64 {
 		return 0
 	}
 	return bytes / int64(iv)
+}
+
+// handoffGNULTE is the Live Interconnection handoff: pressing ⏎ (or g) on a
+// host opens gnulte against it in a fresh terminal window. The returned hint
+// is shown under the footer so the operator always has the exact command,
+// even when no terminal emulator is available.
+func handoffGNULTE(nic, ip string) string {
+	args := []string{"gnulte", "-t", ip}
+	if nic != "" {
+		args = append(args, "-i", nic)
+	}
+	started, err := ux.LaunchTerminal(args...)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("gnulte -t %s   (could not open a window: %v)", ip, err)
+	case started:
+		return "gnulte -t " + ip + "   (opened in a new terminal)"
+	default:
+		return "gnulte -t " + ip + "   (no terminal emulator found — run it in another terminal)"
+	}
+}
+
+// saveWatchToDB folds the live watch (watched hosts, the gateway, this
+// machine) into the shared cross-tool device store, and returns the line to
+// log and show. The store is what gnulte's target picker and gnulte-scan's
+// table read, so one watch feeds the whole toolkit.
+func saveWatchToDB(hosts []string, info map[string]hostInfo, selfIP, gwIP string) string {
+	var sigs []inventory.Record
+	for _, ip := range hosts {
+		h := info[ip]
+		sigs = append(sigs, inventory.Record{
+			IP:     ip,
+			MAC:    h.MAC,
+			Vendor: h.Vendor,
+			Host:   h.Host,
+			Kind:   h.Type,
+			IsSelf: ip == selfIP,
+		})
+	}
+	if gwIP != "" && gwIP != selfIP {
+		sigs = append(sigs, inventory.Record{IP: gwIP, Kind: "Router/Gateway"})
+	}
+	if selfIP != "" {
+		in := false
+		for _, s := range sigs {
+			if s.IP == selfIP {
+				in = true
+			}
+		}
+		if !in {
+			sigs = append(sigs, inventory.Record{IP: selfIP, Kind: "This host", IsSelf: true})
+		}
+	}
+	recs, err := inventory.Load()
+	if err != nil {
+		return "device store: " + err.Error()
+	}
+	merged, _, err := inventory.MergeList(recs, sigs)
+	if err != nil {
+		return "device store: " + err.Error()
+	}
+	return fmt.Sprintf("live devices saved → %s (%d device(s))", inventory.Path(), len(merged))
 }
 
 // buildLines renders one full dashboard frame: a traffic row and identity row

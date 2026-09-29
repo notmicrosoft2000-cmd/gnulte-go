@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"gnulte-go/internal/discover"
+	"gnulte-go/internal/scanner"
 )
 
 func sampleRows() []discover.Row {
@@ -102,6 +103,58 @@ func TestTVCursorClamps(t *testing.T) {
 	tab.build()
 	if tab.detail != -1 {
 		t.Errorf("detail out-of-range should clear, got %d", tab.detail)
+	}
+}
+
+// TestTVApplyDeltaFold live re-scans into the table: hosts that vanish stay
+// visible with the ▼ GONE mark, brand-new hosts appear with ▲ NEW, and the
+// movement counts feed the summary.
+func TestTVApplyDeltaFold(t *testing.T) {
+	tab := newTable()
+	next := []discover.Row{
+		{IP: "192.168.1.2", MAC: "BB:BB:BB:BB:BB:02", Vendor: "Xiaomi", Hostname: "", Type: "Mobile"},              // unchanged
+		{IP: "192.168.1.99", MAC: "CC:CC:CC:CC:CC:03", Vendor: "Frontiir", Hostname: "gw", Type: "Router/Gateway"}, // unchanged
+		{IP: "192.168.1.200", MAC: "EE:EE:EE:EE:EE:0E", Vendor: "Tesla", Hostname: "car", Type: "Car"},             // brand new
+		// 192.168.1.10 and .50 dropped off the network.
+	}
+	tab.applyDelta(next)
+	if tab.delta["192.168.1.10"] != scanner.DeltaGone {
+		t.Errorf(".10 = %v, want GONE", tab.delta["192.168.1.10"])
+	}
+	if tab.delta["192.168.1.50"] != scanner.DeltaGone {
+		t.Errorf(".50 = %v, want GONE", tab.delta["192.168.1.50"])
+	}
+	if tab.delta["192.168.1.200"] != scanner.DeltaNew {
+		t.Errorf(".200 = %v, want NEW", tab.delta["192.168.1.200"])
+	}
+	if tab.delta["192.168.1.2"] != scanner.DeltaAlive {
+		t.Errorf(".2 = %v, want ALIVE", tab.delta["192.168.1.2"])
+	}
+	// GONE hosts must still appear in the visible rows (dimmed, marked).
+	ips := map[string]bool{}
+	for _, v := range tab.view {
+		ips[v.r.IP] = true
+	}
+	for _, want := range []string{"192.168.1.10", "192.168.1.50", "192.168.1.2", "192.168.1.99", "192.168.1.200"} {
+		if !ips[want] {
+			t.Errorf("row %s missing after delta fold (visible %v)", want, ips)
+		}
+	}
+	newN, goneN, changedN, _ := tab.delta.Counts()
+	if newN != 1 || goneN != 2 || changedN != 0 {
+		t.Errorf("counts = new %d gone %d changed %d, want 1/2/0", newN, goneN, changedN)
+	}
+}
+
+// TestTVDeltaMark: the table stays quiet for hosts that simply stayed alive.
+func TestTVDeltaMark(t *testing.T) {
+	tab := newTable()
+	if tab.deltaMark("192.168.1.2") != " " {
+		t.Fatal("deltaMark without a delta must be blank")
+	}
+	tab.applyDelta(sampleRows())
+	if got := tab.deltaMark("192.168.1.10"); got != "·" {
+		t.Errorf("alive mark = %q, want ·", got)
 	}
 }
 

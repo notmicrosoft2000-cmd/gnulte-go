@@ -48,7 +48,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "13.5"
+const version = "15.0"
 
 // bootLog holds the pre-run transcript (banner, confirmation, arming) so the
 // HTML report shows the full command flow, not just the monitor's own output.
@@ -502,9 +502,53 @@ func main() {
 			}
 		}
 	}
+	// Live shaping telemetry (v15 "Live Interconnection"): while a shaped test
+	// runs, the monitor reads the netem leaf once per tick and shows the
+	// impairment landing on real packets — delayed / reordered / dropped /
+	// backlog / current delay. It chains after any RANDOM-mode hook. Pure
+	// garnish: no tc, no netem leaf, or an unprivileged shell simply yields no
+	// line.
+	var teleN int
+	telemetry := func() {
+		teleN++
+		if *quiet || ec.Mode != engine.ModeShape {
+			return
+		}
+		// Keep the cadence human: poll every tick when the interval is already
+		// ≥ 5s, otherwise every fifth tick (≈ every 5s).
+		if iv < 5 && teleN%5 != 0 {
+			return
+		}
+		pctx, cancel := context.WithTimeout(monCtx, 1500*time.Millisecond)
+		defer cancel()
+		q, _ := engine.QdiscStats(pctx, cfg.Interface)
+		if !q.Found {
+			return
+		}
+		plain := fmt.Sprintf("  netem live · delayed %d · reordered %d · dropped %d · backlog %dp · delay %dms",
+			q.Delayed, q.Reordered, q.Dropped, q.Backlog, q.DelayMs)
+		fmt.Println(c(cDim, plain+"  (shaping telemetry)"))
+		mon.Note(plain)
+	}
+	if mon.OnTick != nil {
+		prev := mon.OnTick
+		mon.OnTick = func() { prev(); telemetry() }
+	} else {
+		mon.OnTick = telemetry
+	}
 	startTime := time.Now()
 	if err := mon.Run(monCtx); err != nil && !*quiet {
 		fmt.Fprintf(os.Stderr, "gnulte: monitor: %v\n", err)
+	}
+
+	// One final telemetry snapshot lands in the boot transcript before the
+	// shaping tree comes down, so the report closes the loop it opened.
+	if ec.Mode == engine.ModeShape {
+		q, _ := engine.QdiscStats(context.Background(), cfg.Interface)
+		if q.Found {
+			bootLog = append(bootLog, fmt.Sprintf("  netem telemetry @ end · delayed %d · reordered %d · dropped %d · backlog %dp · delay %dms",
+				q.Delayed, q.Reordered, q.Dropped, q.Backlog, q.DelayMs))
+		}
 	}
 
 	endTime := time.Now()

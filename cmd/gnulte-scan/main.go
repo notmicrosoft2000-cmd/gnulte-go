@@ -52,7 +52,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "13.5"
+const version = "15.0"
 
 // scanPrefs holds the technical-tuning settings so deepScan and buildRows can
 // honor the SCANLTE knobs (probe retries, uptime, rogue flag, confidence,
@@ -93,6 +93,7 @@ func main() {
 		noArp       = flag.Bool("no-arp", false, "disable the automatic ARP sweep")
 		reportArg   = flag.String("report", "", "write the post-test HTML report (full log history) to FILE")
 		noReport    = flag.Bool("no-report", false, "skip writing the post-test HTML report")
+		watchArg    = flag.Int("watch", 0, "re-scan every N seconds and mark what changed (NEW/GONE/CHANGED)")
 		showDocs    = flag.Bool("docs", false, "print the safety documents and exit")
 		resetSafe   = flag.Bool("reset-safety", false, "remove the acceptance record and exit")
 		showVer     = flag.Bool("version", false, "print version and exit")
@@ -117,6 +118,17 @@ func main() {
 	showUI := !*quiet
 	if exporting {
 		ux.Out = os.Stderr
+	}
+
+	// The --watch live re-scan owns the console, so it refuses machine modes
+	// that would either swallow the delta lines or scatter them into a stream.
+	if *watchArg > 0 {
+		if exporting || *quiet {
+			fatal(fmt.Errorf("--watch re-scans the live console, so it cannot be combined with -q or --json/--yaml/--csv"))
+		}
+		if *watchArg < 0 {
+			fatal(fmt.Errorf("--watch needs a positive interval in seconds"))
+		}
 	}
 
 	// Terminal metrics are captured once, before any output redirection, so the
@@ -336,14 +348,44 @@ func main() {
 	}
 	out.SortByIP(rows)
 
+	// The --watch re-scanner (v15 "Live Interconnection"): a lean sweep that
+	// re-discovers the subnet so the delta engine can mark NEW/GONE/CHANGED
+	// over time. It skips the one-time deep/service enrichments — a live watch
+	// is about presence, not banners.
+	watchCtx, watchCancel := context.WithCancel(ctx)
+	defer watchCancel()
+	watchSweep := func() []discover.Row {
+		live := discover.PingSweep(watchCtx, targets, *threads, nil)
+		if useArp && discover.Privileged() {
+			arpLive := discover.ARPSweep(watchCtx, targets, cfg.Interface, *threads, nil)
+			seen := map[string]bool{}
+			for _, ip := range append(append([]string{}, live...), arpLive...) {
+				seen[ip] = true
+			}
+			live = make([]string, 0, len(seen))
+			for ip := range seen {
+				live = append(live, ip)
+			}
+			sort.Strings(live)
+		}
+		next := buildRows(watchCtx, live, discover.Neighbors(context.Background(), cfg.Interface), cfg)
+		discover.EnrichHostnames(watchCtx, next)
+		out.SortByIP(next)
+		return next
+	}
+
 	// Interactive full-screen device table: replaces the classic table on a
 	// live terminal. On exit its (filtered, sorted) snapshot is logged for the
-	// report, and the plain table below is skipped to avoid a duplicate.
+	// report, and the plain table below is skipped to avoid a duplicate. The
+	// screen runs its own live re-scan (applyDelta) when --watch is set, so the
+	// console watch loop below must not also start afterwards.
 	interactiveQuit := false
+	screenTookOver := false
 	if *interactive && !exporting {
 		if ux.TTY() && tui.StdinTTY() {
-			final, quit := interactiveTable(rows, sess.log)
+			final, quit := interactiveTable(rows, sess.log, *watchArg, watchSweep, watchCtx)
 			interactiveQuit = quit
+			screenTookOver = true
 			rows = final
 			for _, line := range rawTableLines(rows) {
 				sess.log = append(sess.log, line)
@@ -388,6 +430,37 @@ func main() {
 		} else {
 			sound.Found()
 		}
+	}
+
+	// Live re-scan (--watch): keep sweeping on the console and print exactly
+	// what changed each interval — ▲ new, ▼ gone, ~ changed — until Ctrl+C.
+	// With -T the interactive screen already owns the watch, so this loop is
+	// skipped (it would otherwise keep the process alive after the user quit).
+	if *watchArg > 0 && !screenTookOver {
+		sess.pl(ux.C(ux.Dim, fmt.Sprintf("  Δ watching every %ds — live rescan, Ctrl+C to stop", *watchArg)),
+			fmt.Sprintf("  watch every %ds", *watchArg))
+		prev := rows
+		ticker := time.NewTicker(time.Duration(*watchArg) * time.Second)
+		defer ticker.Stop()
+	watchLoop:
+		for {
+			select {
+			case <-ctx.Done():
+				break watchLoop
+			case <-ticker.C:
+				next := watchSweep()
+				d := scanner.Diff(prev, next)
+				if s := d.Summary(); s != "no change" {
+					sess.pl(ux.C(ux.Yellow, "  "+s), "  "+s)
+					for _, ln := range d.Changes() {
+						sess.pl("  "+ln, "  "+strings.TrimSpace(ln))
+					}
+				}
+				prev = next
+			}
+		}
+		sess.pl(ux.C(ux.Dim, "  Δ watch stopped — last sweep "+fmt.Sprint(len(prev))+" host(s)"),
+			fmt.Sprintf("  watch stopped — last sweep %d host(s)", len(prev)))
 	}
 
 	if !*noReport {
@@ -634,6 +707,8 @@ Options:
   -c, --csv               output CSV
   -q, --quiet             results only, no header/summary
       --sound             play a tone for the result
+      --watch N           re-scan every N seconds, marking NEW/GONE/CHANGED hosts
+                          live (Live Interconnection; needs the console, not -q/--json)
       --report FILE       write the post-test HTML report (full log history)
       --no-report         skip writing the HTML report (written by default)
       --settings          open the settings editor (saved defaults) and exit

@@ -116,12 +116,14 @@ func sessionHTML(s *lanSession) string {
 
 func cardHTML(ip string, inf hostInfo, st *hostStat, flows []traffic.Flow, iv int) string {
 	var b strings.Builder
-	lbl := ip
+	// The pieces are escaped before being composed into markup — escaping the
+	// composed string again turned the literal "<span>" into text on screen.
+	lbl := htmlEscape(ip)
 	if inf.Host != "" {
-		lbl = inf.Host + " <span class=dim>(" + htmlEscape(ip) + ")</span>"
+		lbl = htmlEscape(inf.Host) + " <span class=dim>(" + htmlEscape(ip) + ")</span>"
 	}
 	fmt.Fprintf(&b, "<div class=card><div class=card-head><h3>%s %s</h3>%s</div>\n",
-		htmlEscape(lbl), typePill(inf.Type), statusPill(st.ping))
+		lbl, typePill(inf.Type), statusPill(st.ping))
 	var meta []string
 	if inf.MAC != "" {
 		meta = append(meta, "<b>MAC</b> "+htmlEscape(inf.MAC))
@@ -297,7 +299,7 @@ func rateStr(bps int64) string {
 func humanBytes(n int64) string {
 	switch {
 	case n >= 1<<40:
-		return fmt.Sprintf("%.1f GiB", float64(n)/(1<<40))
+		return fmt.Sprintf("%.1f TiB", float64(n)/(1<<40))
 	case n >= 1<<30:
 		return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30))
 	case n >= 1<<20:

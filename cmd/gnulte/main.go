@@ -609,6 +609,10 @@ func main() {
 	}
 }
 
+// maxRangeTargets caps how many addresses --range may expand to. See
+// resolveTargets: the expansion is materialised in RAM before any probing.
+const maxRangeTargets = 4096
+
 // resolveTargets combines --target/--mac/--range into a target list.
 func resolveTargets(ctx context.Context, tAmt, tMac, rCIDR, wl string, cfg netutil.Config) ([]string, error) {
 	var list []string
@@ -645,6 +649,16 @@ func resolveTargets(ctx context.Context, tAmt, tMac, rCIDR, wl string, cfg netut
 		iplist, err := netutil.HostsInCIDR(rCIDR)
 		if err != nil {
 			return nil, fmt.Errorf("invalid range: %w", err)
+		}
+		// Guard the expansion, matching gnulte-scan's capTargets. The list
+		// is materialised in RAM *before* any ping, so `--range 0.0.0.0/0`
+		// tried to hold ~4.3e9 strings (~167 GB) and even a real /8 meant
+		// 16.7M ping subprocesses. These are monitoring targets, not a
+		// fleet scan: a tool that forks a ping per host per second cannot
+		// service more than a few hundred anyway.
+		if len(iplist) > maxRangeTargets {
+			return nil, fmt.Errorf("range %s covers %d addresses (limit %d); use a smaller CIDR, or pass explicit targets",
+				rCIDR, len(iplist), maxRangeTargets)
 		}
 		// The router is how you get in and out of the network — shaping it
 		// would knock out your own uplink — so a range sweep never includes it.

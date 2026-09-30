@@ -262,11 +262,23 @@ func (m *Monitor) trimHistory(st *Stats) {
 	}
 }
 
-// rec appends one plain-text console line to the session history.
+// maxLogLines caps the session transcript. The log gains a line per sample
+// per target, so a long run (the default is one sample per second) grew it
+// without limit — tens of thousands of lines per target per day, all of which
+// the HTML report then embeds. gnulte-lan already caps its transcript at a
+// few thousand lines; this is the same guard on the gnulte side, keeping the
+// tail (the interesting end) and dropping the oldest lines.
+const maxLogLines = 4000
+
+// rec appends one plain-text console line to the session history, trimming
+// the head once the transcript passes maxLogLines.
 func (m *Monitor) rec(line string) {
 	m.logMu.Lock()
 	defer m.logMu.Unlock()
 	m.Log = append(m.Log, line)
+	if len(m.Log) > maxLogLines {
+		m.Log = m.Log[len(m.Log)-maxLogLines:]
+	}
 }
 
 // Note records one plain line into the session history (so it reaches the

@@ -103,23 +103,19 @@ func interactiveTable(rows []discover.Row, log []string, watchEvery int, rescan 
 	if watchEvery > 0 && rescan != nil {
 		watchCh := make(chan []discover.Row, 2)
 		go func() {
-			timer := time.NewTicker(time.Duration(watchEvery) * time.Second)
-			defer timer.Stop()
-			for {
-				select {
-				case <-wctx.Done():
+			// Same sweep-then-wait cadence as the console watch (watch.go):
+			// a ticker swallowed the interval, so `--watch 1` re-scanned
+			// every ~11s (the sweep cost) on a /24.
+			watchLoop(wctx, time.Duration(watchEvery)*time.Second, func() {
+				next := rescan()
+				if len(next) == 0 {
 					return
-				case <-timer.C:
-					next := rescan()
-					if len(next) == 0 {
-						continue
-					}
-					select {
-					case watchCh <- next:
-					default: // a slow re-scan must not clog the loop
-					}
 				}
-			}
+				select {
+				case watchCh <- next:
+				default: // a slow re-scan must not clog the loop
+				}
+			})
 		}()
 		t.watchCh = watchCh
 	}

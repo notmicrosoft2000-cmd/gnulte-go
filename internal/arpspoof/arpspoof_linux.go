@@ -92,12 +92,22 @@ func (sp *Spoofer) SendReply(toMAC net.HardwareAddr, toIP, claimedIP net.IP) err
 		return errors.New("arp spoof: destination MAC must be 6 bytes")
 	}
 	frame := BuildARPReply(sp.ourMAC, claimedIP, toIP, toMAC)
+	return sp.SendRaw(frame)
+}
+
+// SendRaw places one pre-built Ethernet+ARP frame on the wire, addressed to
+// the frame's own destination MAC. Used for corrective announcements that
+// must speak as a *different* sender (the real gateway) than this interface.
+func (sp *Spoofer) SendRaw(frame []byte) error {
+	if len(frame) < 14 {
+		return errors.New("arp spoof: frame too short")
+	}
 	sa := &syscall.SockaddrLinklayer{
 		Protocol: htons(ethPArp),
 		Ifindex:  sp.idx,
 		Halen:    6,
 	}
-	copy(sa.Addr[:], toMAC)
+	copy(sa.Addr[:], frame[0:6])
 	return syscall.Sendto(sp.fd, frame, 0, sa)
 }
 

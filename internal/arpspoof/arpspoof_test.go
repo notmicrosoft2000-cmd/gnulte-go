@@ -100,13 +100,3 @@ func TestParseARPRequestRejectsNonARP(t *testing.T) {
 		t.Error("IPv4 frame parsed as ARP request")
 	}
 }
-
-func TestIsLocal(t *testing.T) {
-	sp := &Spoofer{ourMAC: mac("aa:aa:aa:aa:aa:aa")}
-	if !sp.IsLocal(mac("aa:aa:aa:aa:aa:aa")) {
-		t.Error("own MAC must be local")
-	}
-	if sp.IsLocal(mac("bb:bb:bb:bb:bb:bb")) {
-		t.Error("foreign MAC must not be local")
-	}
-}

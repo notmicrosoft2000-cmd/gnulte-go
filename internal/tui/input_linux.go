@@ -68,9 +68,17 @@ func (k *keyStream) read() (Key, rune) {
 		// Always start from a filled buffer: parse before reading meant an
 		// empty buffer busy-spun on the nothing-more path.
 		for len(k.pending) == 0 {
-			if nr := readChunk(k.fd, buf, 500); nr > 0 {
+			nr := readChunk(k.fd, buf, 500)
+			if nr > 0 {
 				k.pending = append(k.pending, buf[:nr]...)
+				continue
 			}
+			// Nothing arrived: yield briefly instead of re-entering the
+			// syscall immediately. A closed/EOF fd is permanently "ready",
+			// so this loop used to burn 100% CPU with no way out. Callers
+			// block on Key() expecting a key, so returning a nil key here
+			// would only move the spin to the caller's draw loop.
+			time.Sleep(20 * time.Millisecond)
 		}
 		key, rn, n, more := parseKey(k.pending)
 		if n > 0 {

@@ -99,7 +99,35 @@ func SaveTo(path string, recs []Record) error {
 			return err
 		}
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	// Write-then-rename: a direct WriteFile truncates the target first, so a
+	// second Ctrl+C (the v16 hard-kill) landing mid-write left the shared
+	// device store as invalid JSON that every tool then refuses to read.
+	// The temp file is created in the same directory so the rename is atomic
+	// (never a cross-device copy).
+	tmp, err := os.CreateTemp(dirOrDot(path), ".gnulte-store-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once the rename succeeded
+	if _, err := tmp.Write(append(data, '\n')); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
+
+func dirOrDot(path string) string {
+	if dir := filepath.Dir(path); dir != "" {
+		return dir
+	}
+	return "."
 }
 
 // Update merges a sighting into the store: existing IPs refresh their detail

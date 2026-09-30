@@ -158,11 +158,20 @@ func buildRows(ctx context.Context, live []string, neighbors map[string]string, 
 	seen := map[string]bool{}
 	var rows []discover.Row
 	var mu sync.Mutex
+	// add fans out over `live` below, so the dedupe set is touched from up to
+	// eight goroutines at once. It is guarded by the same mutex as `rows`:
+	// an unguarded map here is a fatal "concurrent map writes" abort, which
+	// no recover() can catch, and it triggers as soon as a live host is not
+	// already an ARP neighbour.
 	add := func(ip, mac string) {
+		mu.Lock()
 		if seen[ip] {
+			mu.Unlock()
 			return
 		}
 		seen[ip] = true
+		mu.Unlock()
+
 		vendor := discover.VendorFor(mac)
 		var host string
 		if !noHosts {

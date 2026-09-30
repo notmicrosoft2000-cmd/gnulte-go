@@ -100,13 +100,23 @@ func main() {
 		explicit[f.Name] = true
 		// Aliased spellings (--jitter / --jitter-ms, --mix / --mix-reasons,
 		// --hop / --hop-channels) share one value; treat either as explicit.
+		// Both directions are recorded: a one-way map silently dropped the
+		// documented long spelling, so an explicit `--mix-reasons=false`
+		// was overwritten by the saved default and the adapter kept
+		// rotating reason codes the operator had just turned off.
 		switch f.Name {
 		case "jitter":
 			explicit["jitter-ms"] = true
+		case "jitter-ms":
+			explicit["jitter"] = true
 		case "mix":
 			explicit["mix-reasons"] = true
+		case "mix-reasons":
+			explicit["mix"] = true
 		case "hop":
 			explicit["hop-channels"] = true
+		case "hop-channels":
+			explicit["hop"] = true
 		}
 	})
 	prefs, err := settings.Load()

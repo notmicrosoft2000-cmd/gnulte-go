@@ -40,6 +40,10 @@ func (sp *Spoofer) SendReply(toMAC net.HardwareAddr, toIP, claimedIP net.IP) err
 	return errOther
 }
 
+func (sp *Spoofer) SendRaw(frame []byte) error {
+	return errOther
+}
+
 func (sp *Spoofer) ReadRequest() (net.HardwareAddr, net.IP, net.IP, bool, error) {
 	return nil, nil, nil, false, errOther
 }

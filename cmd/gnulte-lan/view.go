@@ -452,16 +452,58 @@ func buildView(st *viewState, hosts []string, info map[string]hostInfo, rates ma
 
 	switch st.screen {
 	case scrTalkers:
-		st.count = len(hosts)
+		// The cursor indexes the ranked talker list (see rankedTalkers), so
+		// currentIP is the host at that rank — not the stale one from the
+		// hosts screen, which used to be handed to gnulte on ⏎/g.
+		list, _ := rankedTalkers(hosts, rates, flows, hostSet)
+		st.count = len(list)
+		if st.cursor < 0 {
+			st.cursor = 0
+		}
+		if len(list) == 0 {
+			st.currentIP = ""
+		} else {
+			if st.cursor > len(list)-1 {
+				st.cursor = len(list) - 1
+			}
+			st.currentIP = list[st.cursor].ip
+		}
 		out = append(out, talkersLines(hosts, info, rates, stats, flows, hostSet, env, height-overhead)...)
 	case scrFlows:
+		// A flow row is a *pair* of hosts — there is no single target to hand
+		// off, so currentIP is cleared and ⏎ falls back to detail, g no-ops.
 		st.count = len(flows)
+		if st.cursor < 0 {
+			st.cursor = 0
+		}
+		if st.count == 0 {
+			st.cursor = 0
+		} else if st.cursor > st.count-1 {
+			st.cursor = st.count - 1
+		}
+		st.currentIP = ""
 		out = append(out, flowsLines(flows, hostSet, stats, env, height-overhead)...)
 	case scrArp:
-		st.count = len(env.neigh)
+		sorted := neighRows(env, hosts)
+		st.count = len(sorted)
+		if len(sorted) == 0 {
+			st.cursor = 0
+			st.currentIP = ""
+		} else {
+			if st.cursor < 0 {
+				st.cursor = 0
+			}
+			if st.cursor > len(sorted)-1 {
+				st.cursor = len(sorted) - 1
+			}
+			st.currentIP = sorted[st.cursor]
+		}
 		out = append(out, arpLines(st, hosts, info, stats, env, height-overhead)...)
 	case scrMap:
+		// The map's last row is the gateway hub, which is not a host to test
+		// against — clear currentIP so ⏎/g can never launch at the router.
 		st.count = len(hosts) + 1 // devices plus the gateway hub
+		st.currentIP = ""
 		out = append(out, mapLines(hosts, info, rates, stats, flows, hostSet, env, height-overhead)...)
 	default:
 		// ----- host rows, windowed by line budget so the cursor never leaves
@@ -605,35 +647,32 @@ func gateLines(name, why string) []string {
 // this interval, with a down/up bar split and its peer count, followed by the
 // "communicators" block — the LAN-internal conversation pairs (who talks to
 // whom without leaving the subnet).
-func talkersLines(hosts []string, info map[string]hostInfo, rates map[string]traffic.Rate,
-	stats map[string]*hostStat, flows []traffic.Flow, hostSet map[string]bool,
-	env watchEnv, budget int) []string {
+type talkerStat struct {
+	ip    string
+	rx    int64
+	tx    int64
+	tot   int64
+	peers int
+}
 
-	out := []string{
-		"  " + ux.C(ux.Bold, "TOP TALKERS") + ux.C(ux.Dim, "  by combined rate this interval · bars scale to the busiest host · peers = hosts talked to"),
-	}
-	type tk struct {
-		ip   string
-		rx   int64
-		tx   int64
-		tot  int64
-		peers int
-	}
-	var list []tk
-	var maxR int64
+// rankedTalkers orders every host by combined rate this interval (descending,
+// IP tiebreak) — exactly the ordering talkersLines draws. The interactive
+// cursor indexes rows, so buildView and the drawing path must agree on this
+// order or a handoff from the talkers screen would launch at a wrong host.
+func rankedTalkers(hosts []string, rates map[string]traffic.Rate, flows []traffic.Flow, hostSet map[string]bool) (list []talkerStat, maxR int64) {
 	for _, ip := range hosts {
 		r := rates[ip]
-		tkt := tk{ip: ip, rx: r.RXBytes, tx: r.TXBytes, tot: r.RXBytes + r.TXBytes}
+		t := talkerStat{ip: ip, rx: r.RXBytes, tx: r.TXBytes, tot: r.RXBytes + r.TXBytes}
 		for _, f := range flows {
 			if hostSet[endpointHost(f.A)] && endpointHost(f.A) == ip ||
 				hostSet[endpointHost(f.B)] && endpointHost(f.B) == ip {
-				tkt.peers++
+				t.peers++
 			}
 		}
-		if tkt.tot > maxR {
-			maxR = tkt.tot
+		if t.tot > maxR {
+			maxR = t.tot
 		}
-		list = append(list, tkt)
+		list = append(list, t)
 	}
 	sort.Slice(list, func(i, j int) bool {
 		if list[i].tot != list[j].tot {
@@ -641,6 +680,36 @@ func talkersLines(hosts []string, info map[string]hostInfo, rates map[string]tra
 		}
 		return list[i].ip < list[j].ip
 	})
+	return list, maxR
+}
+
+// neighRows returns every address the ARP screen draws — the neighbour table
+// plus the live hosts, sorted by IP — in draw order, so the cursor maps to a
+// real row there.
+func neighRows(env watchEnv, hosts []string) []string {
+	keys := map[string]bool{}
+	for ip := range env.neigh {
+		keys[ip] = true
+	}
+	for _, ip := range hosts {
+		keys[ip] = true
+	}
+	out := make([]string, 0, len(keys))
+	for ip := range keys {
+		out = append(out, ip)
+	}
+	sort.Slice(out, func(i, j int) bool { return ipLess(out[i], out[j]) })
+	return out
+}
+
+func talkersLines(hosts []string, info map[string]hostInfo, rates map[string]traffic.Rate,
+	stats map[string]*hostStat, flows []traffic.Flow, hostSet map[string]bool,
+	env watchEnv, budget int) []string {
+
+	out := []string{
+		"  " + ux.C(ux.Bold, "TOP TALKERS") + ux.C(ux.Dim, "  by combined rate this interval · bars scale to the busiest host · peers = hosts talked to"),
+	}
+	list, maxR := rankedTalkers(hosts, rates, flows, hostSet)
 	busy := 0
 	for _, t := range list {
 		if t.tot > 0 {
@@ -971,18 +1040,7 @@ func arpLines(st *viewState, hosts []string, info map[string]hostInfo,
 	out := []string{
 		"  " + ux.C(ux.Bold, "NEIGHBOURS") + ux.C(ux.Dim, "  /proc/net/arp · refreshed live · MAC · vendor · type · ping"),
 	}
-	keys := map[string]bool{}
-	for ip := range env.neigh {
-		keys[ip] = true
-	}
-	for _, ip := range hosts {
-		keys[ip] = true
-	}
-	sorted := make([]string, 0, len(keys))
-	for ip := range keys {
-		sorted = append(sorted, ip)
-	}
-	sort.Slice(sorted, func(i, j int) bool { return ipLess(sorted[i], sorted[j]) })
+	sorted := neighRows(env, hosts)
 	if len(sorted) == 0 {
 		out = append(out, ux.C(ux.Dim, "  empty neighbour table — nothing on the link yet"))
 		return out

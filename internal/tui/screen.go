@@ -20,6 +20,7 @@ package tui
 import (
 	"errors"
 	"os"
+	"sync"
 
 	"gnulte-go/internal/ux"
 )
@@ -36,6 +37,12 @@ type Screen struct {
 	restore func()
 	leave   func()
 	keys    *keyStream
+
+	// mu guards leave/restore: Close is reachable from the main goroutine
+	// and from the signal-cleanup goroutine at the same time. Running the
+	// restore callbacks twice would drop a stray alternate-buffer switch into
+	// whatever stdout is writing next (commonly the end-of-run report).
+	mu sync.Mutex
 }
 
 // Open prepares a full-screen interactive editor. It requires a live terminal;
@@ -59,15 +66,20 @@ func Open() (*Screen, error) {
 }
 
 // Close restores the primary buffer and the original line settings exactly
-// once. It is safe to call from the registered signal cleanups.
+// once. It is safe to call from the registered signal cleanups and from the
+// caller's own defer at the same time.
 func (s *Screen) Close() {
-	if s.leave != nil {
-		s.leave()
-		s.leave = nil
+	s.mu.Lock()
+	leave := s.leave
+	s.leave = nil
+	restore := s.restore
+	s.restore = nil
+	s.mu.Unlock()
+	if leave != nil {
+		leave()
 	}
-	if s.restore != nil {
-		s.restore()
-		s.restore = nil
+	if restore != nil {
+		restore()
 	}
 }
 

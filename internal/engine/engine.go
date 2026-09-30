@@ -258,6 +258,7 @@ type Session struct {
 	drops          []string
 	spoofs         []*exec.Cmd
 	qdiscBefore    string
+	qdiscBeforeErr string // why the original qdisc could not be recorded
 	qdiscApplied   bool
 	restoreErr     []string
 	capture        *exec.Cmd
@@ -326,6 +327,11 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 	// -- Capture (optional).
 	if cfg.CaptureFile != "" {
 		if err := s.startCapture(ctx); err != nil {
+			// By now forwarding has been toggled and/or FORWARD DROPs inserted,
+			// so a failed capture must still tear the session down. Every other
+			// error path in Start calls Stop; skipping it here left the box
+			// firewalled with nothing in the output mentioning it.
+			s.Stop()
 			return nil, err
 		}
 	}
@@ -443,7 +449,21 @@ func (s *Session) killSpoof(c *exec.Cmd) {
 		return
 	}
 	_ = syscall.Kill(-c.Process.Pid, syscall.SIGTERM)
-	_, _ = c.Process.Wait()
+	// Wait with an escalation, like stopCapture: a spoof child that wedges
+	// must not hang Stop — Stop holds the session lock for the entire
+	// teardown, so one blocked Wait silently skips the qdisc/iptables/
+	// forwarding restore behind it.
+	done := make(chan struct{})
+	go func() {
+		_, _ = c.Process.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		_ = syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
+		<-done
+	}
 }
 
 // stealthTarget is one spoofed host: the victim's IP and learned MAC.
@@ -517,6 +537,15 @@ func (s *Session) stealthPump(ctx context.Context, sp *arpspoof.Spoofer, gw net.
 		for i := 0; i < 64; i++ {
 			fromMAC, fromIP, asked, ok, err := sp.ReadRequest()
 			if err != nil {
+				// Transient shortfalls (EINTR on a signal, ENOBUFS under load)
+				// are ordinary on a raw socket and must not kill the pump —
+				// a single one silently stopping all spoofing mid-test was
+				// indistinguishable from the test working. Only a persistent
+				// error (e.g. EBADF: the socket was closed) ends the loop.
+				if err == syscall.EINTR || err == syscall.ENOBUFS || err == syscall.EAGAIN {
+					break
+				}
+				traceCommand(fmt.Sprintf("arp spoof pump stopped: %v", err))
 				return
 			}
 			if !ok {
@@ -598,9 +627,19 @@ func (s *Session) applyTC(ctx context.Context) error {
 		if len(lines) > 0 {
 			s.qdiscBefore = strings.TrimSpace(lines[0])
 		}
+	} else {
+		// A failed read must not silently drop the restore target: if the
+		// rebuild below succeeds we would delete an original qdisc we can no
+		// longer name. Surface it at teardown instead.
+		s.qdiscBeforeErr = fmt.Sprintf("tc qdisc show: %v", err)
 	}
 	// Deleting the current root qdisc is best-effort (none may exist yet).
 	_ = runRoot("tc", "qdisc", "del", "dev", s.cfg.Interface, "root")
+	// Mark the qdisc as applied *before* the tree is built: from this moment
+	// on a failure (or a Ctrl+C mid-build) must make Stop take the qdisc down
+	// again and restore what we recorded. Setting the flag after the build
+	// left the original qdisc deleted with half a tree and no cleanup.
+	s.qdiscApplied = true
 	tree := tcTreeCommands(&s.cfg, s.cfg.Interface)
 	for _, args := range tree[1:] {
 		cmd := exec.CommandContext(ctx, "tc", args...)
@@ -609,7 +648,6 @@ func (s *Session) applyTC(ctx context.Context) error {
 			return fmt.Errorf("tc %s: %w", strings.Join(args, " "), err)
 		}
 	}
-	s.qdiscApplied = true
 	return nil
 }
 
@@ -655,10 +693,42 @@ func (s *Session) stopSpoofs() {
 	}
 	s.spoofs = nil
 	if s.cfg.Gateway != "" {
-		// Gratuitous ARP so neighbors re-learn the real router MAC quickly.
-		if _, err := exec.LookPath("arping"); err == nil {
-			_ = runRoot("arping", "-q", "-c", "3", "-U", "-I", s.cfg.Interface, s.cfg.Gateway)
+		s.announceRealGateway()
+	}
+}
+
+// announceRealGateway broadcasts the gateway's real MAC so neighbors re-learn
+// the true owner immediately instead of waiting out the poison's ARP-cache
+// TTL. The old cleanup used `arping -U … gateway`, which advertises *our*
+// interface MAC as the gateway — the same claim the test just spent its run
+// enforcing — so it actively re-poisons the link at teardown. Putting the
+// router's own MAC in the sender field is exactly what correcting it needs,
+// and that requires raw-crafting the frame (arping's -s sets the IP, never
+// the sender MAC).
+func (s *Session) announceRealGateway() {
+	gw := net.ParseIP(s.cfg.Gateway)
+	if gw == nil {
+		return
+	}
+	gmac, err := arpLookupMAC(s.cfg.Interface, s.cfg.Gateway)
+	if err != nil {
+		traceCommand(fmt.Sprintf("gateway MAC unknown at teardown (%v); neighbors re-learn on ARP cache expiry", err))
+		return
+	}
+	sp, err := arpspoof.Open(s.cfg.Interface)
+	if err != nil {
+		traceCommand(fmt.Sprintf("gateway re-announce skipped: %v", err))
+		return
+	}
+	defer sp.Close()
+	bcast := net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+	frame := arpspoof.BuildARPReply(gmac, gw, gw, bcast)
+	for i := 0; i < 3; i++ {
+		if err := sp.SendRaw(frame); err != nil {
+			traceCommand(fmt.Sprintf("gateway re-announce failed: %v", err))
+			return
 		}
+		time.Sleep(200 * time.Millisecond)
 	}
 }
 
@@ -750,6 +820,11 @@ func (s *Session) Stop() {
 			if err := runRoot("tc", args...); err != nil {
 				s.restoreErr = append(s.restoreErr, "tc qdisc restore: "+err.Error())
 			}
+		} else if s.qdiscBeforeErr != "" {
+			// The original qdisc could not be identified before it was
+			// deleted, so there is nothing to restore — say so explicitly
+			// instead of pretending the link is as we found it.
+			s.restoreErr = append(s.restoreErr, s.qdiscBeforeErr+"; original qdisc unknown, not restored")
 		}
 	}
 

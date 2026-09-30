@@ -466,61 +466,68 @@ func main() {
 			fmt.Println(string(b))
 		}
 		prev := rows
-		ticker := time.NewTicker(time.Duration(*watchArg) * time.Second)
-		defer ticker.Stop()
-	watchLoop:
-		for {
-			select {
-			case <-ctx.Done():
-				break watchLoop
-			case <-ticker.C:
-				next := watchSweep()
-				d := scanner.Diff(prev, next)
-				if s := d.Summary(); s != "no change" {
-					if machineWatch {
-						// One JSON object per sweep with movement. Evenside
-						// rows carry the newest state; GONE rows use the last
-						// known identity from the previous sweep.
-						info := map[string]discover.Row{}
-						for _, r := range prev {
-							info[r.IP] = r
-						}
-						for _, r := range next {
-							info[r.IP] = r
-						}
-						type chg struct {
-							Kind     string `json:"kind"`
-							IP       string `json:"ip"`
-							Hostname string `json:"hostname,omitempty"`
-							Vendor   string `json:"vendor,omitempty"`
-							Type     string `json:"type,omitempty"`
-							MAC      string `json:"mac,omitempty"`
-						}
-						changes := []chg{}
-						for _, ip := range d.ChangeIPs() {
-							r := info[ip]
-							changes = append(changes, chg{d[ip].String(), ip, r.Hostname, r.Vendor, r.Type, r.MAC})
-						}
-						obj := map[string]any{
-							"kind":    "delta",
-							"ts":      time.Now().UTC().Format(time.RFC3339),
-							"summary": s,
-							"changes": changes,
-						}
-						b, merr := json.Marshal(obj)
-						if merr == nil {
-							fmt.Println(string(b))
-						}
-					} else {
-						sess.pl(ux.C(ux.Yellow, "  "+s), "  "+s)
-						for _, ln := range d.Changes() {
-							sess.pl("  "+ln, "  "+strings.TrimSpace(ln))
-						}
+		sweeps := 0
+		watchLoop(ctx, time.Duration(*watchArg)*time.Second, func() {
+			t0 := time.Now()
+			next := watchSweep()
+			sweeps++
+			if sweeps == 1 {
+				// Honest timing: a sweep's real cost is often the dominant
+				// term (a /24 pass costs ~11s), so say what the operator
+				// actually gets rather than the nominal --watch N. Safe in
+				// every mode: the machine formats put the console narrative
+				// on stderr, so the JSON feed on stdout stays pure.
+				cost := time.Since(t0).Round(100 * time.Millisecond)
+				sess.pl(ux.C(ux.Dim, fmt.Sprintf("  Δ first sweep took %s, so watching actually runs about every %s (asked for %ds)",
+					cost, (cost+time.Duration(*watchArg)*time.Second).Round(time.Second), *watchArg)),
+					fmt.Sprintf("  first sweep took %s, effective interval ~%s", cost,
+						(cost+time.Duration(*watchArg)*time.Second).Round(time.Second)))
+			}
+			d := scanner.Diff(prev, next)
+			if s := d.Summary(); s != "no change" {
+				if machineWatch {
+					// One JSON object per sweep with movement. Evenside
+					// rows carry the newest state; GONE rows use the last
+					// known identity from the previous sweep.
+					info := map[string]discover.Row{}
+					for _, r := range prev {
+						info[r.IP] = r
+					}
+					for _, r := range next {
+						info[r.IP] = r
+					}
+					type chg struct {
+						Kind     string `json:"kind"`
+						IP       string `json:"ip"`
+						Hostname string `json:"hostname,omitempty"`
+						Vendor   string `json:"vendor,omitempty"`
+						Type     string `json:"type,omitempty"`
+						MAC      string `json:"mac,omitempty"`
+					}
+					changes := []chg{}
+					for _, ip := range d.ChangeIPs() {
+						r := info[ip]
+						changes = append(changes, chg{d[ip].String(), ip, r.Hostname, r.Vendor, r.Type, r.MAC})
+					}
+					obj := map[string]any{
+						"kind":    "delta",
+						"ts":      time.Now().UTC().Format(time.RFC3339),
+						"summary": s,
+						"changes": changes,
+					}
+					b, merr := json.Marshal(obj)
+					if merr == nil {
+						fmt.Println(string(b))
+					}
+				} else {
+					sess.pl(ux.C(ux.Yellow, "  "+s), "  "+s)
+					for _, ln := range d.Changes() {
+						sess.pl("  "+ln, "  "+strings.TrimSpace(ln))
 					}
 				}
-				prev = next
 			}
-		}
+			prev = next
+		})
 		sess.pl(ux.C(ux.Dim, "  Δ watch stopped — last sweep "+fmt.Sprint(len(prev))+" host(s)"),
 			fmt.Sprintf("  watch stopped — last sweep %d host(s)", len(prev)))
 	}

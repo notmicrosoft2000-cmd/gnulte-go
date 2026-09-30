@@ -52,3 +52,22 @@ func TestDashboardSparkMapping(t *testing.T) {
 		t.Fatalf("SparkRTT mapping changed: %q", sp)
 	}
 }
+
+// The session transcript gains a line per sample per target and was never
+// trimmed: a day at the default 1s interval is ~86k lines per target, all of
+// which the HTML report embeds. The cap keeps the tail.
+func TestRecTrimsLogToCap(t *testing.T) {
+	m := &Monitor{}
+	total := maxLogLines + 500
+	for i := 0; i < total; i++ {
+		m.rec("line")
+	}
+	if len(m.Log) != maxLogLines {
+		t.Errorf("Log length = %d, want capped at %d", len(m.Log), maxLogLines)
+	}
+	// The cap drops from the head, keeping the newest.
+	m.rec("newest")
+	if m.Log[len(m.Log)-1] != "newest" {
+		t.Errorf("last line = %q, want %q", m.Log[len(m.Log)-1], "newest")
+	}
+}

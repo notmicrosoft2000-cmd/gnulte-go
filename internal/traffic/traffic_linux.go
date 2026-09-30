@@ -22,7 +22,9 @@ import (
 type Counter struct {
 	fd      int
 	ifindex int
-	closed  chan struct{}
+
+	closeOnce sync.Once
+	closed    chan struct{}
 
 	mu   sync.Mutex
 	host map[string]*counts
@@ -294,15 +296,17 @@ func (r *Rate) clamp() {
 	}
 }
 
-// Close stops the capture loop and frees the socket.
+// Close stops the capture loop and frees the socket. It runs at most once,
+// on any number of concurrent callers: gnulte-lan registers this method as a
+// signal cleanup *and* defers the raw method, so both the tui goroutine and
+// the main loop can reach it on the same Ctrl+C. The check-then-act select
+// below was fine for one caller but panicked ("close of closed channel") when
+// both passed the select before either closed.
 func (c *Counter) Close() {
-	select {
-	case <-c.closed:
-		return
-	default:
+	c.closeOnce.Do(func() {
 		close(c.closed)
-	}
-	_ = syscall.Close(c.fd)
+		syscall.Close(c.fd)
+	})
 }
 
 // htons swaps a 16-bit value to network byte order.

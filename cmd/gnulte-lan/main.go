@@ -502,8 +502,8 @@ func main() {
 		case tui.KeyEnter:
 			// Live Interconnection handoff: open gnulte against the selected
 			// host in a fresh terminal (falls back to printing the command).
-			if view.currentIP != "" && (view.screen == scrHosts || view.screen == scrTalkers) {
-				view.gCmd = handoffGNULTE(nic, view.currentIP)
+			if ip := handoffIP(view.screen, view.currentIP); ip != "" {
+				view.gCmd = handoffGNULTE(nic, ip)
 				return true, false
 			}
 			view.detail = !view.detail
@@ -553,8 +553,8 @@ func main() {
 				view.detail = false
 				return true, false
 			case 'g', 'G':
-				if view.currentIP != "" {
-					view.gCmd = handoffGNULTE(nic, view.currentIP)
+				if ip := handoffIP(view.screen, view.currentIP); ip != "" {
+					view.gCmd = handoffGNULTE(nic, ip)
 				}
 				return true, false
 			case 'd', 'D':
@@ -927,6 +927,24 @@ func bps(bytes int64, iv int) int64 {
 		return 0
 	}
 	return bytes / int64(iv)
+}
+
+// handoffIP decides which IP an ⏎/g handoff may launch against, or "" when
+// there is none.
+//
+// buildView sets currentIP to the host under the cursor on the screens whose
+// rows *are* hosts (hosts, talkers, ARP) and clears it on the two that are
+// not: a flow row is a pair of endpoints with no single host, and the map's
+// last row is the gateway hub, which is a diagram node rather than a target.
+// Returning "" there means ⏎ falls back to the detail pane and g is a no-op,
+// instead of launching gnulte against whatever host the cursor last sat on
+// when the screen was still the hosts list.
+func handoffIP(screen int, currentIP string) string {
+	switch screen {
+	case scrHosts, scrTalkers, scrArp:
+		return currentIP
+	}
+	return ""
 }
 
 // handoffGNULTE is the Live Interconnection handoff: pressing ⏎ (or g) on a

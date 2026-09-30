@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -43,13 +44,26 @@ func runHelper(t *testing.T, mode string, signals, graceMs int) (string, int) {
 	}()
 
 	rd := bufio.NewReader(stdout)
-	var sb strings.Builder
+	// The reader goroutine owns the transcript; the test body only ever reads
+	// it through snapshot(). A strings.Builder shared across the two would be
+	// a genuine data race, and `go test -race` rightly fails this package on it.
+	var (
+		mu   sync.Mutex
+		sb   strings.Builder
+		read = func() string {
+			mu.Lock()
+			defer mu.Unlock()
+			return sb.String()
+		}
+	)
 	ready := make(chan struct{})
 	go func() {
 		readyOnce := false
 		for {
 			line, err := rd.ReadString('\n')
+			mu.Lock()
 			sb.WriteString(line)
+			mu.Unlock()
 			if !readyOnce && strings.TrimSpace(line) == "READY" {
 				readyOnce = true
 				close(ready)
@@ -64,7 +78,7 @@ func runHelper(t *testing.T, mode string, signals, graceMs int) (string, int) {
 	case <-ready:
 	case <-time.After(20 * time.Second):
 		_ = cmd.Process.Kill()
-		t.Fatalf("helper never became ready; got:\n%s", sb.String())
+		t.Fatalf("helper never became ready; got:\n%s", read())
 	}
 
 	// Space the interrupts so the first one is clearly the graceful path and
@@ -87,11 +101,11 @@ func runHelper(t *testing.T, mode string, signals, graceMs int) (string, int) {
 		}
 	case <-time.After(25 * time.Second):
 		_ = cmd.Process.Kill()
-		t.Fatalf("helper never exited; got:\n%s", sb.String())
+		t.Fatalf("helper never exited; got:\n%s", read())
 	}
 	// Let the reader drain the tail the child wrote before exiting.
 	time.Sleep(150 * time.Millisecond)
-	return sb.String(), code
+	return read(), code
 }
 
 // TestCleanupHelper is the subprocess entry point. It is skipped unless one of

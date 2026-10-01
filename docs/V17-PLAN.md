@@ -99,13 +99,28 @@ an unavailable `ip_forward`, no route, or a down interface. `Check` marshals
 wired into build/install/uninstall and the README tool table. Tests inject fake
 facts for every branch, plus exit-code and JSON-wording guards.
 
-### 16.10 — `gnulte-trace` (new tool)
+### 16.10 — `gnulte-trace` (new tool)  — **SHIPPED** (v16.10)
 mtr-style traceroute: hop-by-hop RTT, animated TUI + HTML report + `--json`.
 
 - Raw ICMP probes at TTL 1..N (reuses 16.7 core): each hop probed several times for min/avg/max/loss; stop on "port unreachable"/echo-reply from target. Re-exec as root (like the other root tools).
 - Live table (mtr-like), final HTML report, machine output.
 - Tests: synthetic ICMP time-exceeded frames; hop-extraction logic; live only with root → pty proof skipped in sandbox, rely on unit level + `GOOS` build tags.
 - Touch: new cmd/gnulte-trace.
+
+**As built:** `internal/icmp` gains `TraceProbe` (Linux raw ICMP echo with a
+per-probe `IP_TTL`, `icmp_other.go` stub off Linux) and the pure `DecodeTrace`,
+which classifies an echo reply (the target), a time-exceeded (a router, with the
+quoted request matched by id/seq), or a destination-unreachable — rejecting
+packets that are not our probe's answer. New `internal/trace` owns the walk:
+`Walk(ctx, target, Options, ProbeFunc, onHop)` probes each TTL `Probes` times,
+accumulates min/avg/max/loss and the hop address, and stops at the target, an
+unreachable, the hop limit or context cancellation — all behind a probe seam so
+it is tested without a socket. New `cmd/gnulte-trace` (`-m/-c/-t/-i`, `--json`,
+`--html`, `-q`) drives a `tui.Screen` live table (goroutine walk + mutex-guarded
+hops + `Poll` for `q`), falls back to an incremental plain view when stdout is
+not a terminal, prints the finished table to the scrollback, and re-execs
+through sudo once like the other root tools. Wired into build/install/uninstall
+and the README tool table.
 
 ### 16.11 — `gnulte-top` (new tool)
 Live per-host/per-flow bandwidth top + CSV/JSON export.

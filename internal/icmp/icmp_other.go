@@ -34,3 +34,9 @@ var errOther = errors.New("in-Go ICMP requires Linux raw sockets")
 func Ping(ctx context.Context, ip string, timeout time.Duration) (int, int, bool, error) {
 	return -1, 0, false, errOther
 }
+
+// TraceProbe is unavailable off Linux: a traceroute needs the same raw ICMP
+// socket, so the caller is told the in-Go path cannot run here.
+func TraceProbe(ctx context.Context, ip string, ttl int, timeout time.Duration) (int, TraceReply, error) {
+	return -1, TraceReply{Kind: NoReply}, errOther
+}

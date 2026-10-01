@@ -6,5 +6,6 @@
 /gnulte-traffic
 /gnulte-devices
 /gnulte-doctor
+/gnulte-trace
 # generated reports
 /gnulte-scan-report-*.html

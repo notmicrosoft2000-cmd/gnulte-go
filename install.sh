@@ -46,10 +46,11 @@ go build -trimpath -ldflags "-s -w" -o gnulte-wifi ./cmd/gnulte-wifi || exit 1
 go build -trimpath -ldflags "-s -w" -o gnulte-lan ./cmd/gnulte-lan || exit 1
 go build -trimpath -ldflags "-s -w" -o gnulte-devices ./cmd/gnulte-devices || exit 1
 go build -trimpath -ldflags "-s -w" -o gnulte-doctor ./cmd/gnulte-doctor || exit 1
+go build -trimpath -ldflags "-s -w" -o gnulte-trace ./cmd/gnulte-trace || exit 1
 
 # --- verify before installing ---
 
-for f in gnulte gnulte-scan gnulte-wifi gnulte-lan gnulte-devices gnulte-doctor; do
+for f in gnulte gnulte-scan gnulte-wifi gnulte-lan gnulte-devices gnulte-doctor gnulte-trace; do
     if ! file "$f" | grep -q "ELF"; then
         echo "built $f does not look like an ELF binary; aborting." >&2
         exit 1
@@ -62,7 +63,7 @@ if [[ -z "$VERSION" ]]; then
     echo "gnulte does not report a version number; aborting." >&2
     exit 1
 fi
-for b in gnulte gnulte-scan gnulte-wifi gnulte-lan gnulte-devices gnulte-doctor; do
+for b in gnulte gnulte-scan gnulte-wifi gnulte-lan gnulte-devices gnulte-doctor gnulte-trace; do
     if ! "./$b" --version 2>/dev/null | grep -q "$VERSION"; then
         echo "$b does not report $VERSION; aborting." >&2
         exit 1
@@ -77,6 +78,7 @@ install -m755 "$SRC_DIR/gnulte-wifi" "$BINDIR/gnulte-wifi"
 install -m755 "$SRC_DIR/gnulte-lan" "$BINDIR/gnulte-lan"
 install -m755 "$SRC_DIR/gnulte-devices" "$BINDIR/gnulte-devices"
 install -m755 "$SRC_DIR/gnulte-doctor" "$BINDIR/gnulte-doctor"
+install -m755 "$SRC_DIR/gnulte-trace" "$BINDIR/gnulte-trace"
 
 # --- install legal / safety documentation ---
 
@@ -95,7 +97,7 @@ done
 
 echo ""
 echo "GNULTE ${VERSION} installed successfully."
-echo "  Binaries: ${BINDIR}/gnulte, ${BINDIR}/gnulte-scan, ${BINDIR}/gnulte-wifi, ${BINDIR}/gnulte-lan, ${BINDIR}/gnulte-devices, ${BINDIR}/gnulte-doctor"
+echo "  Binaries: ${BINDIR}/gnulte, ${BINDIR}/gnulte-scan, ${BINDIR}/gnulte-wifi, ${BINDIR}/gnulte-lan, ${BINDIR}/gnulte-devices, ${BINDIR}/gnulte-doctor, ${BINDIR}/gnulte-trace"
 echo "  Docs:     ${DOCDIR}/"
 echo ""
 echo "Run gnulte (it elevates via sudo as needed)."

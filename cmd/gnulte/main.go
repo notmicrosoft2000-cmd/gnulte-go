@@ -48,7 +48,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "16.7"
+const version = "16.8"
 
 // bootLog holds the pre-run transcript (banner, confirmation, arming) so the
 // HTML report shows the full command flow, not just the monitor's own output.
@@ -131,7 +131,7 @@ func main() {
 		probePorts  = flag.String("probe-ports", "", "TCP fallback probe ports for ICMP-filtered targets, e.g. 443,80,53")
 
 		duration    = flag.Int("duration", 0, "auto-stop after N seconds (0 = until interrupt)")
-		captureArg  = flag.String("c", "", "capture target traffic with tcpdump to FILE ('-' = stdout)")
+		captureArg  = flag.String("c", "", "capture target traffic to FILE as pcap ('-' = stdout)")
 		stealthArg  = flag.Bool("S", false, "stealth ARP spoofing: answer only when asked (far less visible to other scanners)")
 		block       = flag.Bool("block", false, "fully block the target (no forwarding) instead of shaping")
 		soundArg    = flag.Bool("sound", true, "beep per ping result, pitch scaled by latency (default: on)")
@@ -157,7 +157,7 @@ func main() {
 	flag.IntVar(dup, "duplicate", 0, "duplicate packets percent")
 	flag.IntVar(reorder, "reorder", 0, "out-of-order packets percent")
 	flag.IntVar(bandwidth, "bandwidth", 0, "bandwidth cap in kbps (0 = unlimited)")
-	flag.StringVar(captureArg, "capture", "", "capture target traffic with tcpdump to FILE ('-' = stdout)")
+	flag.StringVar(captureArg, "capture", "", "capture target traffic to FILE as pcap ('-' = stdout)")
 	flag.BoolVar(stealthArg, "stealth", false, "stealth ARP spoofing: answer only when asked (alias: -S)")
 	flag.BoolVar(noBanner, "minimal", false, "skip the banner (alias: --no-banner)")
 	flag.BoolVar(quiet, "quiet", false, "quiet: results only")
@@ -1019,7 +1019,7 @@ Watch:
 Advanced:
       --duration SECONDS  auto-stop after N seconds
       --interval SECONDS  ping every N seconds (default 1)
-  -c, --capture FILE      capture target traffic with tcpdump ('.'- = stdout)
+  -c, --capture FILE      capture target traffic to FILE as pcap ('-' = stdout)
   -S, --stealth           stealth ARP spoofing: answer only when asked, slow
                           jittered cache refresh — far less visible to other
                           scanners on the LAN (no periodic unsolicited replies)

@@ -21,13 +21,14 @@
 // spoofing in both directions, optional IP forwarding that is toggled only
 // for the length of a test, 100% block mode via FORWARD-chain DROPs, a
 // per-target tc tree (root htb + netem leaf) that leaves non-target traffic
-// untouched, and tcpdump capture.
+// untouched, and in-process pcap capture.
 package engine
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
 	"os"
@@ -82,10 +83,11 @@ type Config struct {
 	Stealth bool
 
 	// Verbose, when set, receives every privilege-requiring command the engine
-	// runs (iptables, tc, arpspoof, tcpdump, sysctls) as a single shell line.
-	// It is the pre-permission command transcript: tools surface it to the
-	// operator live and fold it into the report so the exact commands that ran
-	// with root are always on the record. May be nil.
+	// runs (iptables, tc, arpspoof, sysctls) as a single shell line, plus a note
+	// for the work the engine now does in-process (such as capture). It is the
+	// pre-permission command transcript: tools surface it to the operator live
+	// and fold it into the report so the exact commands that ran with root are
+	// always on the record. May be nil.
 	Verbose func(line string)
 }
 
@@ -131,11 +133,6 @@ func DepsCheck(c *Config) []string {
 	for _, bin := range deps {
 		if _, err := exec.LookPath(bin); err != nil {
 			problems = append(problems, fmt.Sprintf("missing required command: %s", bin))
-		}
-	}
-	if c.CaptureFile != "" && c.CaptureFile != "-" {
-		if _, err := exec.LookPath("tcpdump"); err != nil {
-			problems = append(problems, "missing required command: tcpdump (for --capture)")
 		}
 	}
 	if !fileExists("/proc/sys/net/ipv4/ip_forward") {
@@ -224,20 +221,6 @@ func blockRules(c *Config) [][]string {
 	return rules
 }
 
-// captureArgs builds the tcpdump arguments (host <target> … -w <file>).
-func captureArgs(c *Config, iface string) []string {
-	args := []string{"-i", iface}
-	for _, t := range c.Targets {
-		args = append(args, "host", t)
-	}
-	if c.CaptureFile == "-" {
-		args = append(args, "-")
-	} else {
-		args = append(args, "-w", c.CaptureFile)
-	}
-	return args
-}
-
 func readForward() (string, error) {
 	b, err := os.ReadFile("/proc/sys/net/ipv4/ip_forward")
 	if err != nil {
@@ -264,8 +247,7 @@ type Session struct {
 	qdiscBeforeErr string // why the original qdisc could not be recorded
 	qdiscApplied   bool
 	restoreErr     []string
-	capture        *exec.Cmd
-	captureWait    chan struct{}
+	capture        *captureHandle
 
 	// Stealth ARP spoofing (in-Go, on-demand) replaces arpspoof children.
 	stealthSpoof  *arpspoof.Spoofer
@@ -288,7 +270,7 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 		return nil, errors.New(strings.Join(problems, "; "))
 	}
 
-	s := &Session{cfg: cfg, captureWait: make(chan struct{})}
+	s := &Session{cfg: cfg}
 	if cfg.Verbose != nil {
 		verboseHook = cfg.Verbose
 		defer func() { verboseHook = nil }()
@@ -374,37 +356,46 @@ func traceCommand(pieces ...string) {
 	}
 }
 
+// startCapture arms the in-process capture: a raw AF_PACKET socket feeding a
+// libpcap file. The socket is opened synchronously, so a permission or interface
+// problem surfaces here (across Start's error path) instead of as a capture that
+// quietly records nothing.
 func (s *Session) startCapture(ctx context.Context) error {
-	// Overwrite guard (mirrors Bash behaviour).
+	// Overwrite guard (mirrors the old tcpdump behaviour).
 	if s.cfg.CaptureFile != "-" {
 		if fi, err := os.Stat(s.cfg.CaptureFile); err == nil && fi.Mode().IsRegular() {
 			return fmt.Errorf("capture file %s already exists (move it or delete it first)", s.cfg.CaptureFile)
 		}
 	}
-	cmd := exec.CommandContext(ctx, "tcpdump", captureArgs(&s.cfg, s.cfg.Interface)...)
-	traceCommand(append([]string{"tcpdump"}, captureArgs(&s.cfg, s.cfg.Interface)...)...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	var dst io.WriteCloser
 	if s.cfg.CaptureFile == "-" {
-		cmd.Stdout = os.Stdout
+		dst = writeCloser{os.Stdout}
 	} else {
-		cmd.Stdout = nil
+		f, err := os.OpenFile(s.cfg.CaptureFile, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
+		if err != nil {
+			return fmt.Errorf("capture file %s: %w", s.cfg.CaptureFile, err)
+		}
+		dst = f
 	}
-	cmd.Stderr = nil
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("tcpdump failed to start: %w", err)
+
+	src, err := newFrameSource(s.cfg.Interface)
+	if err != nil {
+		dst.Close()
+		if s.cfg.CaptureFile != "-" {
+			os.Remove(s.cfg.CaptureFile)
+		}
+		return fmt.Errorf("capture on %s: %w", s.cfg.Interface, err)
 	}
-	s.capture = cmd
-	s.captureWait = make(chan struct{})
+
+	cctx, cancel := context.WithCancel(ctx)
+	h := &captureHandle{cancel: cancel, done: make(chan struct{})}
+	s.capture = h
 	go func() {
-		_ = cmd.Wait()
-		close(s.captureWait)
+		defer close(h.done)
+		captureLoop(cctx, src, dst, hostSet(s.cfg.Targets))
 	}()
-	// Give tcpdump a moment and verify it is alive.
-	time.Sleep(time.Second)
-	if s.capture.Process != nil && s.capture.Process.Signal(syscall.Signal(0)) != nil {
-		s.stopCapture()
-		return errors.New("tcpdump exited immediately (wrong interface or permission)")
-	}
+	traceCommand("in-process capture", s.cfg.Interface, "->", s.cfg.CaptureFile)
 	return nil
 }
 
@@ -741,15 +732,14 @@ func (s *Session) stopCapture() {
 	if s.capture == nil {
 		return
 	}
-	_ = s.capture.Process.Signal(syscall.SIGTERM)
+	// Cancel the loop; it closes the socket and finishes the pcap file. The
+	// read timeout bounds how long the wait can take.
+	s.capture.cancel()
 	select {
-	case <-s.captureWait:
-		s.capture = nil
+	case <-s.capture.done:
 	case <-time.After(3 * time.Second):
-		_ = s.capture.Process.Kill()
-		<-s.captureWait
-		s.capture = nil
 	}
+	s.capture = nil
 	if s.cfg.CaptureFile != "" && s.cfg.CaptureFile != "-" {
 		chownToCaller(s.cfg.CaptureFile)
 	}

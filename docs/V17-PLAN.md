@@ -54,13 +54,28 @@ loopback test, and three fallback-selection tests in `internal/probe` (a mutant
 battery killed the inverted-selection, bad-checksum and no-IP-strip variants).
 Live raw-socket proof needs a root box — pending user verification.
 
-### 16.8 — In-Go capture + pcap writer
+### 16.8 — In-Go capture + pcap writer  — **SHIPPED** (v16.8)
 `gnulte --capture FILE` stops needing `tcpdump`.
 
 - AF_PACKET sniff + a pure-stdlib pcap writer (global header magic `d4 c3 b2 a1`, linktype EN10MB=1, per-packet ts_sec/ts_usec/incl_len/orig_len). `-` = raw pcap to stdout like tcpdump.
 - Capture runs concurrently with the shaping session; stopped on teardown; file closed cleanly (no `exec.LookPath("tcpdump")`).
 - Tests: write frames → reopen → validate magic/linktype/len for both byte orders; menu.go LookPath list drops tcpdump.
 - Touch: internal/engine, new internal/pcap (or internal/capture).
+
+**As built:** new `internal/pcap` (pure `Writer`/`Reader`; little-endian output,
+reader auto-detects either order; snaplen truncation preserves orig_len) and
+`internal/engine/capture{,_linux,_other}.go`. The loop reads an `AF_PACKET`
+socket (opened synchronously, so a permission/interface problem fails Start), a
+host filter (byte-exact IPv4/IPv6 keys, VLAN-aware, empty set = capture all,
+ARP skipped under a filter) replaces the old `tcpdump host …` args, and matching
+frames stream through the pcap writer until the context is cancelled; both the
+socket and the file are closed on the way out, then the file is chowned back.
+`DepsCheck` and the engine transcript no longer mention `tcpdump`; the flag help
+now says "as pcap". Tests: `internal/pcap` round-trip in both byte orders,
+snaplen truncation, empty-valid-file, garbage rejection; `internal/engine`
+filter/normalisation plus a fake-source loop test (filtering, empty filter,
+cancel-and-valid-partial-file). Live AF_PACKET proof needs a root box — pending
+user verification.
 
 ### 16.9 — `gnulte-doctor` (new tool)
 Pre-flight + fix-it report; makes the zero-dep chain a friendly claim.

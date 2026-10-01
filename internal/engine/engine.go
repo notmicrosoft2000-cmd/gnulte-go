@@ -121,7 +121,9 @@ func (c *Config) Validate() error {
 // DepsCheck lists problems preventing a test (empty = ready).
 func DepsCheck(c *Config) []string {
 	var problems []string
-	deps := []string{"tc", "ping"}
+	// tc is the kernel interface we still drive out of process. Telemetry no
+	// longer needs ping(8): the raw-ICMP echo is in-process.
+	deps := []string{"tc"}
 	if !c.Stealth {
 		// Stealth mode uses the in-Go ARP spoofer, so arpspoof(8) is not needed.
 		deps = append(deps, "arpspoof")

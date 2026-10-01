@@ -31,7 +31,7 @@ Kill the `arping` / `arp-scan` shell-outs in `internal/discover`. Benefits every
 
 **As built:** `arpspoof.BuildARPRequest` / `ParseARPReply` / `ReadReply` / `LocalIP` added; the sweep lives in `internal/discover/arpsweep{,_linux,_other}.go` (`runSweep`, `probeSet.note`); `Neighbors` split into the cheap kernel read and `DiscoverNeighbors` (the old `arp-scan --localnet` boost), with the six discovery call sites switched over. `engine.arpLookupMAC` now uses `discover.ResolveMAC` instead of `arping -c 1`. Tests: `internal/arpspoof/frame_test.go`, `internal/discover/arpsweep_test.go`. Live-sweep proof needs a root box — pending user verification.
 
-### 16.7 — In-Go ICMP echo
+### 16.7 — In-Go ICMP echo  — **SHIPPED** (v16.7)
 Engine per-second telemetry stops shelling to `ping`. Builds the raw-ICMP core later tools reuse.
 
 - Raw `IPPROTO_ICMP` echo request/reply: checksum, id/seq, timeout, RTT. Engine already re-execs as root, so this is the root path.
@@ -39,6 +39,20 @@ Engine per-second telemetry stops shelling to `ping`. Builds the raw-ICMP core l
 - Feed `hostStat` (avg/p50/p95) in the same shape as today.
 - Tests: synthetic echo-reply parsing; framing checks; keep old `ping`-based behaviour behind nothing — it just goes away in the engine.
 - Touch: internal/engine, internal/discover (share the ICMP pinger).
+
+**As built:** new `internal/icmp` package — pure `Checksum`/`BuildEcho`/`Decode`
+(the decoder accepts either a bare ICMP message or one behind its IPv4 header,
+and reports the TTL) plus a Linux raw-socket `Ping` (`SO_RCVTIMEO`-bounded reads
+that honour the deadline and context) and an off-Linux stub. `probe.Ping` tries
+the in-Go probe first through a test seam (`rawPing`); a non-nil error (no raw
+socket: non-root or non-Linux) falls back to the system `ping`, while a silent
+target is silence and is *not* retried through the subprocess. Engine
+`DepsCheck` no longer requires `ping`, and the boot sequence prints an
+"in-process" ICMP row instead. Tests: `internal/icmp/icmp_test.go` (checksum
+vector, framing, IP-header/TTL, impostor rejection, payload copy), a root-gated live
+loopback test, and three fallback-selection tests in `internal/probe` (a mutant
+battery killed the inverted-selection, bad-checksum and no-IP-strip variants).
+Live raw-socket proof needs a root box — pending user verification.
 
 ### 16.8 — In-Go capture + pcap writer
 `gnulte --capture FILE` stops needing `tcpdump`.

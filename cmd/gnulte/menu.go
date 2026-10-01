@@ -135,7 +135,7 @@ func adminBox() {
 	fmt.Println()
 	fmt.Println("GNULTE needs sudo (root) access for the following reasons:")
 	fmt.Println()
-	fmt.Println("  • raw sockets – in-process ARP probing and injection")
+	fmt.Println("  • raw sockets – in-process ARP probing/injection and ICMP echo")
 	fmt.Println("  • tc          – kernel-level control of packet flow")
 	fmt.Println("  • sysctl      – enable IP forwarding for MITM operation")
 	fmt.Println("  • iptables    – forward/DROP rules for block mode")
@@ -161,7 +161,7 @@ func bootSeq(cfg netutil.Config) {
 	bootResult(fmt.Sprintf("interface %s (%s)", cfg.Interface, cfg.SelfIP), false)
 
 	bootPhase("Verifying utilities")
-	for _, ut := range []string{"tc", "ping", "iptables"} {
+	for _, ut := range []string{"tc", "iptables"} {
 		_, err := exec.LookPath(ut)
 		if err != nil {
 			bootResult(ut+" (MISSING — install it for full function)", true)
@@ -169,6 +169,7 @@ func bootSeq(cfg netutil.Config) {
 			bootResult(ut, false)
 		}
 	}
+	bootResult("raw ICMP echo (in-process, no ping)", false)
 
 	bootPhase("Preparing traffic engine")
 	if fwd, err := os.ReadFile("/proc/sys/net/ipv4/ip_forward"); err == nil {

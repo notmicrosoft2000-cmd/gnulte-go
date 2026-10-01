@@ -32,6 +32,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gnulte-go/internal/icmp"
 )
 
 // DefaultPorts are probed when the caller supplies none: common service ports
@@ -134,11 +136,28 @@ func (r Result) Note() string {
 	}
 }
 
-// Ping performs a single ICMP echo via the system ping and returns the RTT
-// (or -1 on no reply) and the reply TTL.
+// rawPing is the in-Go raw-ICMP probe. It is a package seam so the tests can
+// exercise both the in-Go fast path and the subprocess fallback without needing
+// a root raw socket.
+var rawPing = icmp.Ping
+
+// Ping measures a single ICMP echo round trip and returns the RTT (or -1 on no
+// reply) and the reply TTL. It uses the in-Go raw-ICMP core when the kernel
+// allows a raw socket — Linux as root, which is the engine's path and is the
+// reason the engine no longer needs ping(8). When a raw socket cannot be opened
+// (any non-root caller, or a non-Linux build) it falls back to the system ping,
+// so the non-root tools keep their existing behaviour. A target that simply
+// does not answer is silence, not an error, so it is reported as -1 rather than
+// retried through the subprocess.
 func Ping(ctx context.Context, ip string, timeout time.Duration) (rtt int, ttl int) {
 	if timeout <= 0 {
 		timeout = time.Second
+	}
+	if r, t, ok, err := rawPing(ctx, ip, timeout); err == nil {
+		if ok {
+			return r, t
+		}
+		return -1, 0
 	}
 	secs := int((timeout + time.Second - 1) / time.Second)
 	if secs < 1 {

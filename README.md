@@ -1,16 +1,16 @@
 # GNULTE · Go edition
 
-> **v16.5 — Steady Hands** · the GNU LAN Network Testing Environment, rewritten in pure Go
+> **v16.6 — Unplugged** · the GNU LAN Network Testing Environment, rewritten in pure Go
 > (standard library only, no external dependencies)
 
-![version](https://img.shields.io/badge/version-16.5-62a0ea)
+![version](https://img.shields.io/badge/version-16.6-62a0ea)
 ![language](https://img.shields.io/badge/Go-1.21-00ADD8)
 ![platform](https://img.shields.io/badge/platform-Linux-9cf)
 ![tests](https://img.shields.io/badge/tests-go%20vet%20%2B%20go%20test-2ea44f)
 ![license](https://img.shields.io/badge/license-GPL--3.0--or--later-%23c0392b)
 [![website](https://img.shields.io/badge/website-GNULTE%20site-1d3a5c)](https://notmicrosoft2000-cmd.github.io/gnulte/)
 
-![GNULTE v16.5 — Steady Hands](social-preview.png)
+![GNULTE v16.6 — Unplugged](social-preview.png)
 
 GNULTE is a suite of focused Linux tools for measuring how devices behave when
 their network misbehaves — on networks you own or are explicitly authorised to
@@ -27,6 +27,22 @@ toolkit shares one live view of your network.
 | `gnulte-scan` | optional | Parallel sweep + in-Go deep port scanner — OUI vendor, mDNS/NetBIOS names, device types, OS fingerprinting, `-T` tabbed browser, and live re-scanning with `--watch N` |
 | `gnulte-devices` | no | Instant ARP/neighbour inventory — vendors, mDNS hostnames, type guesses, HTML reports |
 | `gnulte-wifi` | **yes** | Targeted 802.11 deauthentication for authorised Wi-Fi disassociation testing — per-frame jitter, rotating reason codes, channel hopping |
+
+## Unplugged (v16.6+)
+
+v17's **Unplugged** programme, in progress. The goal is a toolkit that runs on a
+bare box with nothing but the kernel: the shell-outs to `arping`, `arp-scan` and
+`tcpdump` are being replaced by in-process raw-socket code, one per increment,
+each independently shippable.
+
+- **v16.6 — in-Go ARP sweep.** The LAN sweep no longer shells out. `gnulte-scan
+  --arp` now crafts who-has frames in-process over AF_PACKET and matches the
+  answers itself, so `arping` and `arp-scan` are not required anywhere. The
+  kernel's neighbour table is still read for cheap lookups, and
+  `DiscoverNeighbors` additionally sweeps the interface subnet as root, which is
+  what the old `arp-scan --localnet` boost did — devices that answer ARP but
+  never originate traffic (phones in doze, printers, TVs) are learned either
+  way, with no helper binary installed.
 
 ## Steady Hands (v16)
 
@@ -67,7 +83,8 @@ together — with the sharp edges filed off and a few things added:
 ## Install
 
 Requires [Go 1.21+](https://go.dev/dl/) and, for shaping, `iproute2`,
-`arpspoof` (`dsniff`) or `arp-scan`, and `iputils`.
+`iptables`, and `iputils`. No external ARP or packet capture tools are
+required: raw ARP probing/injection and capture are implemented in-process.
 
 ```sh
 git clone https://github.com/notmicrosoft2000-cmd/gnulte-go.git

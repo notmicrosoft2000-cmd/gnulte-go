@@ -24,7 +24,7 @@ import (
 	"net"
 )
 
-var errOther = errors.New("in-Go ARP spoofing requires Linux (AF_PACKET); install arpspoof and run without --stealth")
+var errOther = errors.New("in-Go ARP needs Linux (AF_PACKET); run without --stealth, or use Linux for raw sockets")
 
 // Spoofer is an inert stub off Linux: stealth mode degrades loudly rather
 // than silently pretending to work.
@@ -36,6 +36,9 @@ func Open(iface string) (*Spoofer, error) { return nil, errOther }
 // of our own exists to report.
 func (sp *Spoofer) localMAC() net.HardwareAddr { return nil }
 
+// localIP backs LocalIP off Linux, for the same reason.
+func (sp *Spoofer) localIP() net.IP { return nil }
+
 func (sp *Spoofer) SendReply(toMAC net.HardwareAddr, toIP, claimedIP net.IP) error {
 	return errOther
 }
@@ -45,6 +48,10 @@ func (sp *Spoofer) SendRaw(frame []byte) error {
 }
 
 func (sp *Spoofer) ReadRequest() (net.HardwareAddr, net.IP, net.IP, bool, error) {
+	return nil, nil, nil, false, errOther
+}
+
+func (sp *Spoofer) ReadReply() (net.HardwareAddr, net.IP, net.IP, bool, error) {
 	return nil, nil, nil, false, errOther
 }
 

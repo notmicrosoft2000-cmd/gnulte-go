@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"gnulte-go/internal/arpspoof"
+	"gnulte-go/internal/discover"
 )
 
 var roll = rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -587,14 +588,16 @@ func ipInTargets(ip net.IP, targets []stealthTarget) bool {
 	return false
 }
 
-// arpLookupMAC resolves ip's MAC via the kernel ARP table, asking once with
-// arping if it is not cached yet (a victim was just pinged, so it usually is).
+// arpLookupMAC resolves ip's MAC via the kernel ARP table, and if it is not
+// cached yet (a victim was just pinged, so it usually is) asks the address
+// directly with one in-Go who-has. No helper binary involved.
 func arpLookupMAC(iface, ip string) (net.HardwareAddr, error) {
 	if hw := macFromProcARP(iface, ip); hw != nil {
 		return hw, nil
 	}
-	if _, err := exec.LookPath("arping"); err == nil {
-		_ = runRoot("arping", "-q", "-c", "1", "-w", "2", "-I", iface, ip)
+	// Ask on the wire. A victim that filters ping but answers ARP still resolves.
+	if hw, err := discover.ResolveMAC(context.Background(), iface, ip); err == nil && len(hw) == 6 {
+		return hw, nil
 	}
 	if hw := macFromProcARP(iface, ip); hw != nil {
 		return hw, nil

@@ -20,7 +20,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "16.5"
+const version = "16.6"
 
 func main() {
 	var (
@@ -87,7 +87,7 @@ func main() {
 		fmt.Fprintln(ux.Out)
 	}
 
-	neighbors := discover.Neighbors(ctx, cfg.Interface)
+	neighbors := discover.DiscoverNeighbors(ctx, cfg.Interface)
 
 	var live []string
 	if *doScan {

@@ -74,7 +74,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "16.5"
+const version = "16.6"
 
 // hostInfo is the identity enrichment for one watched host.
 type hostInfo struct {
@@ -797,7 +797,7 @@ func lanWatch(ctx context.Context, cfg netutil.Config, threads int, quiet bool) 
 
 	// Merge ARP-table neighbours the ICMP sweep missed (devices that quietly
 	// ignore ping but are very much on the link).
-	neigh := discover.Neighbors(ctx, cfg.Interface)
+	neigh := discover.DiscoverNeighbors(ctx, cfg.Interface)
 	seen := map[string]bool{}
 	for _, ip := range live {
 		seen[ip] = true

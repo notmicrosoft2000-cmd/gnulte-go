@@ -135,11 +135,10 @@ func adminBox() {
 	fmt.Println()
 	fmt.Println("GNULTE needs sudo (root) access for the following reasons:")
 	fmt.Println()
-	fmt.Println("  • arp-scan  – raw sockets to scan the network")
-	fmt.Println("  • arpspoof  – raw sockets to send ARP packets")
-	fmt.Println("  • tc        – kernel-level control of packet flow")
-	fmt.Println("  • sysctl    – enable IP forwarding for MITM operation")
-	fmt.Println("  • iptables  – forward/DROP rules for block mode")
+	fmt.Println("  • raw sockets – in-process ARP probing and injection")
+	fmt.Println("  • tc          – kernel-level control of packet flow")
+	fmt.Println("  • sysctl      – enable IP forwarding for MITM operation")
+	fmt.Println("  • iptables    – forward/DROP rules for block mode")
 	fmt.Println()
 	fmt.Println("Without sudo, these cannot function. GNULTE will now request")
 	fmt.Println("your password and run the test session with the privileges it needs.")
@@ -162,7 +161,7 @@ func bootSeq(cfg netutil.Config) {
 	bootResult(fmt.Sprintf("interface %s (%s)", cfg.Interface, cfg.SelfIP), false)
 
 	bootPhase("Verifying utilities")
-	for _, ut := range []string{"arpspoof", "tc", "ping", "arping", "iptables"} {
+	for _, ut := range []string{"tc", "ping", "iptables"} {
 		_, err := exec.LookPath(ut)
 		if err != nil {
 			bootResult(ut+" (MISSING — install it for full function)", true)
@@ -555,7 +554,7 @@ func truncate(s string, n int) string {
 // rowsFromScan builds device rows from live ping results plus any extra
 // neighbours in the ARP table (quiet hosts that ignore ICMP).
 func rowsFromScan(cfg netutil.Config, live []string) []discover.Row {
-	neighbors := discover.Neighbors(context.Background(), cfg.Interface)
+	neighbors := discover.DiscoverNeighbors(context.Background(), cfg.Interface)
 	seen := map[string]bool{}
 	var rows []discover.Row
 	add := func(ip, mac string) {

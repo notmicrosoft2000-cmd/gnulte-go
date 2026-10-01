@@ -43,6 +43,9 @@ type Spoofer struct {
 // localMAC backs the cross-platform LocalMAC/IsLocal helpers in arpspoof.go.
 func (sp *Spoofer) localMAC() net.HardwareAddr { return sp.ourMAC }
 
+// localIP backs the cross-platform LocalIP accessor in arpspoof.go.
+func (sp *Spoofer) localIP() net.IP { return sp.ourIP }
+
 func Open(iface string) (*Spoofer, error) {
 	nif, err := net.InterfaceByName(iface)
 	if err != nil {
@@ -109,6 +112,22 @@ func (sp *Spoofer) SendRaw(frame []byte) error {
 	}
 	copy(sa.Addr[:], frame[0:6])
 	return syscall.Sendto(sp.fd, frame, 0, sa)
+}
+
+// ReadReply drains one pending ARP reply frame, or reports ok=false when the
+// socket has nothing waiting (EAGAIN) or holds something that is not a reply.
+// This is the sweep's half: a host that answers a who-has is on the segment.
+func (sp *Spoofer) ReadReply() (fromMAC net.HardwareAddr, fromIP, targetIP net.IP, ok bool, err error) {
+	buf := make([]byte, 2048)
+	n, _, err := syscall.Recvfrom(sp.fd, buf, 0)
+	if err != nil {
+		if err == syscall.EAGAIN || err == syscall.EWOULDBLOCK {
+			return nil, nil, nil, false, nil
+		}
+		return nil, nil, nil, false, err
+	}
+	fromMAC, fromIP, target, ok := ParseARPReply(buf[:n])
+	return fromMAC, fromIP, target, ok, nil
 }
 
 // ReadRequest drains one pending ARP request frame, or reports ok=false when

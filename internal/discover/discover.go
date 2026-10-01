@@ -16,10 +16,13 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 // Package discover performs LAN host discovery: a parallel ICMP sweep via the
-// system `ping`, neighbor resolution from /proc/net/arp (optionally boosted by
-// `arp-scan` when running as root), vendor identification, and hostname
-// resolution. `-d/--deep` additionally runs the in-Go port scanner against
-// alive hosts.
+// system `ping`, neighbor resolution from /proc/net/arp (boosted, as root, by
+// the in-Go ARP sweep in arpsweep.go, which learns devices the kernel table
+// never sees), vendor identification, and hostname resolution. `-d/--deep`
+// additionally runs the in-Go port scanner against alive hosts.
+//
+// The ARP half needs no helper binary: who-has frames are crafted and read
+// in-process over AF_PACKET, so arping/arp-scan are not required anywhere.
 package discover
 
 import (
@@ -114,88 +117,12 @@ func ipAlive(ctx context.Context, ip string) bool {
 // override). ARP probing and frame injection need it; everything else degrades.
 func Privileged() bool { return os.Geteuid() == 0 }
 
-// ARPSweep probes every target with `arping` (ARP who-has), catching hosts that
-// answer ARP but filter ICMP echo — common on phones, smart TVs and IOT. It
-// needs raw sockets, so it only works as root; run gnulte-scan with sudo to
-// enable it. Returns the sorted list of hosts that answered.
-func ARPSweep(ctx context.Context, targets []string, iface string, threads int, onProgress ...func(completed, alive int)) []string {
-	if threads < 1 {
-		threads = 1
-	}
-	if threads > 256 {
-		threads = 256
-	}
-	if !Privileged() {
-		return nil
-	}
-	if _, err := exec.LookPath("arping"); err != nil {
-		return nil
-	}
-	jobs := make(chan string)
-	var live []string
-	var mu sync.Mutex
-	var completed, alive int
-	report := func(d, a int) {
-		if len(onProgress) > 0 && onProgress[0] != nil {
-			onProgress[0](d, a)
-		}
-	}
-	var wg sync.WaitGroup
-	for i := 0; i < threads; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for ip := range jobs {
-				ok := arpAlive(ctx, ip, iface)
-				mu.Lock()
-				completed++
-				if ok {
-					live = append(live, ip)
-					alive++
-				}
-				report(completed, alive)
-				mu.Unlock()
-			}
-		}()
-	}
-	for _, ip := range targets {
-		jobs <- ip
-	}
-	close(jobs)
-	wg.Wait()
-	sort.Strings(live)
-	return live
-}
-
-func arpAlive(ctx context.Context, ip, iface string) bool {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	// -c 1 asks one who-has and stops; -w bounds the wait; -q stays quiet. The
-	// reply both proves the host is up and populates the kernel ARP table, so
-	// Neighbors() later sees its MAC.
-	cmd := exec.CommandContext(ctx, "arping", "-q", "-c", "1", "-w", "2", "-I", iface, ip)
-	return cmd.Run() == nil
-}
-
 // Neighbors returns ip->MAC from /proc/net/arp, optionally restricted to one
-// interface (empty = all). If arp-scan is available and we are root it is used
-// first to also learn quiet devices.
+// interface (empty = all). This is the cheap read: what the kernel already
+// learned, with no packets sent. Callers that are about to sweep anyway should
+// use DiscoverNeighbors, which also asks the segment directly.
 func Neighbors(ctx context.Context, iface string) map[string]string {
 	out := map[string]string{}
-	// Opportunistic arp-scan: only as root and only when the tool exists.
-	if os.Geteuid() == 0 {
-		if path, err := exec.LookPath("arp-scan"); err == nil {
-			cmd := exec.CommandContext(ctx, path, "--interface="+iface, "--localnet", "--retry=2")
-			if raw, err := cmd.Output(); err == nil {
-				for _, line := range strings.Split(string(raw), "\n") {
-					f := strings.Fields(line)
-					if len(f) >= 2 && net.ParseIP(f[0]) != nil && isMAC(f[1]) {
-						out[f[0]] = strings.ToUpper(f[1])
-					}
-				}
-			}
-		}
-	}
 	f, err := os.Open("/proc/net/arp")
 	if err != nil {
 		return out
@@ -220,17 +147,38 @@ func Neighbors(ctx context.Context, iface string) map[string]string {
 	return out
 }
 
-func isMAC(s string) bool {
-	if len(s) < 17 {
-		return false
+// DiscoverNeighbors is the thorough form of Neighbors: on top of the kernel's
+// table it asks the interface's own subnet directly, so devices that answer ARP
+// but never originate unicast traffic — phones in doze, printers, TVs — are
+// learned too. This is what the old `arp-scan --localnet` boost did, and it
+// needs no helper binary, only raw sockets (so only as root; otherwise it
+// degrades to a plain table read).
+//
+// It costs a few seconds of wire time, so it belongs in a discovery pass, not in
+// a hot loop that only wants an address looked up.
+func DiscoverNeighbors(ctx context.Context, iface string) map[string]string {
+	out := Neighbors(ctx, iface)
+	if iface == "" || !Privileged() {
+		return out
 	}
-	for _, b := range s {
-		if strings.ContainsRune("0123456789abcdefABCDEF:-", b) == false && b != '.' {
-			return false
+	// One pass, no retry round: this lookup is a bonus on top of the kernel
+	// table, not the user's reason for running the tool.
+	res := sweep(ctx, subnetTargets(iface), iface, neighborSweepThreads, 1, nil)
+	// Merge without overwriting: the kernel's own entry is authoritative where
+	// the two disagree (a sweep answer for a stale address is possible if the
+	// device was reassigned mid-sweep).
+	for ip, mac := range res.macs {
+		if _, known := out[ip]; !known {
+			out[ip] = mac
 		}
 	}
-	return strings.Count(s, ":") == 5 || strings.Count(s, "-") == 5
+	return out
 }
+
+// neighborSweepThreads bounds the implicit sweep inside DiscoverNeighbors. It has
+// no -t of its own, so this is a fixed, polite number: enough that a /24 is
+// asked quickly, low enough that nothing resembling a flood goes out.
+const neighborSweepThreads = 32
 
 // VendorFor maps a MAC (upper hex, any separator) to a vendor name, using the
 // embedded IEEE registry (with any local oui.txt layered on top).

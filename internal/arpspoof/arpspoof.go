@@ -42,6 +42,65 @@ const ethPArp = 0x0806
 // the address does not exist.
 func (sp *Spoofer) LocalMAC() net.HardwareAddr { return sp.localMAC() }
 
+// LocalIP returns the interface's IPv4 address — the sender a who-has request
+// is crafted from, so a host answers our request instead of the gateway's.
+// A platform accessor for the same reason as LocalMAC.
+func (sp *Spoofer) LocalIP() net.IP { return sp.localIP() }
+
+// BroadcastMAC is the Ethernet destination every ARP request goes to: asking
+// "who has X" is a question for the whole segment, not a unicast.
+var BroadcastMAC = net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+
+// BuildARPRequest crafts a complete Ethernet+ARP who-has frame (padded to the
+// 60-byte minimum): broadcast destination, src localMAC, ARP op 1 asking who
+// has askIP, told to answer localIP. It replaces shelling out to arping(8) for
+// both the sweep and single-address MAC resolution.
+func BuildARPRequest(localMAC net.HardwareAddr, localIP, askIP net.IP) []byte {
+	frame := make([]byte, 60)
+	copy(frame[0:6], BroadcastMAC) // Ethernet dst: everyone
+	copy(frame[6:12], localMAC)    // Ethernet src: us
+	binary.BigEndian.PutUint16(frame[12:14], ethPArp)
+
+	arp := frame[14:]
+	binary.BigEndian.PutUint16(arp[0:2], 1)      // htype: Ethernet
+	binary.BigEndian.PutUint16(arp[2:4], 0x0800) // ptype: IPv4
+	arp[4] = 6                                   // hlen
+	arp[5] = 4                                   // plen
+	binary.BigEndian.PutUint16(arp[6:8], 1)      // op: request
+	copy(arp[8:14], localMAC)                    // sha: us
+	copy(arp[14:18], localIP.To4())              // spa: our address
+	// tha stays zeroed: we do not know who holds askIP yet.
+	copy(arp[24:28], askIP.To4()) // tpa: who has this?
+	return frame
+}
+
+// ParseARPReply decodes an Ethernet+ARP frame and reports whether it is an ARP
+// *reply* (op 2). It returns the responder's MAC/IP (who answers, and for which
+// address) plus the address the reply was aimed at — which, for a reply to our
+// own who-has, is us and is how a caller can tell the answer was meant for it.
+func ParseARPReply(frame []byte) (fromMAC net.HardwareAddr, fromIP, targetIP net.IP, ok bool) {
+	if len(frame) < 42 {
+		return nil, nil, nil, false
+	}
+	if binary.BigEndian.Uint16(frame[12:14]) != ethPArp {
+		return nil, nil, nil, false
+	}
+	arp := frame[14:]
+	if binary.BigEndian.Uint16(arp[0:2]) != 1 || binary.BigEndian.Uint16(arp[2:4]) != 0x0800 {
+		return nil, nil, nil, false
+	}
+	if arp[4] != 6 || arp[5] != 4 {
+		return nil, nil, nil, false
+	}
+	if binary.BigEndian.Uint16(arp[6:8]) != 2 {
+		return nil, nil, nil, false // a request is not an answer
+	}
+	fromMAC = append(net.HardwareAddr(nil), arp[8:14]...)
+	fromIP = append(net.IP(nil), arp[14:18]...)
+	targetIP = append(net.IP(nil), arp[24:28]...)
+	return fromMAC, fromIP, targetIP, true
+}
+
 // BuildARPReply crafts a complete Ethernet+ARP reply frame (padded to the
 // 60-byte minimum): dag = toMAC, src = localMAC, ARP op 2 with the claim that
 // claimedIP lives at localMAC, addressed to toIP/toMAC. The frame is

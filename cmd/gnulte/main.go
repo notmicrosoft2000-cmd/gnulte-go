@@ -48,7 +48,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "16.5"
+const version = "16.6"
 
 // bootLog holds the pre-run transcript (banner, confirmation, arming) so the
 // HTML report shows the full command flow, not just the monitor's own output.
@@ -758,7 +758,7 @@ func resolveTargetName(ctx context.Context, cfg netutil.Config, name string) (st
 func nameOnLAN(ctx context.Context, cfg netutil.Config, name string) string {
 	rctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	neighbors := discover.Neighbors(rctx, cfg.Interface)
+	neighbors := discover.DiscoverNeighbors(rctx, cfg.Interface)
 	want := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(name), ".local"))
 	var (
 		mu    sync.Mutex
@@ -855,7 +855,7 @@ func matchAny(actual string, want []string) bool {
 
 // ipForMAC finds the IP that currently has the given MAC.
 func ipForMAC(iface, mac string) (string, error) {
-	neighbors := discover.Neighbors(context.Background(), iface)
+	neighbors := discover.DiscoverNeighbors(context.Background(), iface)
 	want := strings.ToUpper(strings.ReplaceAll(strings.ReplaceAll(mac, ":", ""), "-", ""))
 	for ip, m := range neighbors {
 		if strings.ToUpper(strings.ReplaceAll(m, ":", "")) == want {
@@ -947,9 +947,9 @@ func fatal(err error) {
 }
 
 func runDupcheck(iface string) {
-	neighbors := discover.Neighbors(context.Background(), iface)
+	neighbors := discover.DiscoverNeighbors(context.Background(), iface)
 	if len(neighbors) == 0 {
-		fmt.Println("ARP table is empty; ping the LAN first, or run as root for arp-scan boost.")
+		fmt.Println("ARP table is empty; ping the LAN first, or run as root for the ARP sweep boost.")
 		return
 	}
 	type entry struct{ ips []string }

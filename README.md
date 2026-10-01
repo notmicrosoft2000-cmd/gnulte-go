@@ -1,16 +1,16 @@
 # GNULTE · Go edition
 
-> **v16.8 — Unplugged** · the GNU LAN Network Testing Environment, rewritten in pure Go
+> **v16.9 — Unplugged** · the GNU LAN Network Testing Environment, rewritten in pure Go
 > (standard library only, no external dependencies)
 
-![version](https://img.shields.io/badge/version-16.8-62a0ea)
+![version](https://img.shields.io/badge/version-16.9-62a0ea)
 ![language](https://img.shields.io/badge/Go-1.21-00ADD8)
 ![platform](https://img.shields.io/badge/platform-Linux-9cf)
 ![tests](https://img.shields.io/badge/tests-go%20vet%20%2B%20go%20test-2ea44f)
 ![license](https://img.shields.io/badge/license-GPL--3.0--or--later-%23c0392b)
 [![website](https://img.shields.io/badge/website-GNULTE%20site-1d3a5c)](https://notmicrosoft2000-cmd.github.io/gnulte/)
 
-![GNULTE v16.8 — Unplugged](social-preview.png)
+![GNULTE v16.9 — Unplugged](social-preview.png)
 
 GNULTE is a suite of focused Linux tools for measuring how devices behave when
 their network misbehaves — on networks you own or are explicitly authorised to
@@ -18,7 +18,7 @@ test. Scan the LAN, shape a target’s traffic with real kernel `tc netem`,
 watch every device live, and hand off from one tool to the next: the whole
 toolkit shares one live view of your network.
 
-## The five tools
+## The six tools
 
 | Binary | Root | What it does |
 | --- | --- | --- |
@@ -27,6 +27,7 @@ toolkit shares one live view of your network.
 | `gnulte-scan` | optional | Parallel sweep + in-Go deep port scanner — OUI vendor, mDNS/NetBIOS names, device types, OS fingerprinting, `-T` tabbed browser, and live re-scanning with `--watch N` |
 | `gnulte-devices` | no | Instant ARP/neighbour inventory — vendors, mDNS hostnames, type guesses, HTML reports |
 | `gnulte-wifi` | **yes** | Targeted 802.11 deauthentication for authorised Wi-Fi disassociation testing — per-frame jitter, rotating reason codes, channel hopping |
+| `gnulte-doctor` | no | Pre-flight health check — privileges, `tc`/`iptables`, `ip_forward`, the netem/netfilter modules, default route and interface, duplicate IPs, and the safety-record. PASS/WARN/FAIL table with fix-it hints, `--json`, non-zero exit on any failure |
 
 ## Unplugged (v16.6+)
 
@@ -56,6 +57,13 @@ each independently shippable.
   (`internal/pcap`), so capture records alongside the shaping session and stops
   cleanly on teardown, with the file handed back to the invoking user.
   `tcpdump` is no longer required by the engine.
+
+- **v16.9 — `gnulte-doctor`.** A new zero-dependency pre-flight command that
+  reports whether a machine is ready to run the toolkit: privileges, the
+  `tc`/`iptables` binaries, `ip_forward`, the netem/netfilter kernel modules, the
+  default route and interface, duplicate IPs, and the safety-record. It prints a
+  PASS/WARN/FAIL table with fix-it hints, supports `--json`, and exits non-zero
+  when anything fails, so a script can gate on it.
 
 ## Steady Hands (v16)
 

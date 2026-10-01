@@ -77,13 +77,27 @@ filter/normalisation plus a fake-source loop test (filtering, empty filter,
 cancel-and-valid-partial-file). Live AF_PACKET proof needs a root box — pending
 user verification.
 
-### 16.9 — `gnulte-doctor` (new tool)
+### 16.9 — `gnulte-doctor` (new tool)  — **SHIPPED** (v16.9)
 Pre-flight + fix-it report; makes the zero-dep chain a friendly claim.
 
 - Checks: euid root (per tool), ip_forward, netem/iptables kernel modules (`/proc/modules` or `tc qdisc show`), `tc`/`iptables` present, interface up + has IPv4, default route, duplicate-IP scan (reuse dupcheck), safety acceptance record.
 - Output: PASS/WARN/FAIL table + fix-it hints; `--json`; non-zero exit on FAIL. Reuses the install.sh guidance.
 - Tests: check registry against injected fake facts (dependency-inject the gatherers).
 - Touch: new cmd/gnulte-doctor.
+
+**As built:** new `internal/doctor` separates gathering (`Gather(ctx) Facts`,
+reads euid, PATH, `/proc/sys/net/ipv4/ip_forward`, `/proc/modules`, netutil's
+route, the safety record, and the discovery neighbour table) from judging
+(`Run(Facts) []Check`, pure). Ten checks: privileges, `tc`, `iptables`,
+`ip_forward`, netem and netfilter modules, default route, interface up,
+duplicate IPs, safety acceptance. `Warn` (not `Fail`) covers non-root, missing
+modules that may be built in, an empty ARP table, LAN conflicts and an
+unaccepted safety record; `Fail` (→ exit 1) covers a missing `tc`/`iptables`,
+an unavailable `ip_forward`, no route, or a down interface. `Check` marshals
+`status` as the word PASS/WARN/FAIL for `--json`. New `cmd/gnulte-doctor`
+(`-j/--json`, `-q/--quiet`, `-v/--version`) renders the table with fix-it hints;
+wired into build/install/uninstall and the README tool table. Tests inject fake
+facts for every branch, plus exit-code and JSON-wording guards.
 
 ### 16.10 — `gnulte-trace` (new tool)
 mtr-style traceroute: hop-by-hop RTT, animated TUI + HTML report + `--json`.

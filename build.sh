@@ -27,8 +27,11 @@ go build -o gnulte-doctor ./cmd/gnulte-doctor
 echo "== building gnulte-trace (cmd/gnulte-trace) =="
 go build -o gnulte-trace ./cmd/gnulte-trace
 
+echo "== building gnulte-top (cmd/gnulte-top) =="
+go build -o gnulte-top ./cmd/gnulte-top
+
 echo "== running tests =="
 go test ./...
 go vet ./...
 
-echo "== done: ./gnulte-scan ./gnulte ./gnulte-wifi ./gnulte-lan ./gnulte-devices ./gnulte-doctor ./gnulte-trace =="
+echo "== done: ./gnulte-scan ./gnulte ./gnulte-wifi ./gnulte-lan ./gnulte-devices ./gnulte-doctor ./gnulte-trace ./gnulte-top =="

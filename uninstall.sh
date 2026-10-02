@@ -22,7 +22,7 @@ for arg in "$@"; do
     [[ "$arg" == "--purge" ]] && PURGE=1
 done
 
-for f in gnulte gnulte-scan gnulte-wifi gnulte-lan gnulte-devices gnulte-doctor gnulte-trace gnulte-traffic; do
+for f in gnulte gnulte-scan gnulte-wifi gnulte-lan gnulte-devices gnulte-doctor gnulte-trace gnulte-top gnulte-traffic; do
     if [[ -f "$BINDIR/$f" ]]; then
         rm -f "$BINDIR/$f"
         echo "[+] Removed $BINDIR/$f"

@@ -1,16 +1,16 @@
 # GNULTE · Go edition
 
-> **v16.10 — Unplugged** · the GNU LAN Network Testing Environment, rewritten in pure Go
+> **v16.11 — Unplugged** · the GNU LAN Network Testing Environment, rewritten in pure Go
 > (standard library only, no external dependencies)
 
-![version](https://img.shields.io/badge/version-16.10-62a0ea)
+![version](https://img.shields.io/badge/version-16.11-62a0ea)
 ![language](https://img.shields.io/badge/Go-1.21-00ADD8)
 ![platform](https://img.shields.io/badge/platform-Linux-9cf)
 ![tests](https://img.shields.io/badge/tests-go%20vet%20%2B%20go%20test-2ea44f)
 ![license](https://img.shields.io/badge/license-GPL--3.0--or--later-%23c0392b)
 [![website](https://img.shields.io/badge/website-GNULTE%20site-1d3a5c)](https://notmicrosoft2000-cmd.github.io/gnulte/)
 
-![GNULTE v16.10 — Unplugged](social-preview.png)
+![GNULTE v16.11 — Unplugged](social-preview.png)
 
 GNULTE is a suite of focused Linux tools for measuring how devices behave when
 their network misbehaves — on networks you own or are explicitly authorised to
@@ -18,7 +18,7 @@ test. Scan the LAN, shape a target’s traffic with real kernel `tc netem`,
 watch every device live, and hand off from one tool to the next: the whole
 toolkit shares one live view of your network.
 
-## The seven tools
+## The eight tools
 
 | Binary | Root | What it does |
 | --- | --- | --- |
@@ -29,6 +29,7 @@ toolkit shares one live view of your network.
 | `gnulte-wifi` | **yes** | Targeted 802.11 deauthentication for authorised Wi-Fi disassociation testing — per-frame jitter, rotating reason codes, channel hopping |
 | `gnulte-doctor` | no | Pre-flight health check — privileges, `tc`/`iptables`, `ip_forward`, the netem/netfilter modules, default route and interface, duplicate IPs, and the safety-record. PASS/WARN/FAIL table with fix-it hints, `--json`, non-zero exit on any failure |
 | `gnulte-trace` | **yes** | mtr-style hop-by-hop path probe — in-process ICMP echo at every TTL, a live table with per-hop last/avg/best/worst and loss, `--json`, and a self-contained HTML report. No `traceroute(8)` |
+| `gnulte-top` | **yes** | Live per-host and per-conversation bandwidth — an in-process AF_PACKET counter ranked into a top-talker table with ↓/↑ rates, peers and bars, plus `--flows`, `--csv` and `--json`. No iptables, no `top(1)` |
 
 ## Unplugged (v16.6+)
 
@@ -73,6 +74,12 @@ each independently shippable.
   loss per hop. The command shows a live table while it runs, then a finished
   table in the scrollback, and can emit `--json` or a self-contained HTML
   report.
+
+- **v16.11 — `gnulte-top`.** A live per-host and per-conversation bandwidth
+  view built on the same in-process `AF_PACKET` counter the LAN watch already
+  uses. It ranks the talkers (`internal/toptalk`) with ↓/↑ rates, peer counts
+  and bars, can follow `--flows`, and exports a snapshot as `--csv` or `--json`
+  instead of painting the screen.
 
 ## Steady Hands (v16)
 

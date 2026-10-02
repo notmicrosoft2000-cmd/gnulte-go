@@ -122,12 +122,24 @@ not a terminal, prints the finished table to the scrollback, and re-execs
 through sudo once like the other root tools. Wired into build/install/uninstall
 and the README tool table.
 
-### 16.11 — `gnulte-top` (new tool)
+### 16.11 — `gnulte-top` (new tool)  — **SHIPPED** (v16.11)
 Live per-host/per-flow bandwidth top + CSV/JSON export.
 
 - Reuse `internal/traffic` Counter (AF_PACKET). Live TUI sorted by combined rate (gnulte-lan talkers pattern), ↓/↑ rate, totals, peers; `--interval`, `--json`/`--csv`, per-host filter. Re-exec as root.
 - Tests: formatting/sorting units; pty render-check with the GNULTE_AS_ROOT shim (rates 0 in sandbox, must render + quit clean).
 - Touch: new cmd/gnulte-top.
+
+**As built:** new pure `internal/toptalk` owns the ranking and formatting core
+(`Rows`, `FlowRows`, `Peers`, `HostOf`, `HumanBytes`, `HumanRate`, `Bar`), so the
+table maths is `go test`-able with no socket. New `cmd/gnulte-top` (`-i/-n`,
+`--json`, `--csv`, `--flows`, `--host`, `--iface`, `-q/-v`) reuses the
+`internal/traffic` AF_PACKET `Counter`, re-execs through sudo once like the other
+root tools, and drives a `tui.Screen` live table; the counter is a **garnish** —
+if the socket cannot be opened (non-root, down interface) the tool still runs and
+simply reports zero rates. `--csv`/`--json` export a single sample without
+painting the screen, and a non-terminal stdout gets incremental plain lines
+instead of the live view. Wired into build/install/uninstall, the README tool
+table and the Unplugged bullet list.
 
 ### 16.12 — Engine scenarios
 - **JSON scenario scripts**: phases `{duration, latency, jitter, loss, dup, reorder, bandwidth, wobble?, burst?}` advanced on a clock; live dashboard shows current phase; `--scenario file.json`.

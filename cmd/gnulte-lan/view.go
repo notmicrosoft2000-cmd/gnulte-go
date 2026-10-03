@@ -56,6 +56,7 @@ const (
 	scrFlows
 	scrArp
 	scrMap
+	scrHistory
 )
 
 // screenLabel is the mode tag shown in the header status line.
@@ -69,6 +70,8 @@ func screenLabel(s int) string {
 		return "ARP"
 	case scrMap:
 		return "MAP"
+	case scrHistory:
+		return "HISTORY"
 	default:
 		return "HOSTS"
 	}
@@ -127,6 +130,14 @@ func (s *viewState) sortName() string {
 	}
 }
 
+// watchEvent is one up/down transition as the history screen lists it.
+type watchEvent struct {
+	when time.Time
+	ip   string
+	name string
+	up   bool
+}
+
 // watchEnv is the frame-time environment the view needs beyond the watched
 // rows themselves: the network the watch runs on, the operator's own machine,
 // the gateway's last latency, the aggregate flags, the terminal width (for row
@@ -144,6 +155,9 @@ type watchEnv struct {
 	width       int  // terminal columns, for layoutFor
 	neigh       map[string]string
 	pulse       bool // map screen: highlight the busiest link this draw
+
+	events []watchEvent // this session's transitions, oldest first
+	today  []watchEvent // today's stored transitions, oldest first
 }
 
 // vrow is one host row with its sort keys and rendered lines precomputed.
@@ -505,6 +519,13 @@ func buildView(st *viewState, hosts []string, info map[string]hostInfo, rates ma
 		st.count = len(hosts) + 1 // devices plus the gateway hub
 		st.currentIP = ""
 		out = append(out, mapLines(hosts, info, rates, stats, flows, hostSet, env, height-overhead)...)
+	case scrHistory:
+		// A transition row is not a host cursor target, so ⏎/g fall back to
+		// detail rather than launching gnulte.
+		st.count = len(env.events)
+		st.cursor = 0
+		st.currentIP = ""
+		out = append(out, historyLines(env, height-overhead)...)
 	default:
 		// ----- host rows, windowed by line budget so the cursor never leaves
 		// the screen and the frame never overflows a short terminal -----
@@ -1084,23 +1105,71 @@ func arpLines(st *viewState, hosts []string, info map[string]hostInfo,
 	return out
 }
 
+// historyLines renders screen 6: the transition alarms raised this session on
+// top, then the up/down timeline recorded for today from the on-disk store.
+func historyLines(env watchEnv, budget int) []string {
+	if budget < 4 {
+		budget = 4
+	}
+	out := []string{
+		"  " + ux.C(ux.Bold, "HISTORY") + ux.C(ux.Dim, "  up/down transitions · debounced, so one dropped ping is not an alarm"),
+	}
+	section := func(title string, events []watchEvent) {
+		out = append(out, "", ux.C(ux.Dim, fmt.Sprintf("  %s · %d event(s)", title, len(events))))
+		if len(events) == 0 {
+			out = append(out, ux.C(ux.Dim, "  none yet"))
+			return
+		}
+		// Newest first, capped so the frame never overflows a short terminal.
+		for i := len(events) - 1; i >= 0; i-- {
+			if len(out) >= budget-1 {
+				out = append(out, ux.C(ux.Dim, fmt.Sprintf("  ▾ %d more…", i+1)))
+				return
+			}
+			out = append(out, eventLine(events[i]))
+		}
+	}
+	section("ALARMS · this session", env.events)
+	if len(out) < budget {
+		section("TODAY · recorded timeline", env.today)
+	}
+	return out
+}
+
+// eventLine is one transition row: time, state glyph, address and identity.
+func eventLine(ev watchEvent) string {
+	glyph, color := "✗ down", ux.Red
+	if ev.up {
+		glyph, color = "✓ up", ux.Green
+	}
+	label := ev.name
+	if label == "" {
+		label = ev.ip
+	}
+	return "  " + ux.C(ux.Dim, ev.when.Format("15:04:05")) + "  " +
+		ux.C(color, fmt.Sprintf("%-6s", glyph)) + " " +
+		ux.TruncPad(ev.ip, 15) + "  " + ux.C(ux.Dim, ux.TruncPad(label, 26))
+}
+
 // footerHint is the one-line key legend for the active screen.
 func footerHint(st *viewState) string {
 	switch st.screen {
 	case scrTalkers:
-		return fmt.Sprintf("  talkers · %d ranked · 1/3/4/5 screens · ↑↓ host · ⏎ gnulte · Tab/d detail · x save · q quit", st.count)
+		return fmt.Sprintf("  talkers · %d ranked · 1/3/4/5/6 screens · ↑↓ host · ⏎ gnulte · Tab/d detail · x save · q quit", st.count)
 	case scrFlows:
-		return fmt.Sprintf("  flows · %d pairs · 1/2/4/5 screens · ↑↓ host · ⏎ gnulte · Tab/d detail · x save · q quit", st.count)
+		return fmt.Sprintf("  flows · %d pairs · 1/2/4/5/6 screens · ↑↓ host · ⏎ gnulte · Tab/d detail · x save · q quit", st.count)
 	case scrArp:
-		return fmt.Sprintf("  neighbours · %d · 1/2/3/5 screens · ↑↓ host · ⏎ gnulte · Tab/d detail · x save · q quit", st.count)
+		return fmt.Sprintf("  neighbours · %d · 1/2/3/5/6 screens · ↑↓ host · ⏎ gnulte · Tab/d detail · x save · q quit", st.count)
 	case scrMap:
-		return fmt.Sprintf("  map · %d nodes · 1/2/3/4 screens · edges = live flows · pulse = busiest link · x save devices · h help · q quit", st.count)
+		return fmt.Sprintf("  map · %d nodes · 1/2/3/4/6 screens · edges = live flows · pulse = busiest link · x save devices · h help · q quit", st.count)
+	case scrHistory:
+		return fmt.Sprintf("  history · %d alarm(s) · 1-5 screens · x save devices · h help · q quit", st.count)
 	default:
 		filter := ""
 		if st.alarmOnly {
 			filter = " · alarming only"
 		}
-		return fmt.Sprintf("  hosts · %d shown%s · ↑↓ host · ⏎ test with gnulte · Tab/d detail · s sort · a alarm-only · 2-5 screens · x save devices · o settings · h help · q quit", st.count, filter)
+		return fmt.Sprintf("  hosts · %d shown%s · ↑↓ host · ⏎ test with gnulte · Tab/d detail · s sort · a alarm-only · 2-6 screens · x save devices · o settings · h help · q quit", st.count, filter)
 	}
 }
 

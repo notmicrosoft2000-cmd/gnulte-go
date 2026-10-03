@@ -168,7 +168,7 @@ dashboard phase. New `cmd/gnulte/summary.go` computes the console/report rollup
 Monitor records a parallel `LossSeries` (0/100 per attempt) for the loss
 sparkline and run-length distribution, both trimmed with the latency history.
 
-### 16.13 — Watch history (gnulte-lan)
+### 16.13 — Watch history (gnulte-lan)  — **SHIPPED** (v16.13)
 - `--json` live feed (baseline + per-second host/alert events; narrative to stderr — same pattern as gnulte-scan).
 - **stderr alerts** with hysteresis (N consecutive hits before firing/unfiring).
 - **Device timeline**: JSONL store of host up/down transitions (reuse inventory dir layout).
@@ -177,6 +177,21 @@ sparkline and run-length distribution, both trimmed with the latency history.
 - **Screen 6**: alarms history + today's timeline.
 - Tests: alert hysteresis FSM, timeline round-trip, JSON feed schema, screen-6 render via pty.
 - Touch: cmd/gnulte-lan, internal/monitor or new internal/history.
+
+**As built:** the timeline lives in a new pure `internal/history` package
+(`Kind{up,down,snapshot}`, `Entry`, `Path`/`Append`/`Load`, `Window`/`OnDay`/
+`Daily` rollups with a per-day mean loss, `HealthScore`, and a `Latch`
+debouncer) writing JSONL to `~/.config/gnulte-go/watch-history.jsonl` — the same
+config dir as the device store, not the plan text's bare `gnulte`. `cmd/gnulte-lan`
+gains `-json` (baseline/tick/alert objects on stdout, every narrative line moved
+to stderr), `-history-file`, `-no-history` and `-alert-debounce N` (default 2).
+Each tick feeds one `Latch` per host from the latest ping result and appends a
+store entry plus a stderr alert on a debounced flip; the session closes with one
+health snapshot per reachable host. Screen 6 renders the session's alarms and
+today's stored transitions; the HTML report gains a 7-day latency bar chart per
+host and a 0–100 health score (loss first, then drift from the host's own
+baseline, spread and churn). Tests cover the latch FSM, daily loss aggregation,
+the feed schema, the screen-6 render and the trend/health math.
 
 ### 16.14 — Sweepers with memory + `--compare`
 - Extend the inventory store with ports / banners / alive-times.

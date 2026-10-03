@@ -200,7 +200,7 @@ func TestBuildViewNeverExceedsHeight(t *testing.T) {
 		{A: "192.168.100.13:443", B: "151.101.1.69:443", AB: 1000, BA: 200, ABp: 5, BAp: 2},
 		{A: "192.168.100.13:443", B: "192.168.100.40:53", AB: 400, BA: 300, ABp: 4, BAp: 4},
 	}
-	for _, sc := range []int{scrHosts, scrTalkers, scrFlows, scrArp, scrMap} {
+	for _, sc := range []int{scrHosts, scrTalkers, scrFlows, scrArp, scrMap, scrHistory} {
 		for _, h := range []int{10, 12, 18, 24, 40} {
 			st := &viewState{detail: true, showHelp: true, screen: sc}
 			env := watchEnv{nic: "wlan0", subnet: "192.168.100.0/24", iv: 1, start: time.Now(),
@@ -440,7 +440,7 @@ func TestFooterHintsPerScreen(t *testing.T) {
 	if !strings.Contains(footerHint(&viewState{screen: scrHosts}), "↑↓ host") {
 		t.Fatal("hosts footer lost the host navigation hints")
 	}
-	for _, sc := range []int{scrTalkers, scrFlows, scrArp, scrMap} {
+	for _, sc := range []int{scrTalkers, scrFlows, scrArp, scrMap, scrHistory} {
 		if !strings.Contains(footerHint(&viewState{screen: sc}), "q quit") {
 			t.Fatalf("screen %d footer missing quit hint", sc)
 		}

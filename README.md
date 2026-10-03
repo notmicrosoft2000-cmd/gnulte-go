@@ -1,16 +1,16 @@
 # GNULTE · Go edition
 
-> **v16.12 — Unplugged** · the GNU LAN Network Testing Environment, rewritten in pure Go
+> **v16.13 — Unplugged** · the GNU LAN Network Testing Environment, rewritten in pure Go
 > (standard library only, no external dependencies)
 
-![version](https://img.shields.io/badge/version-16.12-62a0ea)
+![version](https://img.shields.io/badge/version-16.13-62a0ea)
 ![language](https://img.shields.io/badge/Go-1.21-00ADD8)
 ![platform](https://img.shields.io/badge/platform-Linux-9cf)
 ![tests](https://img.shields.io/badge/tests-go%20vet%20%2B%20go%20test-2ea44f)
 ![license](https://img.shields.io/badge/license-GPL--3.0--or--later-%23c0392b)
 [![website](https://img.shields.io/badge/website-GNULTE%20site-1d3a5c)](https://notmicrosoft2000-cmd.github.io/gnulte/)
 
-![GNULTE v16.12 — Unplugged](social-preview.png)
+![GNULTE v16.13 — Unplugged](social-preview.png)
 
 GNULTE is a suite of focused Linux tools for measuring how devices behave when
 their network misbehaves — on networks you own or are explicitly authorised to
@@ -23,7 +23,7 @@ toolkit shares one live view of your network.
 | Binary | Root | What it does |
 | --- | --- | --- |
 | `gnulte` | **yes** | Interactive shaping engine — ARP-spoofed routing into `tc netem` (latency, jitter, loss, duplication, reordering, bandwidth), live dashboard, live `tc -s qdisc` telemetry, HTML report. Discreet `-S` stealth spoofing |
-| `gnulte-lan` | optional | Live LAN watch with a **five-screen console** — hosts, talkers (ranked with bars & peers), flows (A ⇄ B, root socket), neighbours (ARP), and screen 5’s **Live Interconnection map** (devices as nodes, live flows as pulsing edges) |
+| `gnulte-lan` | optional | Live LAN watch with a **six-screen console** — hosts, talkers (ranked with bars & peers), flows (A ⇄ B, root socket), neighbours (ARP), screen 5’s **Live Interconnection map** (devices as nodes, live flows as pulsing edges), and screen 6’s **history** (session alarms + today’s recorded timeline). `--json` emits a JSON-lines feed; the report adds a 7-day trend |
 | `gnulte-scan` | optional | Parallel sweep + in-Go deep port scanner — OUI vendor, mDNS/NetBIOS names, device types, OS fingerprinting, `-T` tabbed browser, and live re-scanning with `--watch N` |
 | `gnulte-devices` | no | Instant ARP/neighbour inventory — vendors, mDNS hostnames, type guesses, HTML reports |
 | `gnulte-wifi` | **yes** | Targeted 802.11 deauthentication for authorised Wi-Fi disassociation testing — per-frame jitter, rotating reason codes, channel hopping |
@@ -91,6 +91,19 @@ each independently shippable.
   the run ends, a session summary rolls up min/avg/p95/max, jitter, loss with a
   run-length distribution, and a rough E-model MOS — printed on the console and
   embedded in the HTML report.
+
+- **v16.13 — watch history & a machine feed.** The LAN watch now remembers: a new
+  pure `internal/history` package keeps a JSONL timeline of every debounced
+  up/down transition under the toolkit's config dir, and each finished session
+  files a per-host health snapshot. `--json` turns the dashboard into a
+  JSON-lines feed — a baseline object, a per-second object of host rates and
+  latency, and an alert for each transition — with every human line moved to
+  stderr; `-alert-debounce N` sets the consecutive-sample hysteresis before an
+  alarm fires; `--history-file`/`-no-history` control where the timeline lives.
+  Screen 6 shows the session's alarms beside today's recorded transitions, and
+  the HTML report grows a 7-day latency bar chart per host with a blunt 0–100
+  health score (loss first, then drift from the host's own baseline, spread and
+  up/down churn). Still no `ping`, no external store, no new dependency.
 
 ## Steady Hands (v16)
 

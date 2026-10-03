@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"gnulte-go/internal/history"
 	"gnulte-go/internal/traffic"
 )
 
@@ -76,6 +77,10 @@ func sessionHTML(s *lanSession) string {
 		humanBytes(downTotal), humanBytes(upTotal))
 	b.WriteString("</table></section>\n")
 
+	// 7-day latency trend and per-host health score, drawn from the timeline
+	// store that survives across watch sessions.
+	b.WriteString(trendSection(s))
+
 	// Per-host cards.
 	b.WriteString("<section><h2>Per-host detail</h2>\n")
 	for _, ip := range ips {
@@ -112,6 +117,147 @@ func sessionHTML(s *lanSession) string {
 	}
 	b.WriteString("<footer>GNULTE-LAN " + version + " · passive capture · GPLv3</footer>\n</body></html>\n")
 	return b.String()
+}
+
+// trendSection renders the 7-day device health board: one row per host with a
+// per-day latency bar chart, uptime/down summaries and a blunt 0–100 health
+// score. It draws from the on-disk timeline (s.hist) rather than the live
+// counters, so a short watch still shows the week's shape.
+func trendSection(s *lanSession) string {
+	now := s.end
+	if now.IsZero() {
+		now = time.Now()
+	}
+	ips := append([]string(nil), s.hosts...)
+	sort.Slice(ips, func(i, j int) bool { return ipLess(ips[i], ips[j]) })
+
+	var b strings.Builder
+	b.WriteString("<section><h2>7-day trend &amp; health</h2>\n")
+	b.WriteString("<p class=dim>Latency per day from the on-disk timeline; a gap is a day with no watch, not a zero. " +
+		"The score weighs loss first, then drift from the host's own baseline, spread and up/down churn.</p>\n")
+	b.WriteString("<table class=summary><tr><th>Device</th><th>Latency / day (7d)</th><th>Avg</th><th>p95</th><th>Up</th><th>Downs</th><th>Health</th></tr>\n")
+	any := false
+	for _, ip := range ips {
+		days := history.Daily(s.hist, ip, 7, now)
+		avg, p95, loss, sessions, churn := aggregateDays(days)
+		if sessions == 0 && churn == 0 {
+			continue
+		}
+		any = true
+		score, label := history.HealthScore(avg, p95, baselineDay(days), loss, churn)
+		fmt.Fprintf(&b, "<tr><td class=device><b>%s</b>%s</td><td>%s</td><td class=num>%dms</td>"+
+			"<td class=num>%dms</td><td class=num>%s</td><td class=num>%d</td><td>%s</td></tr>\n",
+			htmlEscape(ip), hostSmall(s.info[ip]), dayBarsSVG(days, 34), avg, p95,
+			fmtUptime(upSum(days)), churn, healthBadge(score, label))
+	}
+	if !any {
+		b.WriteString("<tr><td colspan=7 class=dim>No timeline yet — watch again to build a trend.</td></tr>\n")
+	}
+	b.WriteString("</table></section>\n")
+	return b.String()
+}
+
+// aggregateDays collapses per-day buckets into the figures the score needs:
+// a session-weighted mean latency and loss, the worst p95, the total sample
+// count and the number of recorded downs.
+func aggregateDays(days []history.Day) (avg, p95 int, loss float64, sessions, churn int) {
+	var avgW int
+	var lossW float64
+	for _, d := range days {
+		avgW += d.AvgMS * d.Sessions
+		lossW += d.Loss * float64(d.Sessions)
+		sessions += d.Sessions
+		if d.P95MS > p95 {
+			p95 = d.P95MS
+		}
+		churn += d.Downs
+	}
+	if sessions > 0 {
+		avg = avgW / sessions
+		loss = lossW / float64(sessions)
+	}
+	return
+}
+
+// baselineDay is the first day of the window with real latency — the host's
+// own "normal", so drift is judged relative to itself, not to other machines.
+func baselineDay(days []history.Day) int {
+	for _, d := range days {
+		if d.Sessions > 0 && d.AvgMS > 0 {
+			return d.AvgMS
+		}
+	}
+	return 0
+}
+
+// upSum totals the reachable seconds across the trend window.
+func upSum(days []history.Day) int {
+	total := 0
+	for _, d := range days {
+		total += d.UpSec
+	}
+	return total
+}
+
+// dayBarsSVG draws one bar per day (oldest left). Bars are scaled against the
+// busiest day so the shape is readable, and a day with no samples is a faint
+// stub rather than a zero-height absence.
+func dayBarsSVG(days []history.Day, h int) string {
+	const barW, gap = 12, 4
+	peak := 0
+	for _, d := range days {
+		if d.AvgMS > peak {
+			peak = d.AvgMS
+		}
+	}
+	w := len(days)*(barW+gap) - gap
+	var b strings.Builder
+	fmt.Fprintf(&b, "<svg class=bars width=%d height=%d viewBox=\"0 0 %d %d\" role=img>", w, h, w, h)
+	for i, d := range days {
+		bh := 2
+		cls := "bar bar-empty"
+		if peak > 0 && d.Sessions > 0 {
+			bh = d.AvgMS * h / peak
+			if bh < 2 {
+				bh = 2
+			}
+			cls = "bar"
+		}
+		fmt.Fprintf(&b, "<rect class=\"%s\" x=%d y=%d width=%d height=%d rx=2><title>%s · %dms · %d down</title></rect>",
+			cls, i*(barW+gap), h-bh, barW, bh, htmlEscape(d.Date), d.AvgMS, d.Downs)
+	}
+	b.WriteString("</svg>")
+	return b.String()
+}
+
+// fmtUptime renders a second count as "3h20m" (or "45s").
+func fmtUptime(sec int) string {
+	if sec < 0 {
+		sec = 0
+	}
+	h := sec / 3600
+	m := (sec % 3600) / 60
+	switch {
+	case h > 0:
+		return fmt.Sprintf("%dh%02dm", h, m)
+	case m > 0:
+		return fmt.Sprintf("%dm", m)
+	default:
+		return fmt.Sprintf("%ds", sec)
+	}
+}
+
+// healthBadge is the score pill, coloured like the status pills: green when
+// healthy, amber when fair, red when poor.
+func healthBadge(score int, label string) string {
+	cls := "u"
+	switch {
+	case score < 40:
+		cls = "x"
+	case score < 70:
+		cls = "d"
+	}
+	return fmt.Sprintf("<span class=\"pill %s\">%d %s</span>", cls, score, htmlEscape(label))
 }
 
 func cardHTML(ip string, inf hostInfo, st *hostStat, flows []traffic.Flow, iv int) string {
@@ -383,6 +529,8 @@ svg.spark{display:block;width:100%;max-width:320px;height:44px;background:#0a0e1
 .dimtxt{fill:var(--dim);font-size:10px}
 .conversations{margin-top:10px}
 .conv{display:flex;gap:14px;padding:3px 0;border-top:1px dashed var(--line);font-size:12.5px}.conv .mono{flex:1}
+svg.bars{display:block;background:#0a0e14;border-radius:6px;border:1px solid var(--line)}
+svg.bars rect.bar{fill:var(--lat)}svg.bars rect.bar-empty{fill:var(--line)}
 pre.log{background:#0a0e14;border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;font-size:11.5px;line-height:1.45}
 footer{margin-top:32px;color:var(--dim);font-size:12px;text-align:center}
 </style>`

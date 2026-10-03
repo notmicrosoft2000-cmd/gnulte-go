@@ -63,6 +63,7 @@ import (
 	"time"
 
 	"gnulte-go/internal/discover"
+	"gnulte-go/internal/history"
 	"gnulte-go/internal/inventory"
 	"gnulte-go/internal/netutil"
 	"gnulte-go/internal/probe"
@@ -74,7 +75,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "16.12"
+const version = "16.13"
 
 // hostInfo is the identity enrichment for one watched host.
 type hostInfo struct {
@@ -193,6 +194,12 @@ type hostStat struct {
 	totTX  int64
 
 	alarm bool // currently breaching a threshold
+
+	// latch debounces the up/down state so a single dropped ping does not
+	// raise an alarm; upTicks counts the seconds the host was reachable, which
+	// becomes the report's uptime per day.
+	latch   history.Latch
+	upTicks int
 }
 
 func (s *hostStat) addRate(rx, tx int64, capN int) {
@@ -230,21 +237,29 @@ type lanSession struct {
 	stats  map[string]*hostStat
 	flows  []traffic.Flow // cumulative conversation totals
 	log    []string       // the plain (ANSI-stripped) dashboard history, bounded
+
+	events []watchEvent    // this session's up/down transitions, oldest first
+	today  []watchEvent    // today's stored transitions, oldest first
+	hist   []history.Entry // the whole timeline store, for the report trend
 }
 
 func main() {
 	var (
-		iface     = flag.String("i", "", "network interface (default: auto-detect)")
-		targets   = flag.String("t", "", "host IP(s) to watch, comma-separated (empty = watch the whole LAN)")
-		interval  = flag.Int("interval", 0, "seconds between updates (0 = settings/1)")
-		duration  = flag.Int("duration", 0, "auto-stop after N seconds (0 = until interrupt)")
-		history   = flag.Int("history", 0, "rate/ping samples kept per host (0 = settings/60)")
-		export    = flag.String("export", "", "append per-tick samples as CSV to FILE")
-		noReport  = flag.Bool("no-report", false, "skip the end-of-session HTML report")
-		alarmRate = flag.Int("alarm-rate", 0, "alarm hosts above N kbps (0 = settings)")
-		alarmLat  = flag.Int("alarm-latency-ms", 0, "alarm hosts above N ms average ping (0 = settings)")
-		quiet     = flag.Bool("q", false, "quiet: no banner, plain transcript")
-		showVer   = flag.Bool("version", false, "print version and exit")
+		iface       = flag.String("i", "", "network interface (default: auto-detect)")
+		targets     = flag.String("t", "", "host IP(s) to watch, comma-separated (empty = watch the whole LAN)")
+		interval    = flag.Int("interval", 0, "seconds between updates (0 = settings/1)")
+		duration    = flag.Int("duration", 0, "auto-stop after N seconds (0 = until interrupt)")
+		histSamples = flag.Int("history", 0, "rate/ping samples kept per host (0 = settings/60)")
+		export      = flag.String("export", "", "append per-tick samples as CSV to FILE")
+		asJSON      = flag.Bool("json", false, "emit a JSON-lines event feed on stdout (narrative moves to stderr)")
+		histFile    = flag.String("history-file", "", "up/down timeline store (default: ~/.config/gnulte-go/watch-history.jsonl)")
+		noHist      = flag.Bool("no-history", false, "do not read or write the up/down timeline store")
+		debounce    = flag.Int("alert-debounce", 2, "consecutive samples before an up/down transition is believed")
+		noReport    = flag.Bool("no-report", false, "skip the end-of-session HTML report")
+		alarmRate   = flag.Int("alarm-rate", 0, "alarm hosts above N kbps (0 = settings)")
+		alarmLat    = flag.Int("alarm-latency-ms", 0, "alarm hosts above N ms average ping (0 = settings)")
+		quiet       = flag.Bool("q", false, "quiet: no banner, plain transcript")
+		showVer     = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "%s\n\nUsage: gnulte-lan [flags]\n\n", purpose())
@@ -255,6 +270,15 @@ func main() {
 			"  gnulte-lan --duration 60 --export watch.csv --alarm-rate 500\n")
 	}
 	flag.Parse()
+
+	// --json owns stdout: the watch emits a JSON-lines feed there and every
+	// human line (banner, status, alerts) moves to stderr, exactly like
+	// gnulte-scan's machine modes.
+	jsonMode := *asJSON
+	if jsonMode {
+		*quiet = true
+		ux.Out = os.Stderr
+	}
 
 	if *showVer {
 		fmt.Printf("GNULTE-LAN v%s (Go)\n", version)
@@ -270,7 +294,7 @@ func main() {
 	// Live-tunable knobs from settings plus CLI overrides, re-clamped after a
 	// mid-watch edit (a nonzero flag always beats saved settings).
 	iv, histCap, alarmRateKbps, alarmLatencyMs, timeout :=
-		configLive(cfgLoaded, *interval, *history, *alarmRate, *alarmLat)
+		configLive(cfgLoaded, *interval, *histSamples, *alarmRate, *alarmLat)
 
 	// Administrator-privilege handshake: counting packets needs a raw socket.
 	if os.Geteuid() != 0 && os.Getenv("GNULTE_AS_ROOT") != "1" {
@@ -349,17 +373,20 @@ func main() {
 	}
 
 	// Banner and boot notes stay in the scrollback once the live view takes
-	// over the alternate screen, exactly like the parent gnulte tool.
+	// over the alternate screen, exactly like the parent gnulte tool. Under
+	// --json even these notes move to stderr, because stdout is the feed.
 	if !*quiet {
 		printBanner()
 	}
-	if *duration > 0 {
-		fmt.Printf("  watching for %d seconds — Ctrl+C stops early\n", *duration)
-	}
-	if subnet != "" {
-		fmt.Printf("  watching %d host(s) on %s (router skipped)\n", len(hosts), subnet)
-	} else {
-		fmt.Printf("  watching %d host(s)\n", len(hosts))
+	if !jsonMode {
+		if *duration > 0 {
+			fmt.Printf("  watching for %d seconds — Ctrl+C stops early\n", *duration)
+		}
+		if subnet != "" {
+			fmt.Printf("  watching %d host(s) on %s (router skipped)\n", len(hosts), subnet)
+		} else {
+			fmt.Printf("  watching %d host(s)\n", len(hosts))
+		}
 	}
 
 	// CSV export (optional) opens before the loop and rows stream per tick.
@@ -392,11 +419,37 @@ func main() {
 
 	view := &viewState{auto: subnet != ""}
 
+	// Up/down timeline store: one JSONL file under the same config dir as the
+	// rest of gnulte-go. Best-effort — a read-only config dir must not stop
+	// the watch, so a failure degrades to "no history" rather than a fatal.
+	histPath := *histFile
+	if histPath == "" {
+		histPath = history.Path()
+	}
+	debounceN := *debounce
+	if debounceN < 1 {
+		debounceN = 1
+	}
+
 	stats := make(map[string]*hostStat, len(hosts))
 	for i, ip := range hosts {
 		// One stable hue per host, in appearance order — the colour travels
 		// through every row, screen and tick.
-		stats[ip] = &hostStat{color: i}
+		st := &hostStat{color: i}
+		st.latch.Threshold = debounceN
+		stats[ip] = st
+	}
+	// Seed screen 6 with today's recorded transitions (and the whole store for
+	// the report trend) unless the operator turned history off.
+	var histStore []history.Entry
+	var todayEvents []watchEvent
+	if !*noHist {
+		if loaded, err := history.Load(histPath); err == nil {
+			histStore = loaded
+			todayEvents = watchEvents(history.OnDay(loaded, time.Now()))
+		} else {
+			fmt.Fprintf(os.Stderr, "gnulte-lan: history unavailable (%v) — continuing without it\n", err)
+		}
 	}
 	// The kernel neighbour table is cheap to read fresh whenever the ARP
 	// screen is up; everything else reuses the discovery-time identity.
@@ -409,6 +462,15 @@ func main() {
 		hosts:  hosts,
 		info:   info,
 		stats:  stats,
+		events: []watchEvent{},
+		today:  todayEvents,
+		hist:   histStore,
+	}
+
+	// --json opens with one baseline object so a consumer knows the shape of
+	// the stream before the first tick.
+	if jsonMode {
+		writeJSON(newFeedBaseline(nic, len(hosts), iv, sess.start))
 	}
 
 	tick := time.NewTicker(time.Duration(iv) * time.Second)
@@ -552,6 +614,10 @@ func main() {
 				view.screen = scrMap
 				view.detail = false
 				return true, false
+			case '6', 'y', 'Y':
+				view.screen = scrHistory
+				view.detail = false
+				return true, false
 			case 'g', 'G':
 				if ip := handoffIP(view.screen, view.currentIP); ip != "" {
 					view.gCmd = handoffGNULTE(nic, ip)
@@ -579,7 +645,7 @@ func main() {
 							fmt.Fprintf(os.Stderr, "gnulte-lan: settings: %v\n", serr)
 						}
 						iv, histCap, alarmRateKbps, alarmLatencyMs, timeout =
-							configLive(cfgLoaded, *interval, *history, *alarmRate, *alarmLat)
+							configLive(cfgLoaded, *interval, *histSamples, *alarmRate, *alarmLat)
 						tick.Reset(time.Duration(iv) * time.Second)
 					}
 					if s, err := tui.Open(); err == nil {
@@ -591,6 +657,10 @@ func main() {
 		}
 		return false, false
 	}
+
+	// histWriteErr makes the "store is not writable" warning a one-time note
+	// instead of a per-event flood.
+	var histWriteErr bool
 
 	finish := func() {
 		if scr != nil {
@@ -605,6 +675,32 @@ func main() {
 		if hasCounter {
 			sess.flows = counter.FlowTotals()
 		}
+		// Fold one snapshot per reachable host into the timeline store so the
+		// 7-day trend survives the session; the in-memory copy feeds the
+		// report even when the store is unwritable.
+		if !*noHist {
+			for _, ip := range hosts {
+				st := stats[ip]
+				if st.ping.count+st.ping.drops == 0 {
+					continue
+				}
+				snap := history.Entry{
+					Kind:  history.KindSnapshot,
+					TS:    sess.end.Format(time.RFC3339),
+					IP:    ip,
+					Name:  nameOf(info[ip]),
+					AvgMS: int(st.ping.avg()),
+					P95MS: int(st.ping.pct(95)),
+					UpSec: st.upTicks * iv,
+					Loss:  st.ping.loss(),
+				}
+				if err := history.Append(histPath, snap); err != nil && !histWriteErr {
+					histWriteErr = true
+					fmt.Fprintf(os.Stderr, "gnulte-lan: history not writable (%v) — timeline disabled\n", err)
+				}
+				sess.hist = append(sess.hist, snap)
+			}
+		}
 		// Live Interconnection: fold the final watch into the shared device
 		// store so gnulte and gnulte-scan can pick the hosts up later.
 		if !dbSaved {
@@ -615,6 +711,42 @@ func main() {
 		}
 		if !*noReport {
 			wrapUpReport(sess, cfgLoaded.HTMLReport)
+		}
+	}
+
+	// record logs one debounced up/down transition: the session list, today's
+	// timeline, the on-disk store, and either the JSON feed or a stderr alert.
+	record := func(ev watchEvent) {
+		sess.events = append(sess.events, ev)
+		sess.today = append(sess.today, ev)
+		if !*noHist {
+			kind := history.KindDown
+			if ev.up {
+				kind = history.KindUp
+			}
+			rec := history.Entry{Kind: kind, TS: ev.when.Format(time.RFC3339), IP: ev.ip, Name: ev.name}
+			if err := history.Append(histPath, rec); err != nil && !histWriteErr {
+				histWriteErr = true
+				fmt.Fprintf(os.Stderr, "gnulte-lan: history not writable (%v) — timeline disabled\n", err)
+			}
+		}
+		if jsonMode {
+			writeJSON(newFeedAlert(ev))
+			return
+		}
+		// The interactive dashboard shows the alarm on screen 6; only the
+		// plain/quiet runs get a stderr line, so the alternate screen is never
+		// corrupted by an out-of-band write.
+		if scr == nil {
+			glyph := "DOWN"
+			if ev.up {
+				glyph = "UP"
+			}
+			label := ev.name
+			if label == "" {
+				label = ev.ip
+			}
+			fmt.Fprintf(os.Stderr, "%s  %-4s  %s (%s)\n", ev.when.Format("15:04:05"), glyph, ev.ip, label)
 		}
 	}
 
@@ -645,6 +777,8 @@ func main() {
 			width:      ux.Width(),
 			neigh:      lastNeigh,
 			pulse:      view.screen == scrMap && time.Now().Unix()%2 == 0,
+			events:     sess.events,
+			today:      sess.today,
 		}
 		scr.Draw(buildView(view, hosts, info, lastRates, lastFlows, hostSet, stats, env, ux.Height()))
 	}
@@ -686,6 +820,24 @@ func main() {
 						r.RXPkts, r.TXPkts, st.ping.last, st.ping.loss())
 				}
 			}
+
+			// Debounced up/down detection drives screen 6, the on-disk
+			// timeline and the alert feed. Only feed the latch once a ping has
+			// actually been attempted, so the very first tick (no result yet)
+			// cannot seed a spurious state.
+			for _, ip := range hosts {
+				st := stats[ip]
+				if st.ping.count+st.ping.drops == 0 {
+					continue
+				}
+				reachable := st.ping.last >= 0
+				if reachable {
+					st.upTicks++
+				}
+				if flipped, nowUp := st.latch.Observe(reachable); flipped {
+					record(watchEvent{when: time.Now(), ip: ip, name: nameOf(info[ip]), up: nowUp})
+				}
+			}
 			// One alarm chirp per tick at most — a wall of beeps is not help.
 			if alarmOn && cfgLoaded.Beeps {
 				sound.Beep(720, 80*time.Millisecond)
@@ -695,9 +847,13 @@ func main() {
 			// The transcript (plain, ANSI-free) is what travels into the HTML
 			// report and the scrollback in non-interactive runs.
 			lines := buildLines(hosts, info, rates, flows, hostSet, stats, nic, iv)
-			if scr != nil {
+			switch {
+			case jsonMode:
+				// One machine object per tick; stdout stays pure JSON.
+				writeJSON(newFeedTick(hosts, stats, rates, info, iv, time.Now()))
+			case scr != nil:
 				drawNow()
-			} else {
+			default:
 				for _, ln := range lines {
 					fmt.Println(ln)
 				}
@@ -1203,23 +1359,24 @@ func dirLine(mark string, b, p int64, iv int) string {
 }
 
 // wrapUpReport writes the end-of-session HTML report into the report hub,
-// asking first when a human is at the keyboard.
+// asking first when a human is at the keyboard. Human output goes through
+// ux.Out, so --json (which points ux.Out at stderr) keeps stdout pure.
 func wrapUpReport(sess *lanSession, htmlDefault bool) {
 	path := reportdir.DefaultPathCount(reportdir.GNULTELan, "gnulte-lan-report", len(sess.hosts))
-	if ux.TTY() {
+	if ux.TTY() && ux.Out == os.Stdout {
 		defaultYes := "y"
 		if !htmlDefault {
 			defaultYes = "n"
 		}
 		reader := bufio.NewReader(os.Stdin)
-		fmt.Printf("\nWrite the GNULTE-LAN report to %s? [Y/n] ", path)
+		fmt.Fprintf(ux.Out, "\nWrite the GNULTE-LAN report to %s? [Y/n] ", path)
 		ans, _ := reader.ReadString('\n')
 		ans = strings.TrimSpace(strings.ToLower(ans))
 		if ans == "" {
 			ans = defaultYes
 		}
 		if ans != "y" && ans != "yes" {
-			fmt.Println("Report skipped.")
+			fmt.Fprintln(ux.Out, "Report skipped.")
 			return
 		}
 	} else if !htmlDefault {
@@ -1229,7 +1386,7 @@ func wrapUpReport(sess *lanSession, htmlDefault bool) {
 		fmt.Fprintf(os.Stderr, "gnulte-lan: could not write report: %v\n", err)
 		return
 	}
-	fmt.Printf("  Report: %s\n", path)
+	fmt.Fprintf(ux.Out, "  Report: %s\n", path)
 }
 
 // configLive clamps settings (History, TrafficSec, TimeoutMs, alarm thresholds)

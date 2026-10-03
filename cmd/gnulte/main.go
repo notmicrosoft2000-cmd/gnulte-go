@@ -41,14 +41,16 @@ import (
 	"gnulte-go/internal/engine"
 	"gnulte-go/internal/monitor"
 	"gnulte-go/internal/netutil"
+	userprofiles "gnulte-go/internal/profiles"
 	"gnulte-go/internal/reportdir"
 	"gnulte-go/internal/safety"
+	"gnulte-go/internal/scenario"
 	"gnulte-go/internal/settings"
 	"gnulte-go/internal/tui"
 	"gnulte-go/internal/ux"
 )
 
-const version = "16.11"
+const version = "16.12"
 
 // bootLog holds the pre-run transcript (banner, confirmation, arming) so the
 // HTML report shows the full command flow, not just the monitor's own output.
@@ -120,8 +122,10 @@ func main() {
 		reorder   = flag.Int("e", 0, "out-of-order packets percent")
 		bandwidth = flag.Int("b", 0, "bandwidth cap in kbps (0 = unlimited)")
 
-		profile     = flag.String("profile", "", "preset impairment profile (see --list-profiles)")
+		profile     = flag.String("profile", "", "preset impairment profile (see --list-profiles); with save:NAME, save the current flags as a profile and exit")
 		listProf    = flag.Bool("list-profiles", false, "list preset profiles and exit")
+		scenarioArg = flag.String("scenario", "", "JSON scenario script of timed phases (advanced on a clock); see docs/V17-PLAN.md")
+		perTarget   = flag.String("per-target", "", "JSON file mapping target IP -> impairment override")
 		randomArg   = flag.Bool("random", false, "randomize latency/jitter/loss every second")
 		exportArg   = flag.String("export", "", "stream per-second results to a CSV file")
 		noteArg     = flag.String("note", "", "label this session (shown in the console header and the report)")
@@ -174,6 +178,17 @@ func main() {
 			p := profiles[name]
 			fmt.Printf("  %-10s %4dms jitter %3dms loss %2d%% dup %d%% reorder %d%% cap %5dkbps\n",
 				name, p[0], p[1], p[2], p[3], p[4], p[5])
+		}
+		if names, err := userprofiles.List(); err == nil && len(names) > 0 {
+			fmt.Printf("\nUser profiles (%s):\n", userprofiles.Dir())
+			for _, name := range names {
+				p, err := userprofiles.Load(name)
+				if err != nil {
+					continue
+				}
+				fmt.Printf("  %-10s %4dms jitter %3dms loss %2d%% dup %d%% reorder %d%% cap %5dkbps\n",
+					name, p.LatencyMS, p.JitterMS, p.LossPct, p.DupPct, p.ReorderPct, p.BandwidthKbps)
+			}
 		}
 		return
 	}
@@ -364,28 +379,70 @@ func main() {
 			bootf(!prefs.Advanced || *quiet, "  $ "+line)
 		},
 	}
-	if *profile != "" {
-		p, ok := profiles[*profile]
-		if !ok {
-			fatal(fmt.Errorf("unknown profile %q (available: %s)", *profile, profileNames))
-		}
-		setParam := map[string]func(int){
-			"latency":   func(v int) { ec.LatencyMS = v },
-			"jitter":    func(v int) { ec.JitterMS = v },
-			"loss":      func(v int) { ec.LossPct = v },
-			"duplicate": func(v int) { ec.DupPct = v },
-			"reorder":   func(v int) { ec.ReorderPct = v },
-			"bandwidth": func(v int) { ec.BandwidthKbps = v },
-		}
-		fields := []string{"latency", "jitter", "loss", "duplicate", "reorder", "bandwidth"}
-		for i, f := range fields {
-			if !explicit[f] {
-				setParam[f](p[i])
+	if *profile != "" && !strings.HasPrefix(*profile, "save:") {
+		var p engine.Impairment
+		if bp, ok := profiles[*profile]; ok {
+			p = engine.Impairment{
+				LatencyMS: bp[0], JitterMS: bp[1], LossPct: bp[2],
+				DupPct: bp[3], ReorderPct: bp[4], BandwidthKbps: bp[5],
 			}
+		} else {
+			// Fall through to the operator's saved profiles. The built-ins win
+			// a name collision so a preset can never be shadowed by a file.
+			up, err := userprofiles.Load(*profile)
+			if err != nil {
+				if os.IsNotExist(err) {
+					fatal(fmt.Errorf("unknown profile %q (built-ins: %s; user profiles: %s)", *profile, profileNames, userprofiles.Dir()))
+				}
+				fatal(fmt.Errorf("profile %q: %v", *profile, err))
+			}
+			p = up
 		}
+		applyImpairment(&ec, p, explicit)
+	}
+	if strings.HasPrefix(*profile, "save:") {
+		// --profile save:NAME persists the resolved command-line parameters as
+		// a reusable user profile and stops there (no test is started).
+		name := strings.TrimPrefix(*profile, "save:")
+		p := engine.Impairment{
+			LatencyMS: ec.LatencyMS, JitterMS: ec.JitterMS, LossPct: ec.LossPct,
+			DupPct: ec.DupPct, ReorderPct: ec.ReorderPct, BandwidthKbps: ec.BandwidthKbps,
+		}
+		path, err := userprofiles.Save(name, p)
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Printf("profile %q saved to %s\n", name, path)
+		return
 	}
 	if *block {
 		ec.Mode = engine.ModeBlock
+	}
+	// A scenario script drives the impairment on a clock; seed the first phase
+	// now so the tree matches the script from the first second.
+	var scen *scenario.Scenario
+	if *scenarioArg != "" {
+		if *randomArg {
+			fatal(fmt.Errorf("--scenario and --random cannot be combined"))
+		}
+		s, err := scenario.Load(*scenarioArg)
+		if err != nil {
+			fatal(err)
+		}
+		scen = s
+		p, _, _ := scen.At(0)
+		setImpairment(&ec, p)
+	}
+	if *perTarget != "" {
+		base := engine.Impairment{
+			LatencyMS: ec.LatencyMS, JitterMS: ec.JitterMS, LossPct: ec.LossPct,
+			DupPct: ec.DupPct, ReorderPct: ec.ReorderPct, BandwidthKbps: ec.BandwidthKbps,
+		}
+		ov, err := loadPerTarget(*perTarget, base)
+		if err != nil {
+			fatal(err)
+		}
+		ec.PerTarget = ov
 	}
 	// Beeps are on by default; the saved settings, an explicit flag, or the
 	// wizard can turn them off.
@@ -393,7 +450,7 @@ func main() {
 	if !explicit["sound"] && !explicit["no-sound"] {
 		beep = prefs.Beeps
 	}
-	if interactive && ec.Mode != engine.ModeBlock {
+	if interactive && ec.Mode != engine.ModeBlock && scen == nil {
 		paramsWizard(&ec, duration, &beep, interval)
 	}
 	// A stray Ctrl-D anywhere in the wizard is an abort, not a "keep every
@@ -474,6 +531,12 @@ func main() {
 	// teardown still runs exactly once (Stop is idempotent).
 	defer sess.Stop()
 	bootf(*quiet, "  "+okText("Session armed — pinging "+strings.Join(targetsList, ", ")))
+	if scen != nil {
+		bootf(*quiet, "  "+c(cDim, "scenario · "+scen.Describe()))
+	}
+	if *perTarget != "" {
+		bootf(*quiet, c(cDim, fmt.Sprintf("  per-target overrides · %d host(s) from %s", len(ec.PerTarget), *perTarget)))
+	}
 	bootf(*quiet, c(cDim, "  Ctrl+C stops the test and restores normal connectivity"))
 	bootf(*quiet, "")
 
@@ -492,6 +555,31 @@ func main() {
 	// The per-ping timeout must exceed the planned latency, or a degraded but
 	// reachable target (e.g. the 3000ms voip profile) would read as offline.
 	mon.Timeout = time.Duration(ec.LatencyMS+ec.JitterMS+2000) * time.Millisecond
+	if scen != nil && ec.Mode == engine.ModeShape {
+		// Scenario clock: every tick recompute the phase from elapsed time and
+		// push it into the live tree. The phase name rides on the dashboard
+		// and the transcript whenever it changes.
+		scenStart := time.Now()
+		lastPhase := ""
+		mon.OnTick = func() {
+			p, name, _ := scen.At(time.Since(scenStart))
+			if name != lastPhase {
+				lastPhase = name
+				mon.SetPhase(name)
+				mon.Note("  scenario phase → " + name)
+			}
+			nc := ec
+			nc.LatencyMS = p.LatencyMS
+			nc.JitterMS = p.JitterMS
+			nc.LossPct = p.LossPct
+			nc.DupPct = p.DupPct
+			nc.ReorderPct = p.ReorderPct
+			nc.BandwidthKbps = p.BandwidthKbps
+			if err := sess.UpdateParams(nc); err != nil && !*quiet {
+				fmt.Fprintln(os.Stderr, "gnulte: scenario update failed:", err)
+			}
+		}
+	}
 	if *randomArg && ec.Mode == engine.ModeShape {
 		mon.OnTick = func() {
 			// Toggle parameters mid-test as the Bash toolkit did: random walk
@@ -573,6 +661,17 @@ func main() {
 			fmt.Fprintln(os.Stderr, "  • "+p)
 		}
 		fmt.Fprintln(os.Stderr, "  inspect `tc qdisc show` and `iptables -L FORWARD` and clean up by hand if needed.")
+	}
+	// End-of-session rollup: the same maths the report embeds, printed for a
+	// run watched in a terminal (and skipped entirely in quiet mode).
+	if !*quiet {
+		if lines := Summarize(mon.Results).Console(); len(lines) > 0 {
+			fmt.Println()
+			fmt.Println(c(cDim, "  ── session summary ──"))
+			for _, l := range lines {
+				fmt.Println(l)
+			}
+		}
 	}
 	if !explicit["no-report"] && !explicit["report"] && !prefs.HTMLReport {
 		*noReport = true

@@ -1,16 +1,16 @@
 # GNULTE · Go edition
 
-> **v16.11 — Unplugged** · the GNU LAN Network Testing Environment, rewritten in pure Go
+> **v16.12 — Unplugged** · the GNU LAN Network Testing Environment, rewritten in pure Go
 > (standard library only, no external dependencies)
 
-![version](https://img.shields.io/badge/version-16.11-62a0ea)
+![version](https://img.shields.io/badge/version-16.12-62a0ea)
 ![language](https://img.shields.io/badge/Go-1.21-00ADD8)
 ![platform](https://img.shields.io/badge/platform-Linux-9cf)
 ![tests](https://img.shields.io/badge/tests-go%20vet%20%2B%20go%20test-2ea44f)
 ![license](https://img.shields.io/badge/license-GPL--3.0--or--later-%23c0392b)
 [![website](https://img.shields.io/badge/website-GNULTE%20site-1d3a5c)](https://notmicrosoft2000-cmd.github.io/gnulte/)
 
-![GNULTE v16.11 — Unplugged](social-preview.png)
+![GNULTE v16.12 — Unplugged](social-preview.png)
 
 GNULTE is a suite of focused Linux tools for measuring how devices behave when
 their network misbehaves — on networks you own or are explicitly authorised to
@@ -80,6 +80,17 @@ each independently shippable.
   uses. It ranks the talkers (`internal/toptalk`) with ↓/↑ rates, peer counts
   and bars, can follow `--flows`, and exports a snapshot as `--csv` or `--json`
   instead of painting the screen.
+
+- **v16.12 — scenarios, per-target shaping, profiles & a session summary.** A
+  shaping run can now be scripted: `--scenario FILE` plays timed phases — each
+  with its own latency/jitter/loss and an optional sine or sawtooth wobble or an
+  on/off loss burst — into the live tree, and the dashboard names the phase in
+  force. `--per-target FILE` gives individual hosts their own `tc`/netem class
+  over a JSON override, `--profile save:NAME` stores the current parameters as a
+  reusable preset, and `--list-profiles` shows the built-ins plus your own. When
+  the run ends, a session summary rolls up min/avg/p95/max, jitter, loss with a
+  run-length distribution, and a rough E-model MOS — printed on the console and
+  embedded in the HTML report.
 
 ## Steady Hands (v16)
 

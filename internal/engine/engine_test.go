@@ -92,6 +92,93 @@ func TestTCChangeCommands(t *testing.T) {
 	}
 }
 
+// flattenTC joins a command list into one newline-separated string for the
+// contains-style assertions below.
+func flattenTC(cmds [][]string) string {
+	var lines []string
+	for _, c := range cmds {
+		lines = append(lines, strings.Join(c, " "))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func TestPerTargetTree(t *testing.T) {
+	c := testCfg()
+	c.PerTarget = map[string]Impairment{
+		"192.168.1.51": {LatencyMS: 50, BandwidthKbps: 256},
+	}
+	joined := flattenTC(tcTreeCommands(&c, "eth0"))
+	for _, want := range []string{
+		// The overridden target gets its own class + netem, matched at prio 1.
+		"class add dev eth0 parent 1: classid 1:10 htb rate 256kbit ceil 256kbit",
+		"qdisc add dev eth0 parent 1:10 handle 10: netem delay 50ms 0ms",
+		"filter add dev eth0 parent 1: protocol ip prio 1 u32 match ip dst 192.168.1.51/32 flowid 1:10",
+		"filter add dev eth0 parent 1: protocol ip prio 1 u32 match ip src 192.168.1.51/32 flowid 1:10",
+		// The rest share the global class at prio 2.
+		"class add dev eth0 parent 1: classid 1:11 htb rate 1gbit ceil 1gbit",
+		"qdisc add dev eth0 parent 1:11 handle 11: netem delay 300ms 100ms loss 5% duplicate 2% reorder 3% gap 5",
+		"filter add dev eth0 parent 1: protocol ip prio 2 u32 match ip dst 192.168.1.50/32 flowid 1:11",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("per-target tree missing %q\nfull:\n%s", want, joined)
+		}
+	}
+	// The overridden host must NOT also be routed to the global class.
+	if strings.Contains(joined, "192.168.1.51/32 flowid 1:11") {
+		t.Errorf("overridden target leaked into the global class:\n%s", joined)
+	}
+}
+
+func TestPerTargetGroupsSharedValues(t *testing.T) {
+	c := testCfg()
+	// Two targets with the same override share a single class, and the global
+	// leaf still exists for the third (un-overridden) target.
+	c.Targets = []string{"192.168.1.50", "192.168.1.51", "192.168.1.52"}
+	ov := Impairment{LatencyMS: 10}
+	c.PerTarget = map[string]Impairment{"192.168.1.50": ov, "192.168.1.51": ov}
+	leaves := leafPlan(&c)
+	if len(leaves) != 2 {
+		t.Fatalf("leaf plan = %+v, want 2 leaves (one shared override + global)", leaves)
+	}
+	if len(leaves[0].targets) != 2 || leaves[0].classID != 10 {
+		t.Fatalf("override leaf = %+v, want class 10 with both targets", leaves[0])
+	}
+	if leaves[1].classID != 11 || len(leaves[1].targets) != 1 || leaves[1].targets[0] != "192.168.1.52" {
+		t.Fatalf("global leaf = %+v, want class 11 with .52", leaves[1])
+	}
+}
+
+func TestPerTargetAllOverriddenOmitsGlobalLeaf(t *testing.T) {
+	c := testCfg()
+	c.Targets = []string{"192.168.1.50", "192.168.1.51"}
+	c.PerTarget = map[string]Impairment{
+		"192.168.1.50": {LatencyMS: 10},
+		"192.168.1.51": {LatencyMS: 20},
+	}
+	leaves := leafPlan(&c)
+	if len(leaves) != 2 {
+		t.Fatalf("leaf plan = %+v, want only the two overridden leaves", leaves)
+	}
+	for _, lf := range leaves {
+		if len(lf.targets) == 0 {
+			t.Fatalf("empty trailing leaf emitted: %+v", leaves)
+		}
+	}
+}
+
+func TestPerTargetValidation(t *testing.T) {
+	c := testCfg()
+	c.PerTarget = map[string]Impairment{"not-an-ip": {LatencyMS: 10}}
+	if err := c.Validate(); err == nil {
+		t.Error("expected validation error for an invalid per-target IP")
+	}
+	c = testCfg()
+	c.PerTarget = map[string]Impairment{"192.168.1.50": {LossPct: 60, DupPct: 50}}
+	if err := c.Validate(); err == nil {
+		t.Error("expected validation error for per-target loss+dup over 100%")
+	}
+}
+
 func TestBlockRules(t *testing.T) {
 	c := testCfg()
 	rules := blockRules(&c)

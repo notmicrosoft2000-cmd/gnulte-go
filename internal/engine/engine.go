@@ -59,6 +59,33 @@ const (
 	ModeBlock
 )
 
+// Impairment is one set of netem parameters: the values a shaping class applies
+// together. The global Config fields and every --per-target override resolve to
+// one of these, so the tc-tree builder has a single shape to work from.
+type Impairment struct {
+	LatencyMS     int `json:"latency"`
+	JitterMS      int `json:"jitter"`
+	LossPct       int `json:"loss"`
+	DupPct        int `json:"dup"`
+	ReorderPct    int `json:"reorder"`
+	BandwidthKbps int `json:"bandwidth"`
+}
+
+// Validate applies the numeric guards Config.Validate enforces: no negatives,
+// no percentage over 100, and loss+duplicate+reorder summing to 100 or less.
+func (p Impairment) Validate() error {
+	if p.LatencyMS < 0 || p.JitterMS < 0 || p.LossPct < 0 || p.DupPct < 0 || p.ReorderPct < 0 || p.BandwidthKbps < 0 {
+		return errors.New("impairment parameters cannot be negative")
+	}
+	if p.LossPct > 100 || p.DupPct > 100 || p.ReorderPct > 100 {
+		return errors.New("loss/duplicate/reorder cannot exceed 100%")
+	}
+	if p.LossPct+p.DupPct+p.ReorderPct > 100 {
+		return errors.New("loss+duplicate+reorder must total 100% or less")
+	}
+	return nil
+}
+
 // Config is the fully-resolved traffic test configuration.
 type Config struct {
 	Interface  string
@@ -73,6 +100,11 @@ type Config struct {
 	DupPct        int
 	ReorderPct    int
 	BandwidthKbps int
+
+	// PerTarget overrides the impairment values for individual target IPs
+	// (see --per-target). A target without an entry uses the global values
+	// above; overridden targets get their own tc class + netem leaf.
+	PerTarget map[string]Impairment
 
 	CaptureFile string // "" = none, "-" = stdout
 	Quiet       bool
@@ -107,17 +139,30 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("invalid target IP %q", t)
 		}
 	}
-	if c.LatencyMS < 0 || c.JitterMS < 0 || c.LossPct < 0 || c.DupPct < 0 || c.ReorderPct < 0 {
-		return errors.New("impairment parameters cannot be negative")
+	if err := c.global().Validate(); err != nil {
+		return err
 	}
-	if c.LossPct > 100 || c.DupPct > 100 || c.ReorderPct > 100 {
-		return errors.New("loss/duplicate/reorder cannot exceed 100%")
-	}
-	total := c.LossPct + c.DupPct + c.ReorderPct
-	if total > 100 {
-		return errors.New("loss+duplicate+reorder must total 100% or less")
+	for ip, ov := range c.PerTarget {
+		if net.ParseIP(ip) == nil {
+			return fmt.Errorf("invalid per-target IP %q", ip)
+		}
+		if err := ov.Validate(); err != nil {
+			return fmt.Errorf("per-target %s: %w", ip, err)
+		}
 	}
 	return nil
+}
+
+// global collapses the flat Config fields into an Impairment.
+func (c *Config) global() Impairment {
+	return Impairment{
+		LatencyMS:     c.LatencyMS,
+		JitterMS:      c.JitterMS,
+		LossPct:       c.LossPct,
+		DupPct:        c.DupPct,
+		ReorderPct:    c.ReorderPct,
+		BandwidthKbps: c.BandwidthKbps,
+	}
 }
 
 // DepsCheck lists problems preventing a test (empty = ready).
@@ -154,25 +199,79 @@ func requireRoot() error {
 }
 
 // netemArgs builds the netem sub-options (mirrors Bash NETEM_ARGS).
-func netemArgs(c *Config) []string {
-	a := []string{"delay", fmt.Sprintf("%dms", c.LatencyMS), fmt.Sprintf("%dms", c.JitterMS)}
-	if c.LossPct > 0 {
-		a = append(a, "loss", fmt.Sprintf("%d%%", c.LossPct))
+func netemArgs(c *Config) []string { return netemArgsFor(c.global()) }
+
+func netemArgsFor(p Impairment) []string {
+	a := []string{"delay", fmt.Sprintf("%dms", p.LatencyMS), fmt.Sprintf("%dms", p.JitterMS)}
+	if p.LossPct > 0 {
+		a = append(a, "loss", fmt.Sprintf("%d%%", p.LossPct))
 	}
-	if c.DupPct > 0 {
-		a = append(a, "duplicate", fmt.Sprintf("%d%%", c.DupPct))
+	if p.DupPct > 0 {
+		a = append(a, "duplicate", fmt.Sprintf("%d%%", p.DupPct))
 	}
-	if c.ReorderPct > 0 {
-		a = append(a, "reorder", fmt.Sprintf("%d%%", c.ReorderPct), "gap", "5")
+	if p.ReorderPct > 0 {
+		a = append(a, "reorder", fmt.Sprintf("%d%%", p.ReorderPct), "gap", "5")
 	}
 	return a
 }
 
-func rate(c *Config) string {
-	if c.BandwidthKbps <= 0 {
+func rate(c *Config) string { return rateFor(c.global()) }
+
+func rateFor(p Impairment) string {
+	if p.BandwidthKbps <= 0 {
 		return "1gbit"
 	}
-	return fmt.Sprintf("%dkbit", c.BandwidthKbps)
+	return fmt.Sprintf("%dkbit", p.BandwidthKbps)
+}
+
+// shapeLeaf is one shaping class in the tc tree: the impairment it applies and
+// the targets routed into it. Targets with a --per-target override get their
+// own leaf; the rest share the global leaf.
+type shapeLeaf struct {
+	classID int
+	params  Impairment
+	targets []string
+}
+
+// leafPlan groups the targets into shaping leaves. Override leaves come first
+// (so their filters win the tc prio race) and the global leaf comes last. With
+// no overrides this is exactly one global leaf, so the tree is byte-for-byte
+// what it always was.
+func leafPlan(c *Config) []shapeLeaf {
+	global := c.global()
+	if len(c.PerTarget) == 0 {
+		return []shapeLeaf{{classID: 10, params: global, targets: append([]string(nil), c.Targets...)}}
+	}
+	type group struct {
+		params  Impairment
+		targets []string
+	}
+	var groups []group
+	index := map[Impairment]int{} // Impairment is comparable
+	var rest []string
+	for _, t := range c.Targets {
+		ov, ok := c.PerTarget[t]
+		if !ok {
+			rest = append(rest, t)
+			continue
+		}
+		if i, seen := index[ov]; seen {
+			groups[i].targets = append(groups[i].targets, t)
+			continue
+		}
+		index[ov] = len(groups)
+		groups = append(groups, group{params: ov, targets: []string{t}})
+	}
+	leaves := make([]shapeLeaf, 0, len(groups)+1)
+	cid := 10
+	for _, g := range groups {
+		leaves = append(leaves, shapeLeaf{classID: cid, params: g.params, targets: g.targets})
+		cid++
+	}
+	if len(rest) > 0 {
+		leaves = append(leaves, shapeLeaf{classID: cid, params: global, targets: rest})
+	}
+	return leaves
 }
 
 // tcTreeCommands lists, in order, the commands that build the per-target
@@ -182,28 +281,39 @@ func tcTreeCommands(c *Config, iface string) [][]string {
 		{"qdisc", "del", "dev", iface, "root"},
 		{"qdisc", "add", "dev", iface, "root", "handle", "1:", "htb", "default", "999"},
 		{"class", "add", "dev", iface, "parent", "1:", "classid", "1:999", "htb", "rate", "1gbit", "ceil", "1gbit"},
-		{"class", "add", "dev", iface, "parent", "1:", "classid", "1:10", "htb", "rate", rate(c), "ceil", rate(c)},
 	}
-	na := netemArgs(c)
-	qdisc := []string{"qdisc", "add", "dev", iface, "parent", "1:10", "handle", "10:", "netem"}
-	cmds = append(cmds, append(qdisc, na...))
-	for _, tp := range c.Targets {
-		cmds = append(cmds,
-			[]string{"filter", "add", "dev", iface, "parent", "1:", "protocol", "ip", "prio", "1", "u32", "match", "ip", "dst", tp + "/32", "flowid", "1:10"},
-			[]string{"filter", "add", "dev", iface, "parent", "1:", "protocol", "ip", "prio", "1", "u32", "match", "ip", "src", tp + "/32", "flowid", "1:10"},
-		)
+	for i, lf := range leafPlan(c) {
+		cid := fmt.Sprintf("1:%d", lf.classID)
+		handle := fmt.Sprintf("%d:", lf.classID)
+		r := rateFor(lf.params)
+		cmds = append(cmds, []string{"class", "add", "dev", iface, "parent", "1:", "classid", cid, "htb", "rate", r, "ceil", r})
+		qdisc := []string{"qdisc", "add", "dev", iface, "parent", cid, "handle", handle, "netem"}
+		cmds = append(cmds, append(qdisc, netemArgsFor(lf.params)...))
+		prio := strconv.Itoa(i + 1)
+		for _, tp := range lf.targets {
+			cmds = append(cmds,
+				[]string{"filter", "add", "dev", iface, "parent", "1:", "protocol", "ip", "prio", prio, "u32", "match", "ip", "dst", tp + "/32", "flowid", cid},
+				[]string{"filter", "add", "dev", iface, "parent", "1:", "protocol", "ip", "prio", prio, "u32", "match", "ip", "src", tp + "/32", "flowid", cid},
+			)
+		}
 	}
 	return cmds
 }
 
-// tcChangeCommands lists the live-update commands (class change + netem change).
+// tcChangeCommands lists the live-update commands (class change + netem change)
+// for every leaf, so a phase update re-shapes overridden and global targets
+// alike without tearing the tree down.
 func tcChangeCommands(c *Config, iface string) [][]string {
-	cmds := [][]string{
-		{"class", "change", "dev", iface, "parent", "1:", "classid", "1:10", "htb", "rate", rate(c), "ceil", rate(c)},
+	var cmds [][]string
+	for _, lf := range leafPlan(c) {
+		cid := fmt.Sprintf("1:%d", lf.classID)
+		handle := fmt.Sprintf("%d:", lf.classID)
+		r := rateFor(lf.params)
+		cmds = append(cmds, []string{"class", "change", "dev", iface, "parent", "1:", "classid", cid, "htb", "rate", r, "ceil", r})
+		qdisc := []string{"qdisc", "change", "dev", iface, "parent", cid, "handle", handle, "netem"}
+		cmds = append(cmds, append(qdisc, netemArgsFor(lf.params)...))
 	}
-	na := netemArgs(c)
-	qdisc := []string{"qdisc", "change", "dev", iface, "parent", "1:10", "handle", "10:", "netem"}
-	return append(cmds, append(qdisc, na...))
+	return cmds
 }
 
 // blockRules returns FORWARD-chain DROP match fragments for block mode,

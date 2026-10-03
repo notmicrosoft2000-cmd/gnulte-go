@@ -50,6 +50,11 @@ type Stats struct {
 	Max     int64
 	Last    RTT
 	Samples []int
+	// LossSeries is one entry per attempt back to the history bound: the
+	// loss percentage of that sample (0 on a reply, 100 on a timeout). It
+	// drives the dashboard's loss strip and the session summary's run-length
+	// distribution; Samples alone cannot reconstruct where the drops fell.
+	LossSeries []int
 }
 
 func (st *Stats) avg() int64 {
@@ -248,6 +253,11 @@ type Monitor struct {
 	// from the monitor's own loop; read under mu in renderDashboard.
 	netem string
 
+	// phase is the scenario phase currently in force ("" when no scenario is
+	// running). Written via SetPhase from the OnTick hook; read under mu in
+	// renderDashboard.
+	phase string
+
 	// Results is filled once Run returns.
 	Results []Result
 
@@ -259,6 +269,9 @@ type Monitor struct {
 func (m *Monitor) trimHistory(st *Stats) {
 	if m.History > 0 && len(st.Samples) > m.History {
 		st.Samples = st.Samples[len(st.Samples)-m.History:]
+	}
+	if m.History > 0 && len(st.LossSeries) > m.History {
+		st.LossSeries = st.LossSeries[len(st.LossSeries)-m.History:]
 	}
 }
 
@@ -299,9 +312,18 @@ func (m *Monitor) SetNetem(line string) {
 	m.mu.Unlock()
 }
 
+// SetPhase files the scenario phase now in force so the dashboard can show
+// which step of the script is running. Passing "" clears it.
+func (m *Monitor) SetPhase(line string) {
+	m.mu.Lock()
+	m.phase = line
+	m.mu.Unlock()
+}
+
 func (m *Monitor) publish(ip string, st *Stats) {
 	cp := *st
 	cp.Samples = append([]int(nil), st.Samples...)
+	cp.LossSeries = append([]int(nil), st.LossSeries...)
 	m.Results = append(m.Results, Result{IP: ip, Stats: cp})
 }
 
@@ -507,6 +529,8 @@ func (m *Monitor) runSingle(ctx context.Context, ip string) error {
 		now := time.Now().Format("15:04:05")
 		if !ok {
 			st.Drops++
+			st.LossSeries = append(st.LossSeries, 100)
+			m.trimHistory(st)
 			plain := fmt.Sprintf("  #%03d [%s] ✗ %-16s %10s  %s  %s",
 				seq, now, ip, "unreachable", "timeout",
 				fmt.Sprintf("(no reply in %ds)", int(m.timeout()/time.Second)))
@@ -530,6 +554,7 @@ func (m *Monitor) runSingle(ctx context.Context, ip string) error {
 				st.Max = int64(rtt)
 			}
 			st.Samples = append(st.Samples, rtt)
+			st.LossSeries = append(st.LossSeries, 0)
 			m.trimHistory(st)
 			if !m.Quiet {
 				if note == "" {
@@ -695,10 +720,12 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 						stats[i].Max = int64(rtt)
 					}
 					stats[i].Samples = append(stats[i].Samples, rtt)
-					m.trimHistory(stats[i])
+					stats[i].LossSeries = append(stats[i].LossSeries, 0)
 				} else {
 					stats[i].Drops++
+					stats[i].LossSeries = append(stats[i].LossSeries, 100)
 				}
+				m.trimHistory(stats[i])
 				m.mu.Unlock()
 				// Beep every sample of the host the arrows have selected,
 				// pitched by its latency — the sound mirrors what the
@@ -830,8 +857,12 @@ func (m *Monitor) renderDashboard(stats []*Stats, lastNote []string, keyboard, v
 		if sp := ux.SparkRTT(st.Samples, 30); sp != "" {
 			spark = dim(sp)
 		}
-		lines = append(lines, fmt.Sprintf("      %-16s min %s · max %s · jitter ±%dms %s %s",
-			"", mn, mx, st.jitter(), tcpNote, spark))
+		lossSpark := ""
+		if sp := ux.SparkLoss(st.LossSeries, 30); sp != "" {
+			lossSpark = dim("loss " + sp)
+		}
+		lines = append(lines, fmt.Sprintf("      %-16s min %s · max %s · jitter ±%dms %s %s %s",
+			"", mn, mx, st.jitter(), tcpNote, spark, lossSpark))
 	}
 	// Session footer: elapsed time, running totals across the targets, and the
 	// latest live shaping telemetry the OnTick hook filed (netem live · …).
@@ -853,6 +884,9 @@ func (m *Monitor) renderDashboard(stats []*Stats, lastNote []string, keyboard, v
 	lines = append(lines, dim(sess))
 	if m.netem != "" {
 		lines = append(lines, dim("  netem live · "+m.netem))
+	}
+	if m.phase != "" {
+		lines = append(lines, dim("  scenario · "+m.phase))
 	}
 	lines = append(lines, fmt.Sprintf("  [%s]", time.Now().Format("15:04:05")))
 

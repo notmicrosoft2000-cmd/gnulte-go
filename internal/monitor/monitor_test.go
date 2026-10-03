@@ -71,3 +71,47 @@ func TestRecTrimsLogToCap(t *testing.T) {
 		t.Errorf("last line = %q, want %q", m.Log[len(m.Log)-1], "newest")
 	}
 }
+
+// trimHistory bounds the latency samples and the loss strip together; if the
+// loss series is not trimmed in lock-step the dashboard's loss strip and the
+// run-length rollup grow without limit over a long session.
+func TestTrimHistoryTrimsSamplesAndLossTogether(t *testing.T) {
+	m := &Monitor{History: 3}
+	st := &Stats{
+		Samples:    []int{1, 2, 3, 4, 5},
+		LossSeries: []int{0, 100, 0, 100, 100},
+	}
+	m.trimHistory(st)
+	if len(st.Samples) != 3 || st.Samples[0] != 3 || st.Samples[2] != 5 {
+		t.Errorf("samples = %v, want the tail [3 4 5]", st.Samples)
+	}
+	if len(st.LossSeries) != 3 || st.LossSeries[0] != 0 || st.LossSeries[2] != 100 {
+		t.Errorf("loss series = %v, want the tail [0 100 100]", st.LossSeries)
+	}
+	// History 0 disables trimming entirely.
+	m2 := &Monitor{}
+	st2 := &Stats{Samples: []int{1, 2}, LossSeries: []int{0, 0}}
+	m2.trimHistory(st2)
+	if len(st2.Samples) != 2 || len(st2.LossSeries) != 2 {
+		t.Errorf("History=0 should not trim: %v / %v", st2.Samples, st2.LossSeries)
+	}
+}
+
+// publish hands the report a deep copy; if the loss series were not copied the
+// live sampler would keep mutating the slice the report reads.
+func TestPublishCopiesLossSeries(t *testing.T) {
+	m := &Monitor{}
+	st := &Stats{Samples: []int{1, 2}, LossSeries: []int{0, 100}, Count: 1, Drops: 1}
+	m.publish("10.0.0.1", st)
+	if len(m.Results) != 1 {
+		t.Fatalf("results = %v", m.Results)
+	}
+	if got := m.Results[0].Stats.LossSeries; len(got) != 2 || got[1] != 100 {
+		t.Fatalf("published loss series = %v", got)
+	}
+	st.LossSeries[0] = 77
+	st.Samples[0] = 88
+	if m.Results[0].Stats.LossSeries[0] != 0 || m.Results[0].Stats.Samples[0] != 1 {
+		t.Fatal("publish aliased the source slices")
+	}
+}

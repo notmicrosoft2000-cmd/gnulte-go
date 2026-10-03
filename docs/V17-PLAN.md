@@ -141,7 +141,7 @@ painting the screen, and a non-terminal stdout gets incremental plain lines
 instead of the live view. Wired into build/install/uninstall, the README tool
 table and the Unplugged bullet list.
 
-### 16.12 — Engine scenarios
+### 16.12 — Engine scenarios  — **SHIPPED** (v16.12)
 - **JSON scenario scripts**: phases `{duration, latency, jitter, loss, dup, reorder, bandwidth, wobble?, burst?}` advanced on a clock; live dashboard shows current phase; `--scenario file.json`.
 - **Wobble** (sawtooth/sine latency) and **burst loss** (N-second windows with elevated loss) generators.
 - **`--per-target profile.json`** mapping ip→override on top of global params.
@@ -150,6 +150,23 @@ table and the Unplugged bullet list.
 - **TUI sparklines**: rolling latency/loss strip charts in the dashboard.
 - Tests: scenario clock with fake time, parameter application, summary math, report contains summary.
 - Touch: internal/engine, cmd/gnulte, internal/reportdir.
+
+**As built:** new pure `internal/scenario` (`Parse`/`Load`/`Validate`, `At(elapsed)`
+clock, sine/sawtooth `Wobble`, windowed `Burst`, `Describe`) and
+`internal/profiles` (`Dir`/`Path`/`Load`/`Save`/`Parse`/`List`, name-guarded to
+stay inside the folder). The profile folder is `~/.config/gnulte-go/profiles`
+(the toolkit keeps its `gnulte-go` config dir rather than the bare `gnulte` the
+plan text assumed). `engine` gains the shared exported `Impairment` type (the
+global fields and every override collapse into it), `Config.PerTarget`, and a
+`leafPlan` that puts override classes first (lower `tc` prio) and the global
+class last — with no overrides the tree is byte-for-byte unchanged. `cmd/gnulte`
+adds `--scenario`, `--per-target` (a partial JSON override merged over the
+global base), `--profile save:NAME`, and a folder-aware `--list-profiles`; a
+scenario tick calls `Session.UpdateParams` from the phase clock and sets the
+dashboard phase. New `cmd/gnulte/summary.go` computes the console/report rollup
+(nearest-rank p95, population σ, run-length loss buckets, rough E-model MOS).
+Monitor records a parallel `LossSeries` (0/100 per attempt) for the loss
+sparkline and run-length distribution, both trimmed with the latency history.
 
 ### 16.13 — Watch history (gnulte-lan)
 - `--json` live feed (baseline + per-second host/alert events; narrative to stderr — same pattern as gnulte-scan).

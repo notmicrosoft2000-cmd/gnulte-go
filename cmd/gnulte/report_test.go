@@ -35,6 +35,10 @@ func TestSessionHTMLStructure(t *testing.T) {
 	html := sessionHTML(log, res, start, end)
 	for _, want := range []string{
 		"<section><h2>Target summary</h2>",
+		"<h2>Session summary</h2>",
+		"<th>P95</th>",
+		"MOS",
+		"p95",
 		"Full log history",
 		"192.168.1.2", "192.168.1.10",
 		`class="mono">192.168.1.2</td>`,

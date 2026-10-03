@@ -90,10 +90,10 @@ pre{background:#0a0e14;border:1px solid var(--edge);border-radius:8px;
 // targetStat is the per-target headline set, computed from raw counters so the
 // report does not depend on unexported monitor helpers.
 type targetStat struct {
-	att, drops    int
-	min, max, avg int64
-	loss          float64
-	hasData       bool
+	att, drops         int
+	min, max, avg, p95 int64
+	loss               float64
+	hasData            bool
 }
 
 func collectStat(st monitor.Stats) targetStat {
@@ -108,6 +108,7 @@ func collectStat(st monitor.Stats) targetStat {
 		ts.hasData = true
 		ts.min, ts.max = st.Min, st.Max
 		ts.avg = st.Total / int64(st.Count)
+		ts.p95 = p95Of(st.Samples)
 		ts.loss = float64(st.Drops) * 100 / float64(ts.att)
 	}
 	return ts
@@ -183,6 +184,10 @@ func sessionHTML(log []string, res []monitor.Result, start, end time.Time) strin
 	b.WriteString(`<p class="legal">authorized network testing only · Neptune Productions · connectivity probed via ICMP echo with TCP-connect fallback on filtered targets</p>`)
 	b.WriteString(`</section>` + "\n")
 
+	if len(res) > 0 {
+		b.WriteString(sessionSummaryHTML(Summarize(res)))
+	}
+
 	if len(res) == 0 {
 		b.WriteString(`<p class="empty">No target statistics captured — the session was too short, or every probe timed out.</p>` + "\n")
 	} else {
@@ -195,12 +200,12 @@ func sessionHTML(log []string, res []monitor.Result, start, end time.Time) strin
 			return ipLess(res[order[a]].IP, res[order[b]].IP)
 		})
 		b.WriteString("<section><h2>Target summary</h2>\n<table>\n<thead>\n")
-		b.WriteString(`<tr><th>#</th><th>Target</th><th>Samples</th><th>Min</th><th>Max</th><th>Avg</th><th>Loss</th><th>Status</th></tr>` + "\n</thead><tbody>\n")
+		b.WriteString(`<tr><th>#</th><th>Target</th><th>Samples</th><th>Min</th><th>Avg</th><th>P95</th><th>Max</th><th>Loss</th><th>Status</th></tr>` + "\n</thead><tbody>\n")
 		for i, idx := range order {
 			r := res[idx]
 			ts := collectStat(r.Stats)
-			txt := fmt.Sprintf("<tr><td>%d</td><td class=\"mono\">%s</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
-				i+1, htmlEscape(r.IP), ts.att, ms(ts.min), ms(ts.max), ms(ts.avg), pct(ts.loss), ts.pill())
+			txt := fmt.Sprintf("<tr><td>%d</td><td class=\"mono\">%s</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
+				i+1, htmlEscape(r.IP), ts.att, ms(ts.min), ms(ts.avg), ms(ts.p95), ms(ts.max), pct(ts.loss), ts.pill())
 			b.WriteString(txt)
 		}
 		b.WriteString(`</tbody></table></section>` + "\n")
@@ -229,6 +234,29 @@ func sessionHTML(log []string, res []monitor.Result, start, end time.Time) strin
 	return b.String()
 }
 
+// sessionSummaryHTML renders the whole-run rollup as a chips row.
+func sessionSummaryHTML(s SessionSummary) string {
+	var b strings.Builder
+	b.WriteString(`<section><h2>Session summary</h2>` + "\n")
+	b.WriteString(`<div class="stats">`)
+	b.WriteString(fmt.Sprintf(`<span>targets <b>%d</b></span>`, s.Targets))
+	b.WriteString(fmt.Sprintf(`<span>attempts <b>%d</b></span>`, s.Attempts))
+	b.WriteString(fmt.Sprintf(`<span>lost <b>%d (%.1f%%)</b></span>`, s.Lost, s.LossPct))
+	if s.Samples > 0 {
+		b.WriteString(fmt.Sprintf(`<span>min <b>%dms</b></span>`, s.Min))
+		b.WriteString(fmt.Sprintf(`<span>avg <b>%dms</b></span>`, s.Avg))
+		b.WriteString(fmt.Sprintf(`<span>p95 <b>%dms</b></span>`, s.P95))
+		b.WriteString(fmt.Sprintf(`<span>max <b>%dms</b></span>`, s.Max))
+		b.WriteString(fmt.Sprintf(`<span>σ <b>%.1fms</b></span>`, s.StdDev))
+	}
+	b.WriteString(fmt.Sprintf(`<span>MOS <b>%.1f</b> <em>(rough)</em></span>`, s.MOS))
+	if runs := s.lossRunText(); runs != "" {
+		b.WriteString(fmt.Sprintf(`<span>loss runs <b>%s</b></span>`, htmlEscape(runs)))
+	}
+	b.WriteString(`</div>` + "\n</section>" + "\n")
+	return b.String()
+}
+
 // targetCard renders one target's section: a status pill by its IP, the SVG
 // latency timeline, and the headline statistics.
 func targetCard(r monitor.Result) string {
@@ -242,6 +270,7 @@ func targetCard(r monitor.Result) string {
 	b.WriteString(fmt.Sprintf(`<span>min <b>%s</b></span>`, ms(ts.min)))
 	b.WriteString(fmt.Sprintf(`<span>max <b>%s</b></span>`, ms(ts.max)))
 	b.WriteString(fmt.Sprintf(`<span>avg <b>%s</b></span>`, ms(ts.avg)))
+	b.WriteString(fmt.Sprintf(`<span>p95 <b>%s</b></span>`, ms(ts.p95)))
 	b.WriteString(fmt.Sprintf(`<span>loss <b>%s</b></span>`, pct(ts.loss)))
 	b.WriteString(`</div>` + "\n</section>" + "\n")
 	return b.String()

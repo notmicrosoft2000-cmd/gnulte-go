@@ -38,6 +38,39 @@ func SparkRTT(samples []int, maxWidth int) string {
 	return string(out)
 }
 
+// SparkLoss renders a per-sample loss series (each entry a percentage, 0 on a
+// successful reply) as a compact strip: a middle dot when nothing was lost and
+// taller blocks as loss climbs, so a burst of drops stands out at a glance.
+func SparkLoss(series []int, maxWidth int) string {
+	if maxWidth <= 0 || len(series) == 0 {
+		return ""
+	}
+	start := 0
+	if len(series) > maxWidth {
+		start = len(series) - maxWidth
+	}
+	out := make([]rune, 0, len(series)-start)
+	for i := start; i < len(series); i++ {
+		out = append(out, lossLevel(series[i]))
+	}
+	return string(out)
+}
+
+func lossLevel(v int) rune {
+	switch {
+	case v <= 0:
+		return '·'
+	case v < 25:
+		return '▁'
+	case v < 50:
+		return '▃'
+	case v < 75:
+		return '▅'
+	default:
+		return '█'
+	}
+}
+
 func sparkLevel(v int) rune {
 	switch {
 	case v < 0:

@@ -47,6 +47,176 @@ type Record struct {
 	FirstSeen string `json:"first_seen,omitempty"` // RFC3339
 	LastSeen string `json:"last_seen,omitempty"`   // RFC3339
 	IsSelf   bool   `json:"is_self,omitempty"`
+
+	// The fields below are the "sweeper memory": what the last deep scan saw
+	// and how long the host has been reachable across sweeps.
+	Ports     []int    `json:"ports,omitempty"`     // last deep-scan TCP ports
+	Banners   []string `json:"banners,omitempty"`   // last deep-scan banners
+	OS        string   `json:"os,omitempty"`        // last OS guess
+	Sightings int      `json:"sightings,omitempty"` // sweeps that saw this host
+	AwakeSec  int      `json:"awake_sec,omitempty"` // accumulated reachable seconds
+}
+
+// MaxAwakeGap is the longest gap between sightings still credited as awake
+// time. A host seen again within this window is treated as continuously up; a
+// longer absence (or a first sighting) credits nothing, so a device that
+// sleeps overnight is not reported as having been up all night.
+const MaxAwakeGap = 10 * time.Minute
+
+// PortChange is the port churn observed for one host between two sweeps.
+type PortChange struct {
+	IP       string
+	Host     string
+	Appeared []int
+	Closed   []int
+}
+
+// Empty reports whether the change carries no port movement.
+func (c PortChange) Empty() bool { return len(c.Appeared) == 0 && len(c.Closed) == 0 }
+
+// PortDelta returns the ports present in cur but not prev (appeared) and those
+// present in prev but not cur (closed), each ascending and duplicate-free.
+func PortDelta(prev, cur []int) (appeared, closed []int) {
+	p, c := intSet(prev), intSet(cur)
+	for n := range c {
+		if !p[n] {
+			appeared = append(appeared, n)
+		}
+	}
+	for n := range p {
+		if !c[n] {
+			closed = append(closed, n)
+		}
+	}
+	sort.Ints(appeared)
+	sort.Ints(closed)
+	return appeared, closed
+}
+
+func intSet(ns []int) map[int]bool {
+	m := make(map[int]bool, len(ns))
+	for _, n := range ns {
+		m[n] = true
+	}
+	return m
+}
+
+func sortedUnique(ns []int) []int {
+	cp := append([]int(nil), ns...)
+	sort.Ints(cp)
+	if len(cp) == 0 {
+		return []int{}
+	}
+	out := cp[:1]
+	for _, n := range cp[1:] {
+		if n != out[len(out)-1] {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// Sighting is one scan observation of a host: the identity fields of a Record
+// plus the deep-scan detail (ports, banners, OS) the store remembers.
+type Sighting struct {
+	Record
+	Ports   []int
+	Banners []string
+	OS      string
+}
+
+// RememberTo folds a batch of sightings into the store and saves once. For
+// each host it counts the sighting, credits awake time for a plausible gap
+// since the previous one, refreshes the remembered ports/banners/OS, and
+// returns the port churn since the host's previous deep scan. A host whose
+// previous record carried no port set establishes a baseline silently; only a
+// movement against a known baseline is reported.
+func RememberTo(path string, recs []Record, sightings []Sighting, now time.Time) ([]Record, []PortChange, error) {
+	ts := now.UTC().Format(time.RFC3339)
+	index := make(map[string]int, len(recs))
+	for i := range recs {
+		index[recs[i].IP] = i
+	}
+	var changes []PortChange
+	for _, s := range sightings {
+		i, ok := index[s.IP]
+		if !ok {
+			rec := s.Record
+			rec.FirstSeen = ts
+			rec.LastSeen = ts
+			rec.Sightings = 1
+			if s.Ports != nil {
+				rec.Ports = sortedUnique(s.Ports)
+			}
+			rec.Banners = append([]string(nil), s.Banners...)
+			if s.OS != "" {
+				rec.OS = s.OS
+			}
+			recs = append(recs, rec)
+			index[s.IP] = len(recs) - 1
+			continue
+		}
+		rec := &recs[i]
+		if rec.FirstSeen == "" {
+			rec.FirstSeen = ts
+		}
+		if last, err := time.Parse(time.RFC3339, rec.LastSeen); err == nil {
+			if gap := now.Sub(last); gap > 0 && gap <= MaxAwakeGap {
+				rec.AwakeSec += int(gap / time.Second)
+			}
+		}
+		rec.Sightings++
+		if s.MAC != "" {
+			rec.MAC = s.MAC
+		}
+		if s.Vendor != "" {
+			rec.Vendor = s.Vendor
+		}
+		if s.Host != "" {
+			rec.Host = s.Host
+		}
+		if s.Kind != "" {
+			rec.Kind = s.Kind
+		}
+		rec.IsSelf = s.IsSelf
+		if s.Ports != nil {
+			appeared, closed := PortDelta(rec.Ports, s.Ports)
+			if rec.Ports != nil && (len(appeared) > 0 || len(closed) > 0) {
+				changes = append(changes, PortChange{IP: rec.IP, Host: rec.Host, Appeared: appeared, Closed: closed})
+			}
+			rec.Ports = sortedUnique(s.Ports)
+		}
+		if s.Banners != nil {
+			rec.Banners = append([]string(nil), s.Banners...)
+		}
+		if s.OS != "" {
+			rec.OS = s.OS
+		}
+		rec.LastSeen = ts
+	}
+	if err := SaveTo(path, recs); err != nil {
+		return recs, nil, err
+	}
+	return recs, changes, nil
+}
+
+// FormatAwake renders accumulated awake seconds as "6h12m" (or "45m", "3d2h");
+// an empty string means the host has not been seen twice in quick succession.
+func FormatAwake(sec int) string {
+	if sec <= 0 {
+		return ""
+	}
+	d := sec / 86400
+	h := (sec % 86400) / 3600
+	m := (sec % 3600) / 60
+	switch {
+	case d > 0:
+		return fmt.Sprintf("%dd%dh", d, h)
+	case h > 0:
+		return fmt.Sprintf("%dh%dm", h, m)
+	default:
+		return fmt.Sprintf("%dm", m)
+	}
 }
 
 // Path is the shared device file, e.g. ~/.config/gnulte-go/devices.json.

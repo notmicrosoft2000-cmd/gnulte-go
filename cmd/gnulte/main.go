@@ -130,6 +130,8 @@ func main() {
 		exportArg   = flag.String("export", "", "stream per-second results to a CSV file")
 		noteArg     = flag.String("note", "", "label this session (shown in the console header and the report)")
 		dupcheckArg = flag.Bool("dupcheck", false, "scan the LAN for duplicate IPs / ARP conflicts and exit")
+		compareArg  = flag.String("compare", "", "diff two -j report JSON snapshots (A; B follows as the next argument) and exit")
+		compareHTML = flag.String("compare-html", "", "with --compare, also write the comparison as an HTML report to FILE")
 		reportFile  = flag.String("report", "", "write the post-test HTML report (full log history) to FILE")
 		noReport    = flag.Bool("no-report", false, "skip writing the post-test HTML report")
 		probePorts  = flag.String("probe-ports", "", "TCP fallback probe ports for ICMP-filtered targets, e.g. 443,80,53")
@@ -198,6 +200,12 @@ func main() {
 	}
 	if *resetSafe {
 		if err := safety.Reset(); err != nil {
+			fatal(err)
+		}
+		return
+	}
+	if *compareArg != "" {
+		if err := runCompare(*compareArg, flag.Args(), *compareHTML); err != nil {
 			fatal(err)
 		}
 		return

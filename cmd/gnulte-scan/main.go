@@ -35,6 +35,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -42,6 +43,7 @@ import (
 
 	"gnulte-go/internal/discover"
 	"gnulte-go/internal/ident"
+	"gnulte-go/internal/inventory"
 	"gnulte-go/internal/netutil"
 	"gnulte-go/internal/out"
 	"gnulte-go/internal/reportdir"
@@ -95,6 +97,7 @@ func main() {
 		reportArg   = flag.String("report", "", "write the post-test HTML report (full log history) to FILE")
 		noReport    = flag.Bool("no-report", false, "skip writing the post-test HTML report")
 		watchArg    = flag.Int("watch", 0, "re-scan every N seconds and mark what changed (NEW/GONE/CHANGED)")
+		ouiFile     = flag.String("oui-file", "", "merge an operator CSV vendor table (prefix,vendor) over the built-in OUI data")
 		showDocs    = flag.Bool("docs", false, "print the safety documents and exit")
 		resetSafe   = flag.Bool("reset-safety", false, "remove the acceptance record and exit")
 		showVer     = flag.Bool("version", false, "print version and exit")
@@ -159,6 +162,15 @@ func main() {
 			fatal(err)
 		}
 		return
+	}
+	if *ouiFile != "" {
+		n, err := ident.LoadOUIFile(*ouiFile)
+		if err != nil {
+			fatal(fmt.Errorf("--oui-file: %w", err))
+		}
+		if !*quiet {
+			fmt.Fprintf(ux.Out, "  OUI table: merged %d vendor prefix(es) from %s\n", n, *ouiFile)
+		}
 	}
 
 	// Which flags the operator typed (saved settings only fill the rest).
@@ -359,6 +371,10 @@ func main() {
 	}
 	out.SortByIP(rows)
 
+	// Fold the sweep into the shared device store and surface any port that
+	// appeared or closed since the previous run (stderr + report).
+	rememberSweep(rows, time.Now())
+
 	// The --watch re-scanner (v15 "Live Interconnection"): a lean sweep that
 	// re-discovers the subnet so the delta engine can mark NEW/GONE/CHANGED
 	// over time. It skips the one-time deep/service enrichments — a live watch
@@ -549,7 +565,8 @@ func main() {
 			}
 		}
 		if path != "" {
-			meta := scanMeta{Interface: cfg.Interface, SelfIP: cfg.SelfIP, Gateway: cfg.Gateway, Subnet: subnet}
+			meta := scanMeta{Interface: cfg.Interface, SelfIP: cfg.SelfIP, Gateway: cfg.Gateway, Subnet: subnet,
+				Changes: sweepChanges, Memory: sweepMemory}
 			if err := writeScanReport(path, sess.log, rows, meta); err != nil {
 				fmt.Fprintf(os.Stderr, "gnulte-scan: report: %v\n", err)
 			} else if !*quiet {
@@ -562,6 +579,81 @@ func main() {
 // rows holds the discovered devices; kept package-scope so the busy spinner
 // goroutine can hand it over without an awkward type dance in main.
 var rows []discover.Row
+
+// sweepMemory and sweepChanges carry the device store's recollection of each
+// host and the port movement since the previous sweep into the HTML report.
+var (
+	sweepMemory  = map[string]inventory.Record{}
+	sweepChanges []inventory.PortChange
+)
+
+// rememberSweep folds this run's rows into the shared device store. It returns
+// the port churn since the previous sweep; port moves are announced on stderr
+// (so they remain visible under --json) and logged for the report. A store
+// error is reported but never fatal: the scan itself already succeeded.
+func rememberSweep(rows []discover.Row, now time.Time) []inventory.PortChange {
+	recs, err := inventory.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gnulte-scan: device memory: %v\n", err)
+		return nil
+	}
+	sightings := make([]inventory.Sighting, 0, len(rows))
+	for _, r := range rows {
+		sightings = append(sightings, inventory.Sighting{
+			Record: inventory.Record{
+				IP:     r.IP,
+				MAC:    r.MAC,
+				Vendor: r.Vendor,
+				Host:   r.Hostname,
+				Kind:   r.Type,
+				IsSelf: r.IsSelf,
+			},
+			Ports:   r.OpenPorts,
+			Banners: r.Banners,
+			OS:      r.OS,
+		})
+	}
+	merged, changes, err := inventory.RememberTo(inventory.Path(), recs, sightings, now)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gnulte-scan: device memory: %v\n", err)
+		return nil
+	}
+	sweepMemory = make(map[string]inventory.Record, len(merged))
+	for _, rec := range merged {
+		sweepMemory[rec.IP] = rec
+	}
+	sweepChanges = changes
+	for _, c := range changes {
+		line := "  " + portChangeLine(c)
+		fmt.Fprintln(os.Stderr, line)
+		sess.log = append(sess.log, line)
+	}
+	return changes
+}
+
+// portChangeLine renders one host's port movement as a sentence.
+func portChangeLine(c inventory.PortChange) string {
+	name := c.Host
+	if name == "" {
+		name = c.IP
+	}
+	var parts []string
+	if len(c.Appeared) > 0 {
+		parts = append(parts, "new port "+joinInts(c.Appeared))
+	}
+	if len(c.Closed) > 0 {
+		parts = append(parts, "port closed "+joinInts(c.Closed))
+	}
+	return name + ": " + strings.Join(parts, ", ")
+}
+
+func joinInts(ns []int) string {
+	parts := make([]string, len(ns))
+	for i, n := range ns {
+		parts[i] = strconv.Itoa(n)
+	}
+	return strings.Join(parts, ", ")
+}
 
 func exportKind(j, y, c bool) string {
 	switch {
@@ -699,9 +791,14 @@ func deepScan(ctx context.Context, rows []discover.Row, threads int) {
 					banners = append(banners, fmt.Sprintf("%d (%s): %s", p.Port, svc, p.Banner))
 				}
 			}
+			openPorts := make([]int, 0, len(res.Ports))
+			for _, p := range res.Ports {
+				openPorts = append(openPorts, p.Port)
+			}
 			mu.Lock()
 			r.Ports = ports
 			r.Banners = banners
+			r.OpenPorts = openPorts
 			if r.ScanNote != "" && res.Note != "" {
 				r.ScanNote += " · " + res.Note
 			} else if res.Note != "" {

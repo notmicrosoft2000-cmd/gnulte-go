@@ -34,6 +34,7 @@ import (
 	"sync"
 	"time"
 
+	"gnulte-go/internal/banners"
 	"gnulte-go/internal/probe"
 )
 
@@ -247,11 +248,28 @@ func portOpen(ctx context.Context, ip string, port int) bool {
 }
 
 // bannerFor reads a greeting (or sends one polite probe) and returns the
-// daemon's banner, sanitized to a single short line. TLS ports are skipped —
-// their greeting is the encrypted ServerHello, useless as text.
+// daemon's banner, sanitized to a single short line. TLS, SSH and SMB get a
+// real protocol probe (a handshake, an identification line, a dialect
+// negotiation) because their text greeting is either encrypted or incomplete;
+// everything else gets a plaintext read.
 func bannerFor(ctx context.Context, ip string, port int) string {
-	if tlsPorts[port] {
+	addr := net.JoinHostPort(ip, strconv.Itoa(port))
+	switch {
+	case port == 22:
+		if v, err := banners.SSH(ctx, addr); err == nil {
+			return sanitize(v)
+		}
 		return ""
+	case port == 445:
+		if v, err := banners.SMB(ctx, addr); err == nil {
+			return sanitize(v)
+		}
+		return ""
+	case tlsPorts[port]:
+		if info, err := banners.TLS(ctx, addr, ""); err == nil {
+			return sanitize(info.String())
+		}
+		return "" // no handshake, no honest banner
 	}
 	ctx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()

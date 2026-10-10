@@ -55,6 +55,9 @@ func Vendor(mac string) string {
 	if len(hex) < 6 {
 		return ""
 	}
+	if v, ok := ouiOverrideGet(hex[:6]); ok {
+		return v
+	}
 	if v, ok := ouiTable()[hex[:6]]; ok {
 		return v
 	}
@@ -168,6 +171,78 @@ func parseOUI(raw string, db map[string]string) {
 func cleanPrefix(s string) string {
 	r := strings.NewReplacer(":", "", "-", "")
 	return strings.ToUpper(r.Replace(strings.TrimSpace(s)))
+}
+
+var (
+	ouiOverrideMu sync.RWMutex
+	ouiOverride   map[string]string
+)
+
+func ouiOverrideGet(hex string) (string, bool) {
+	ouiOverrideMu.RLock()
+	v, ok := ouiOverride[hex]
+	ouiOverrideMu.RUnlock()
+	return v, ok
+}
+
+// LoadOUIFile merges an operator-supplied vendor registry over every other
+// source. The file may be a two-column CSV ("B8:27:EB,Acme Networks", with an
+// optional header) or any format parseOUI already understands (arp-scan, IEEE,
+// nmap); entries loaded through the --oui-file flag always win. It returns how
+// many prefixes were read.
+func LoadOUIFile(path string) (int, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	patches := map[string]string{}
+	parseOUI(string(raw), patches)
+	parseOUICSV(string(raw), patches)
+	if len(patches) == 0 {
+		return 0, fmt.Errorf("no OUI entries recognised in %s", path)
+	}
+	ouiOverrideMu.Lock()
+	if ouiOverride == nil {
+		ouiOverride = map[string]string{}
+	}
+	for k, v := range patches {
+		ouiOverride[k] = v
+	}
+	ouiOverrideMu.Unlock()
+	return len(patches), nil
+}
+
+// parseOUICSV folds the explicit "prefix,vendor" (comma or semicolon) form the
+// --oui-file flag documents. A header row fails the six-hex-prefix test and is
+// skipped, so "prefix,vendor" does no harm.
+func parseOUICSV(raw string, db map[string]string) {
+	sc := bufio.NewScanner(strings.NewReader(raw))
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		i := strings.IndexAny(line, ",;")
+		if i < 0 {
+			continue
+		}
+		hex := cleanPrefix(line[:i])
+		vendor := strings.TrimSpace(line[i+1:])
+		if len(hex) == 6 && isHex(hex) && vendor != "" {
+			db[hex] = vendor
+		}
+	}
+}
+
+// isHex reports whether s is exclusively uppercase hexadecimal digits.
+func isHex(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= '0' && c <= '9' || c >= 'A' && c <= 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 // Hostname identifies a device by name: classic reverse DNS first, then a

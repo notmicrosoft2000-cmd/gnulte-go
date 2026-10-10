@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"gnulte-go/internal/discover"
+	"gnulte-go/internal/ident"
+	"gnulte-go/internal/inventory"
 	"gnulte-go/internal/netutil"
 	"gnulte-go/internal/out"
 	"gnulte-go/internal/safety"
@@ -34,6 +36,7 @@ func main() {
 		outFile    = flag.String("o", "", "write the table to a file")
 		htmlReport = flag.String("H", "", "write an HTML report to this file")
 		quiet      = flag.Bool("q", false, "quiet: no banner, no status lines")
+		ouiFile    = flag.String("oui-file", "", "merge an operator CSV vendor table (prefix,vendor) over the built-in OUI data")
 		showVer    = flag.Bool("version", false, "print version and exit")
 	)
 	flag.BoolVar(doScan, "scan", false, "also ping-sweep the subnet (default: ARP table only)")
@@ -55,6 +58,15 @@ func main() {
 
 	if err := safety.EnsureAccepted(); err != nil {
 		fatal(err)
+	}
+	if *ouiFile != "" {
+		n, err := ident.LoadOUIFile(*ouiFile)
+		if err != nil {
+			fatal(fmt.Errorf("--oui-file: %w", err))
+		}
+		if !*quiet {
+			fmt.Fprintf(ux.Out, "OUI table: merged %d vendor prefix(es) from %s\n", n, *ouiFile)
+		}
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -118,6 +130,7 @@ func main() {
 
 	rows := buildRows(ctx, live, neighbors, cfg, *noHosts)
 	out.SortByIP(rows)
+	memory := rememberDevices(rows)
 
 	switch {
 	case exported:
@@ -146,7 +159,7 @@ func main() {
 	}
 
 	if *htmlReport != "" {
-		if err := writeHTML(*htmlReport, rows, cfg, *doScan); err != nil {
+		if err := writeHTML(*htmlReport, rows, cfg, *doScan, memory); err != nil {
 			fmt.Fprintf(os.Stderr, "gnulte-devices: html: %v\n", err)
 		} else if !*quiet {
 			fmt.Fprintf(ux.Out, "HTML report written to %s\n", *htmlReport)
@@ -250,13 +263,64 @@ func banner() {
 	fmt.Fprintln(ux.Out, ux.C(ux.Dim, line))
 }
 
+// rememberDevices folds this run's rows into the shared device store, counting
+// the sighting and accumulating awake time. Drop-in neighbours have no ports,
+// so no port churn is reported here. A store error is silently ignored: the
+// inventory listing itself already succeeded.
+func rememberDevices(rows []discover.Row) map[string]inventory.Record {
+	recs, err := inventory.Load()
+	if err != nil {
+		return nil
+	}
+	sightings := make([]inventory.Sighting, 0, len(rows))
+	for _, r := range rows {
+		sightings = append(sightings, inventory.Sighting{Record: inventory.Record{
+			IP:     r.IP,
+			MAC:    r.MAC,
+			Vendor: r.Vendor,
+			Host:   r.Hostname,
+			Kind:   r.Type,
+			IsSelf: r.IsSelf,
+		}})
+	}
+	merged, _, err := inventory.RememberTo(inventory.Path(), recs, sightings, time.Now())
+	if err != nil {
+		return nil
+	}
+	m := make(map[string]inventory.Record, len(merged))
+	for _, rec := range merged {
+		m[rec.IP] = rec
+	}
+	return m
+}
+
+// devHistoryCell renders a host's sighting count and accumulated awake time.
+func devHistoryCell(rec inventory.Record) string {
+	var parts []string
+	if rec.Sightings > 0 {
+		parts = append(parts, fmt.Sprintf("%d×", rec.Sightings))
+	}
+	if awake := inventory.FormatAwake(rec.AwakeSec); awake != "" {
+		parts = append(parts, awake+" awake")
+	}
+	return strings.Join(parts, " · ")
+}
+
 // writeHTML renders a minimal, dependency-free report of the findings.
-func writeHTML(path string, rows []discover.Row, cfg netutil.Config, swept bool) error {
+func writeHTML(path string, rows []discover.Row, cfg netutil.Config, swept bool, memory map[string]inventory.Record) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+
+	hasMemory := false
+	for _, rec := range memory {
+		if rec.Sightings > 1 || rec.AwakeSec > 0 {
+			hasMemory = true
+			break
+		}
+	}
 
 	var b strings.Builder
 	b.WriteString("<!doctype html><html><head><meta charset=\"utf-8\">")
@@ -271,7 +335,11 @@ func writeHTML(path string, rows []discover.Row, cfg netutil.Config, swept bool)
 		b.WriteString(" · subnet swept")
 	}
 	fmt.Fprintf(&b, " · generated %s</p>", time.Now().Format("2006-01-02 15:04:05"))
-	b.WriteString("<table><thead><tr><th>IP</th><th>MAC</th><th>VENDOR</th><th>HOSTNAME</th><th>TYPE</th></tr></thead><tbody>")
+	b.WriteString("<table><thead><tr><th>IP</th><th>MAC</th><th>VENDOR</th><th>HOSTNAME</th><th>TYPE</th>")
+	if hasMemory {
+		b.WriteString("<th>SEEN / AWAKE</th>")
+	}
+	b.WriteString("</tr></thead><tbody>")
 	for _, r := range rows {
 		b.WriteString("<tr>")
 		if r.IsSelf {
@@ -284,6 +352,9 @@ func writeHTML(path string, rows []discover.Row, cfg netutil.Config, swept bool)
 			html.EscapeString(orDash(r.Vendor)),
 			html.EscapeString(orDash(r.Hostname)),
 			html.EscapeString(orDash(r.Type)))
+		if hasMemory {
+			fmt.Fprintf(&b, "<td>%s</td>", html.EscapeString(devHistoryCell(memory[r.IP])))
+		}
 		b.WriteString("</tr>")
 	}
 	b.WriteString("</tbody></table></body></html>")

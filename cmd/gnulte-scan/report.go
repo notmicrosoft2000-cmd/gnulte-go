@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"gnulte-go/internal/discover"
+	"gnulte-go/internal/inventory"
 )
 
 // scanMeta captures the scan parameters for the report header.
@@ -31,6 +32,8 @@ type scanMeta struct {
 	SelfIP    string
 	Gateway   string
 	Subnet    string
+	Changes   []inventory.PortChange      // port movement since the previous sweep
+	Memory    map[string]inventory.Record // what the device store remembers
 }
 
 // writeScanReport renders a single self-contained HTML file with the scan
@@ -81,9 +84,19 @@ pre{background:#0d0d0d;border:1px solid #2a2a2a;padding:1em;overflow-x:auto;whit
 				break
 			}
 		}
+		hasMemory := false
+		for _, rec := range meta.Memory {
+			if rec.Sightings > 1 || rec.AwakeSec > 0 {
+				hasMemory = true
+				break
+			}
+		}
 		b.WriteString("<h2>Discovered hosts</h2>\n<table>\n<tr><th>IP</th><th>MAC</th><th>Vendor</th><th>Hostname</th><th>Type</th>")
 		if hasDeep {
 			b.WriteString("<th>Ports / OS</th>")
+		}
+		if hasMemory {
+			b.WriteString("<th>History</th>")
 		}
 		b.WriteString("</tr>\n")
 		for _, r := range rows {
@@ -112,9 +125,20 @@ pre{background:#0d0d0d;border:1px solid #2a2a2a;padding:1em;overflow-x:auto;whit
 				}
 				b.WriteString("<td>" + orDash(extra) + "</td>")
 			}
+			if hasMemory {
+				b.WriteString("<td>" + orDash(historyCell(meta.Memory[r.IP])) + "</td>")
+			}
 			b.WriteString("</tr>\n")
 		}
 		b.WriteString("</table>\n")
+	}
+
+	if len(meta.Changes) > 0 {
+		b.WriteString("<h2>Port changes since last scan</h2>\n<ul>\n")
+		for _, c := range meta.Changes {
+			b.WriteString("<li>" + htmlEsc(changeText(c)) + "</li>\n")
+		}
+		b.WriteString("</ul>\n")
 	}
 
 	b.WriteString("<h2>Full log history</h2>\n")
@@ -137,6 +161,42 @@ pre{background:#0d0d0d;border:1px solid #2a2a2a;padding:1em;overflow-x:auto;whit
 func htmlEsc(s string) string {
 	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;")
 	return r.Replace(s)
+}
+
+// historyCell renders a host's sighting count and accumulated awake time.
+func historyCell(rec inventory.Record) string {
+	var parts []string
+	if rec.Sightings > 0 {
+		parts = append(parts, fmt.Sprintf("%d×", rec.Sightings))
+	}
+	if awake := inventory.FormatAwake(rec.AwakeSec); awake != "" {
+		parts = append(parts, awake+" awake")
+	}
+	return strings.Join(parts, " · ")
+}
+
+// changeText renders one host's port movement as a sentence.
+func changeText(c inventory.PortChange) string {
+	name := c.Host
+	if name == "" {
+		name = c.IP
+	}
+	var parts []string
+	if len(c.Appeared) > 0 {
+		parts = append(parts, "new port "+intsText(c.Appeared))
+	}
+	if len(c.Closed) > 0 {
+		parts = append(parts, "port closed "+intsText(c.Closed))
+	}
+	return name + ": " + strings.Join(parts, ", ")
+}
+
+func intsText(ns []int) string {
+	parts := make([]string, len(ns))
+	for i, n := range ns {
+		parts[i] = fmt.Sprintf("%d", n)
+	}
+	return strings.Join(parts, ", ")
 }
 
 func orDash(s string) string {

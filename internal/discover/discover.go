@@ -41,20 +41,21 @@ import (
 
 // Row is one discovered host.
 type Row struct {
-	IP       string
-	MAC      string
-	Vendor   string
-	Hostname string
-	Type     string
-	Ports    string
-	OS       string
-	OSConf   int // confidence 0-100 from deep scan
-	Uptime   string
-	Banners  []string
-	Services []string // mDNS/DNS-SD service labels (Avahi-style discovery)
-	ScanNote string
-	IsSelf   bool
-	IsNew    bool
+	IP        string
+	MAC       string
+	Vendor    string
+	Hostname  string
+	Type      string
+	Ports     string
+	OS        string
+	OSConf    int // confidence 0-100 from deep scan
+	Uptime    string
+	Banners   []string
+	OpenPorts []int    // numeric port set from a deep scan, for memory diffs
+	Services  []string // mDNS/DNS-SD service labels (Avahi-style discovery)
+	ScanNote  string
+	IsSelf    bool
+	IsNew     bool
 }
 
 // PingSweep tests every IP with `ping -c1 -W1 -n`, in parallel, honoring

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Search — GNULTE</title>
+<meta name="description" content="Search the GNULTE website and documentation.">
+<link rel="icon" href="img/favicon.ico">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+<link rel="stylesheet" href="css/gnulte.css?v=16.13-r4">
+</head>
+<body>
+<div class="wrap">
+
+<div class="head">
+  <a class="brand" href="index.html">
+    <img src="img/logo-48.png" alt="GNULTE icon" width="48" height="48">
+    <b>GNULTE</b>
+    <span class="tag">GNU LAN Network Testing Environment &middot; v16.13</span>
+  </a>
+  <form class="head-search" action="search.html" method="get">
+    <label for="hq">Search</label>
+    <input id="hq" type="text" name="q" size="18">
+    <input type="submit" value="Go">
+  </form>
+</div>
+
+<ul class="nav">
+  <li><a href="index.html">Home</a></li>
+  <li><a href="tools.html">Tools</a></li>
+  <li><a href="docs.html">Documentation</a></li>
+  <li><a href="downloads.html">Downloads</a></li>
+  <li><a href="changelog.html">Changelog</a></li>
+  <li><a href="about.html">About</a></li>
+</ul>
+
+<div class="cols2">
+
+  <div class="col-main" role="main">
+    <p class="crumbs"><a href="index.html">Home</a> &rsaquo; Search</p>
+    <h1>Search</h1>
+    <p class="meta">Searches the pages of this site &middot; last updated 2026-10-15</p>
+
+    <form action="search.html" method="get">
+      <p>
+        <label for="q"><b>Search terms:</b></label><br>
+        <input id="q" type="text" name="q" size="40" value="">
+        <input type="submit" value="Search">
+      </p>
+    </form>
+
+    <div id="results">
+      <p>Enter one or more words above. Every term must appear somewhere on a page for it
+      to match; pages are ranked by whether the term appears in the page title.</p>
+      <p>You can also browse the <a href="docs.html">documentation index</a> or the
+      <a href="tools.html">tool directory</a> directly.</p>
+    </div>
+
+    <p><small>The search runs in your browser over a small index of this site;
+    no data is sent anywhere.</small></p>
+  </div>
+
+  <div class="col-right">
+    <div class="box">
+      <h3>Browse instead</h3>
+      <div class="b">
+        <ul>
+          <li><a href="docs.html">Documentation index</a></li>
+          <li><a href="tools.html">Tool directory</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+          <li><a href="downloads.html">Downloads</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div><!-- .cols2 -->
+
+<div class="foot">
+  <p class="foot-nav">
+    <a href="index.html">Home</a>
+    <a href="tools.html">Tools</a>
+    <a href="docs.html">Documentation</a>
+    <a href="downloads.html">Downloads</a>
+    <a href="changelog.html">Changelog</a>
+    <a href="about.html">About</a>
+    <a href="search.html">Search</a>
+    <a href="feed.xml">News feed</a>
+  </p>
+  <p>Copyright &copy; 2026 Neptune Productions. GNULTE is free software released under the
+     <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL version 3 or later</a>.</p>
+  <p>Source: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">github.com/notmicrosoft2000-cmd/gnulte-go</a>
+     &middot; Issues: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a>
+     &middot; Authorised network testing only.</p>
+  <p>This page last updated: 2026-10-15.</p>
+</div>
+
+</div><!-- .wrap -->
+<script src="js/search.js?v=16.13-r4"></script>
+</body>
+</html>

@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>gnulte-trace — command reference — GNULTE documentation</title>
+<meta name="description" content="Command reference for gnulte-trace, the GNULTE mtr-style hop-by-hop path probe: per-hop loss and latency, JSON and HTML report.">
+<link rel="icon" href="../img/favicon.ico">
+<link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
+<link rel="stylesheet" href="../css/gnulte.css?v=16.13-r4">
+</head>
+<body>
+<div class="wrap">
+
+<div class="head">
+  <a class="brand" href="../index.html">
+    <img src="../img/logo-48.png" alt="GNULTE icon" width="48" height="48">
+    <b>GNULTE</b>
+    <span class="tag">GNU LAN Network Testing Environment &middot; v16.13</span>
+  </a>
+  <form class="head-search" action="../search.html" method="get">
+    <label for="hq">Search</label>
+    <input id="hq" type="text" name="q" size="18">
+    <input type="submit" value="Go">
+  </form>
+</div>
+
+<ul class="nav">
+  <li><a href="../index.html">Home</a></li>
+  <li><a href="../tools.html">Tools</a></li>
+  <li><a class="active" href="../docs.html">Documentation</a></li>
+  <li><a href="../downloads.html">Downloads</a></li>
+  <li><a href="../changelog.html">Changelog</a></li>
+  <li><a href="../about.html">About</a></li>
+</ul>
+
+<div class="cols">
+
+  <div class="col-left">
+    <div class="box">
+      <h3>Documentation</h3>
+      <ul class="navlist">
+        <li><a href="../docs.html">Introduction</a></li>
+        <li><a href="install.html">Installation</a></li>
+        <li><a href="configuration.html">Configuration</a></li>
+        <li><a href="usage.html">Usage</a></li>
+        <li class="grp">Command reference</li>
+        <li><a href="gnulte.html">gnulte</a></li>
+        <li><a href="gnulte-lan.html">gnulte-lan</a></li>
+        <li><a href="gnulte-scan.html">gnulte-scan</a></li>
+        <li><a href="gnulte-devices.html">gnulte-devices</a></li>
+        <li><a href="gnulte-wifi.html">gnulte-wifi</a></li>
+        <li><a href="gnulte-doctor.html">gnulte-doctor</a></li>
+        <li><a class="active" href="gnulte-trace.html">gnulte-trace</a></li>
+        <li><a href="gnulte-top.html">gnulte-top</a></li>
+        <li class="grp">Help</li>
+        <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="col-main" role="main">
+    <p class="crumbs"><a href="../index.html">Home</a> &rsaquo; <a href="../docs.html">Documentation</a> &rsaquo; <a href="../tools.html">Tools</a> &rsaquo; gnulte-trace</p>
+    <h1>gnulte-trace(8) — the path probe</h1>
+    <p class="meta">Applies to gnulte-trace v16.13 &middot; last updated 2026-10-15</p>
+
+    <p>An mtr-style hop-by-hop path probe with no <code>traceroute(8)</code> behind it:
+    ICMP echo is built, checksummed and matched in-process at every TTL, and the time
+    exceeded / destination-unreachable errors routers send back are decoded into hops.
+    A live table runs while it probes; a finished table is left in the scrollback.</p>
+
+    <h2>Requirements</h2>
+    <ul>
+      <li><b>Root</b> — raw ICMP sockets are required. Added in v16.10.</li>
+      <li>Routers along the path may rate-limit their ICMP replies; that shows up as
+          per-hop loss, which is part of the measurement rather than an error.</li>
+    </ul>
+
+    <h2>Synopsis</h2>
+<pre><code>sudo gnulte-trace [flags] HOST</code></pre>
+
+    <h2>Options</h2>
+    <table class="data">
+      <tr><th style="width:26%">Flag</th><th>Description</th></tr>
+      <tr><td><code>-c N</code></td><td>probes per hop</td></tr>
+      <tr><td><code>-i MS</code></td><td>pause between the probes of a hop, in milliseconds</td></tr>
+      <tr><td><code>-t MS</code></td><td>per-probe timeout in milliseconds</td></tr>
+      <tr><td><code>-m N</code></td><td>maximum number of hops</td></tr>
+      <tr><td><code>-json</code></td><td>print the result as JSON</td></tr>
+      <tr><td><code>-html FILE</code></td><td>also write a self-contained HTML report to FILE</td></tr>
+      <tr><td><code>-q</code></td><td>quiet: no live view, print the final table only</td></tr>
+      <tr><td><code>-v</code></td><td>print version and exit</td></tr>
+    </table>
+
+    <h2>Examples</h2>
+<pre><code>sudo gnulte-trace 1.1.1.1                        # live hop-by-hop table
+sudo gnulte-trace -m 20 -c 10 192.168.1.1        # bounded hops, more probes per hop
+sudo gnulte-trace -q -json 1.1.1.1 | jq .        # just the data
+sudo gnulte-trace -html trace.html 1.1.1.1       # file a report of the path</code></pre>
+
+    <h2>Output</h2>
+    <p>Per hop: the responding address, and last / avg / best / worst round-trip times
+    with the loss seen at that hop. Compare a trace taken under
+    <a href="gnulte.html">gnulte</a> shaping with a clean one to see exactly where the
+    impairment lands.</p>
+
+    <h2>Installation</h2>
+    <p>Part of the GNULTE suite. Build and install everything at once;</p>
+<pre><code>git clone https://github.com/notmicrosoft2000-cmd/gnulte-go.git
+cd gnulte-go
+./build.sh          # builds all eight binaries, runs go vet + go test ./...
+sudo ./install.sh   # installs to /usr/local/bin + safety docs</code></pre>
+    <p>installs <code>gnulte-trace</code> to <code>/usr/local/bin/gnulte-trace</code>. See
+    <a href="install.html">installation</a> for requirements.</p>
+
+    <h2>Common errors</h2>
+    <dl class="defs">
+      <dt>Every hop shows <code>*</code></dt>
+      <dd>The probe needs root for raw ICMP sockets. If only some hops are starred, those routers are rate-limiting ICMP replies.</dd>
+      <dt>The trace stops early</dt>
+      <dd>Raise the hop limit with <code>-m</code>; paths longer than the default are common on mobile and satellite links.</dd>
+    </dl>
+
+    <h2>Related tools</h2>
+    <ul>
+      <li><a href="gnulte.html">gnulte</a> — the thing whose effect you are measuring</li>
+      <li><a href="gnulte-doctor.html">gnulte-doctor</a> — checks the route before you trace it</li>
+    </ul>
+  </div>
+
+  <div class="col-right">
+    <div class="box">
+      <h3>At a glance</h3>
+      <div class="b">
+        <dl>
+          <dt>Root</dt><dd>yes</dd>
+          <dt>Output</dt><dd>console table, JSON, HTML report</dd>
+          <dt>Since</dt><dd>v16.10</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="box">
+      <h3>See also</h3>
+      <div class="b">
+        <ul>
+          <li><a href="usage.html">Usage recipes</a></li>
+          <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div><!-- .cols -->
+
+<div class="foot">
+  <p class="foot-nav">
+    <a href="../index.html">Home</a>
+    <a href="../tools.html">Tools</a>
+    <a href="../docs.html">Documentation</a>
+    <a href="../downloads.html">Downloads</a>
+    <a href="../changelog.html">Changelog</a>
+    <a href="../about.html">About</a>
+    <a href="../search.html">Search</a>
+    <a href="../feed.xml">News feed</a>
+  </p>
+  <p>Copyright &copy; 2026 Neptune Productions. GNULTE is free software released under the
+     <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL version 3 or later</a>.</p>
+  <p>Source: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">github.com/notmicrosoft2000-cmd/gnulte-go</a>
+     &middot; Issues: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a>
+     &middot; Authorised network testing only.</p>
+  <p>This page last updated: 2026-10-15.</p>
+</div>
+
+</div><!-- .wrap -->
+<script src="../js/search.js?v=16.13-r4"></script>
+</body>
+</html>

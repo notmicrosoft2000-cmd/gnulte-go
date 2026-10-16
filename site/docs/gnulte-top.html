@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>gnulte-top — command reference — GNULTE documentation</title>
+<meta name="description" content="Command reference for gnulte-top, the GNULTE live per-host and per-conversation bandwidth view: sampling, flows, CSV and JSON snapshots.">
+<link rel="icon" href="../img/favicon.ico">
+<link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
+<link rel="stylesheet" href="../css/gnulte.css?v=16.13-r4">
+</head>
+<body>
+<div class="wrap">
+
+<div class="head">
+  <a class="brand" href="../index.html">
+    <img src="../img/logo-48.png" alt="GNULTE icon" width="48" height="48">
+    <b>GNULTE</b>
+    <span class="tag">GNU LAN Network Testing Environment &middot; v16.13</span>
+  </a>
+  <form class="head-search" action="../search.html" method="get">
+    <label for="hq">Search</label>
+    <input id="hq" type="text" name="q" size="18">
+    <input type="submit" value="Go">
+  </form>
+</div>
+
+<ul class="nav">
+  <li><a href="../index.html">Home</a></li>
+  <li><a href="../tools.html">Tools</a></li>
+  <li><a class="active" href="../docs.html">Documentation</a></li>
+  <li><a href="../downloads.html">Downloads</a></li>
+  <li><a href="../changelog.html">Changelog</a></li>
+  <li><a href="../about.html">About</a></li>
+</ul>
+
+<div class="cols">
+
+  <div class="col-left">
+    <div class="box">
+      <h3>Documentation</h3>
+      <ul class="navlist">
+        <li><a href="../docs.html">Introduction</a></li>
+        <li><a href="install.html">Installation</a></li>
+        <li><a href="configuration.html">Configuration</a></li>
+        <li><a href="usage.html">Usage</a></li>
+        <li class="grp">Command reference</li>
+        <li><a href="gnulte.html">gnulte</a></li>
+        <li><a href="gnulte-lan.html">gnulte-lan</a></li>
+        <li><a href="gnulte-scan.html">gnulte-scan</a></li>
+        <li><a href="gnulte-devices.html">gnulte-devices</a></li>
+        <li><a href="gnulte-wifi.html">gnulte-wifi</a></li>
+        <li><a href="gnulte-doctor.html">gnulte-doctor</a></li>
+        <li><a href="gnulte-trace.html">gnulte-trace</a></li>
+        <li><a class="active" href="gnulte-top.html">gnulte-top</a></li>
+        <li class="grp">Help</li>
+        <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="col-main" role="main">
+    <p class="crumbs"><a href="../index.html">Home</a> &rsaquo; <a href="../docs.html">Documentation</a> &rsaquo; <a href="../tools.html">Tools</a> &rsaquo; gnulte-top</p>
+    <h1>gnulte-top(8) — the bandwidth top</h1>
+    <p class="meta">Applies to gnulte-top v16.13 &middot; last updated 2026-10-15</p>
+
+    <p>A live per-host and per-conversation bandwidth view built on the same in-process
+    AF_PACKET counter the LAN watch uses: hosts ranked into a top-talker table with
+    &darr;/&uarr; rates, peer counts and bars. No <code>iptables</code>, no
+    <code>top(1)</code>, no <code>iftop</code> — just the counter. Added in v16.11.</p>
+
+    <h2>Requirements</h2>
+    <ul>
+      <li><b>Root</b> — the in-process AF_PACKET counter needs a capture socket.</li>
+      <li>No external tools; <code>tcpdump</code> and <code>iptables</code> are not
+          involved.</li>
+    </ul>
+
+    <h2>Synopsis</h2>
+<pre><code>sudo gnulte-top [flags]</code></pre>
+
+    <h2>Options</h2>
+    <table class="data">
+      <tr><th style="width:26%">Flag</th><th>Description</th></tr>
+      <tr><td><code>-i SECONDS</code></td><td>sampling interval in seconds</td></tr>
+      <tr><td><code>-n N</code></td><td>number of intervals to sample (0 = until quit)</td></tr>
+      <tr><td><code>-flows</code></td><td>show conversations instead of hosts</td></tr>
+      <tr><td><code>-host TEXT</code></td><td>only show hosts whose address contains this text</td></tr>
+      <tr><td><code>-iface IFACE</code></td><td>interface to watch (default: the default-route interface)</td></tr>
+      <tr><td><code>-csv</code></td><td>print one sample as CSV and exit</td></tr>
+      <tr><td><code>-json</code></td><td>print one sample as JSON and exit</td></tr>
+      <tr><td><code>-q</code></td><td>quiet: no banner</td></tr>
+      <tr><td><code>-v</code></td><td>print version and exit</td></tr>
+    </table>
+
+    <h2>Examples</h2>
+<pre><code>sudo gnulte-top                         # live top talkers
+sudo gnulte-top -flows                  # per-conversation instead of per-host
+sudo gnulte-top -host 192.168.1.50 -n 10   # one host, ten intervals, then exit
+sudo gnulte-top -json | jq .            # one machine-readable sample</code></pre>
+
+    <h2>Installation</h2>
+    <p>Part of the GNULTE suite. Build and install everything at once;</p>
+<pre><code>git clone https://github.com/notmicrosoft2000-cmd/gnulte-go.git
+cd gnulte-go
+./build.sh          # builds all eight binaries, runs go vet + go test ./...
+sudo ./install.sh   # installs to /usr/local/bin + safety docs</code></pre>
+    <p>installs <code>gnulte-top</code> to <code>/usr/local/bin/gnulte-top</code>. See
+    <a href="install.html">installation</a> for requirements.</p>
+
+    <h2>Common errors</h2>
+    <dl class="defs">
+      <dt>The table stays empty</dt>
+      <dd>The AF_PACKET counter needs a capture socket — run with <code>sudo</code>, and check <code>-iface</code> against the interface carrying the traffic.</dd>
+      <dt>Only one host appears</dt>
+      <dd>In switched networks you only see traffic that reaches your interface; put the host in the path (for example with <code>gnulte</code>) to account for its traffic.</dd>
+    </dl>
+
+    <h2>Related tools</h2>
+    <ul>
+      <li><a href="gnulte-lan.html">gnulte-lan</a> — the same counter inside the six-screen watch</li>
+      <li><a href="gnulte.html">gnulte</a> — run the top alongside a shaping session to see the effect on throughput</li>
+    </ul>
+  </div>
+
+  <div class="col-right">
+    <div class="box">
+      <h3>At a glance</h3>
+      <div class="b">
+        <dl>
+          <dt>Root</dt><dd>yes</dd>
+          <dt>Output</dt><dd>console table, CSV, JSON</dd>
+          <dt>Since</dt><dd>v16.11</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="box">
+      <h3>See also</h3>
+      <div class="b">
+        <ul>
+          <li><a href="gnulte-lan.html">gnulte-lan reference</a></li>
+          <li><a href="usage.html">Usage recipes</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div><!-- .cols -->
+
+<div class="foot">
+  <p class="foot-nav">
+    <a href="../index.html">Home</a>
+    <a href="../tools.html">Tools</a>
+    <a href="../docs.html">Documentation</a>
+    <a href="../downloads.html">Downloads</a>
+    <a href="../changelog.html">Changelog</a>
+    <a href="../about.html">About</a>
+    <a href="../search.html">Search</a>
+    <a href="../feed.xml">News feed</a>
+  </p>
+  <p>Copyright &copy; 2026 Neptune Productions. GNULTE is free software released under the
+     <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL version 3 or later</a>.</p>
+  <p>Source: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">github.com/notmicrosoft2000-cmd/gnulte-go</a>
+     &middot; Issues: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a>
+     &middot; Authorised network testing only.</p>
+  <p>This page last updated: 2026-10-15.</p>
+</div>
+
+</div><!-- .wrap -->
+<script src="../js/search.js?v=16.13-r4"></script>
+</body>
+</html>

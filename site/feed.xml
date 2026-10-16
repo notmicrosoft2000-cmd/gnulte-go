@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>GNULTE — news</title>
+  <subtitle>Release announcements and development updates for the GNU LAN Network Testing Environment.</subtitle>
+  <link href="https://notmicrosoft2000-cmd.github.io/gnulte/feed.xml" rel="self" type="application/atom+xml"/>
+  <link href="https://notmicrosoft2000-cmd.github.io/gnulte/" rel="alternate" type="text/html"/>
+  <id>https://notmicrosoft2000-cmd.github.io/gnulte/feed.xml</id>
+  <updated>2026-10-10T00:00:00Z</updated>
+  <author><name>Neptune Productions</name></author>
+  <rights>Copyright (C) 2026 Neptune Productions. Site content under the GNU GPL v3 or later.</rights>
+
+  <entry>
+    <title>v16.14 in development: sweepers with memory and gnulte --compare</title>
+    <link href="https://notmicrosoft2000-cmd.github.io/gnulte/changelog.html"/>
+    <id>https://notmicrosoft2000-cmd.github.io/gnulte/news/16.14-dev</id>
+    <updated>2026-10-10T00:00:00Z</updated>
+    <summary>Work in progress on main: sweepers that remember what they have seen, and a --compare mode that diffs two report JSON snapshots, optionally as an HTML comparison report. Unreleased.</summary>
+  </entry>
+
+  <entry>
+    <title>GNULTE v16.13 released — watch history and a machine feed</title>
+    <link href="https://notmicrosoft2000-cmd.github.io/gnulte/changelog.html"/>
+    <id>https://notmicrosoft2000-cmd.github.io/gnulte/news/16.13</id>
+    <updated>2026-10-03T00:00:00Z</updated>
+    <summary>The LAN watch now remembers: a JSONL timeline of every debounced up/down transition, a --json JSON-lines event feed with alerts on stderr, -alert-debounce hysteresis, screen 6 history, and an HTML report with a 7-day latency trend and a 0-100 health score per host.</summary>
+  </entry>
+
+  <entry>
+    <title>GNULTE v16.12 released — scenarios, per-target shaping, profiles and a session summary</title>
+    <link href="https://notmicrosoft2000-cmd.github.io/gnulte/changelog.html"/>
+    <id>https://notmicrosoft2000-cmd.github.io/gnulte/news/16.12</id>
+    <updated>2026-10-03T00:00:00Z</updated>
+    <summary>--scenario plays timed phases with optional sine/sawtooth wobble and loss bursts; --per-target gives individual hosts their own netem class; --profile save:NAME stores presets; and a finished run rolls up min/avg/p95/max, jitter, loss distribution and an E-model MOS into the console and the HTML report.</summary>
+  </entry>
+
+  <entry>
+    <title>GNULTE v16.11 released — gnulte-top, the live bandwidth top</title>
+    <link href="https://notmicrosoft2000-cmd.github.io/gnulte/changelog.html"/>
+    <id>https://notmicrosoft2000-cmd.github.io/gnulte/news/16.11</id>
+    <updated>2026-10-02T00:00:00Z</updated>
+    <summary>A live per-host and per-conversation bandwidth view built on the same in-process AF_PACKET counter the LAN watch uses: ranked top talkers with down/up rates, peer counts and bars, plus --flows, --csv and --json.</summary>
+  </entry>
+
+  <entry>
+    <title>GNULTE v16.9 and v16.10 released — gnulte-doctor and gnulte-trace</title>
+    <link href="https://notmicrosoft2000-cmd.github.io/gnulte/changelog.html"/>
+    <id>https://notmicrosoft2000-cmd.github.io/gnulte/news/16.9-16.10</id>
+    <updated>2026-10-01T00:00:00Z</updated>
+    <summary>gnulte-doctor is a zero-dependency pre-flight check (PASS/WARN/FAIL with fix-it hints, --json, non-zero exit on failure). gnulte-trace is an mtr-style hop-by-hop path probe with in-process ICMP echo at every TTL, per-hop last/avg/best/worst and loss, --json and an HTML report — no traceroute(8) behind it.</summary>
+  </entry>
+
+  <entry>
+    <title>The Unplugged series, v16.6 to v16.8 — arping, arp-scan, ping, tcpdump and their friends are gone</title>
+    <link href="https://notmicrosoft2000-cmd.github.io/gnulte/changelog.html#unplugged"/>
+    <id>https://notmicrosoft2000-cmd.github.io/gnulte/news/16.6-16.8</id>
+    <updated>2026-10-01T00:00:00Z</updated>
+    <summary>The v17 Unplugged programme ships in increments: ARP sweeps are crafted in-process over AF_PACKET (16.6), ICMP echo is built and matched on a raw socket (16.7), and pcap capture comes from AF_PACKET through a standard-library libpcap writer (16.8). The toolkit now runs on a bare box with nothing but the kernel and tc/iptables.</summary>
+  </entry>
+
+  <entry>
+    <title>GNULTE v16.0 "Steady Hands" and v15.0 "Live Interconnection"</title>
+    <link href="https://notmicrosoft2000-cmd.github.io/gnulte/changelog.html"/>
+    <id>https://notmicrosoft2000-cmd.github.io/gnulte/news/16.0</id>
+    <updated>2026-09-29T00:00:00Z</updated>
+    <summary>v15 wired the tools together through one shared device store; v16 filed the sharp edges off: clean Ctrl+C teardown, interruptible name-identification waits, honest sampling cadence, fixed arrow-key repeat in the LAN watch, --note labels and gnulte-scan --watch N --json.</summary>
+  </entry>
+</feed>

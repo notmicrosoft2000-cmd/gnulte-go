@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Troubleshooting — GNULTE documentation</title>
+<meta name="description" content="GNULTE troubleshooting: run gnulte-doctor first; privileges, tc/iptables, ip_forward, kernel modules, filtered ICMP, capture permissions.">
+<link rel="icon" href="../img/favicon.ico">
+<link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
+<link rel="stylesheet" href="../css/gnulte.css?v=16.13-r4">
+</head>
+<body>
+<div class="wrap">
+
+<div class="head">
+  <a class="brand" href="../index.html">
+    <img src="../img/logo-48.png" alt="GNULTE icon" width="48" height="48">
+    <b>GNULTE</b>
+    <span class="tag">GNU LAN Network Testing Environment &middot; v16.13</span>
+  </a>
+  <form class="head-search" action="../search.html" method="get">
+    <label for="hq">Search</label>
+    <input id="hq" type="text" name="q" size="18">
+    <input type="submit" value="Go">
+  </form>
+</div>
+
+<ul class="nav">
+  <li><a href="../index.html">Home</a></li>
+  <li><a href="../tools.html">Tools</a></li>
+  <li><a class="active" href="../docs.html">Documentation</a></li>
+  <li><a href="../downloads.html">Downloads</a></li>
+  <li><a href="../changelog.html">Changelog</a></li>
+  <li><a href="../about.html">About</a></li>
+</ul>
+
+<div class="cols">
+
+  <div class="col-left">
+    <div class="box">
+      <h3>Documentation</h3>
+      <ul class="navlist">
+        <li><a href="../docs.html">Introduction</a></li>
+        <li><a href="install.html">Installation</a></li>
+        <li><a href="configuration.html">Configuration</a></li>
+        <li><a href="usage.html">Usage</a></li>
+        <li class="grp">Command reference</li>
+        <li><a href="gnulte.html">gnulte</a></li>
+        <li><a href="gnulte-lan.html">gnulte-lan</a></li>
+        <li><a href="gnulte-scan.html">gnulte-scan</a></li>
+        <li><a href="gnulte-devices.html">gnulte-devices</a></li>
+        <li><a href="gnulte-wifi.html">gnulte-wifi</a></li>
+        <li><a href="gnulte-doctor.html">gnulte-doctor</a></li>
+        <li><a href="gnulte-trace.html">gnulte-trace</a></li>
+        <li><a href="gnulte-top.html">gnulte-top</a></li>
+        <li class="grp">Help</li>
+        <li><a class="active" href="troubleshooting.html">Troubleshooting</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="col-main" role="main">
+    <p class="crumbs"><a href="../index.html">Home</a> &rsaquo; <a href="../docs.html">Documentation</a> &rsaquo; Troubleshooting</p>
+    <h1>Troubleshooting</h1>
+    <p class="meta">Applies to GNULTE v16.13 &middot; last updated 2026-10-15</p>
+
+    <h2>Run the doctor first</h2>
+    <p>Almost everything that can be wrong with the machine is checked by
+    <code>gnulte-doctor</code>. It prints a PASS/WARN/FAIL table with fix-it hints,
+    supports <code>--json</code>, and exits non-zero when anything fails — so it can
+    gate a script:</p>
+<pre><code>gnulte-doctor          # human table
+gnulte-doctor --json   # for scripts
+gnulte-doctor -q       # only warnings and failures</code></pre>
+
+    <h2>Symptoms</h2>
+
+    <h3>&ldquo;Shaping does nothing — the target is unaffected&rdquo;</h3>
+    <ul>
+      <li>Was the run started as root? <code>sudo gnulte ...</code> — the engine
+          re-execs itself, but a broken sudo setup means it never gets there.</li>
+      <li>Check <code>tc qdisc show</code> during a run: a <code>netem</code> qdisc
+          should be present on the egress interface.</li>
+      <li>Is <code>ip_forward</code> on? The doctor checks it; the engine also sets it
+          for the duration of the run and restores the old value on exit.</li>
+      <li>Is the target actually routed through the machine? A target that is not on the
+          same broadcast domain, or that pins its gateway's MAC, will not be caught by
+          ARP spoofing.</li>
+    </ul>
+
+    <h3>&ldquo;The target lost all connectivity&rdquo;</h3>
+    <ul>
+      <li>A run that was killed with <code>kill -9</code> never got to clean up: its ARP
+          cache was left poisoned. Fix it by restarting the target's network interface,
+          or by waiting for the ARP entry to expire, or by running one short
+          <code>gnulte</code> run against the host and ending it with a clean
+          <kbd>Ctrl+C</kbd> — the teardown un-spoofs.</li>
+      <li>Use <kbd>Ctrl+C</kbd>, not <code>SIGKILL</code>: the first signal restores the
+          previous qdisc and <code>ip_forward</code> and lets the shutdown finish; a
+          second one forces the exit only if it is stuck.</li>
+    </ul>
+
+    <h3>&ldquo;<code>tc</code> / <code>iptables</code>: command not found&rdquo;</h3>
+    <p>Install <code>iproute2</code> and <code>iptables</code> from your distribution.
+    These are the kernel interfaces for shaping and forwarding; they are not optional
+    for <code>gnulte</code> and are not replaced by anything in the toolkit.</p>
+
+    <h3>&ldquo;netem: No such file or directory&rdquo; / unknown qdisc</h3>
+    <p>The <code>sch_netem</code> kernel module is not loaded. Load it with
+    <code>sudo modprobe sch_netem</code>; most distributions load it on demand when
+    <code>tc</code> asks. The doctor reports the module state explicitly.</p>
+
+    <h3>&ldquo;A host never answers the dashboard's pings&rdquo;</h3>
+    <p>Some devices filter ICMP. The engine falls back to TCP probes on well-known
+    ports; pick the ports the host actually listens on:</p>
+<pre><code>sudo gnulte -t 192.168.1.50 --probe-ports 443,80,53 ...</code></pre>
+
+    <h3>&ldquo;A host does not show up in a scan&rdquo;</h3>
+    <ul>
+      <li>Use <code>--arp</code> (automatic as root): a device that blocks ICMP but
+          still answers ARP — phones in doze, printers, TVs — is caught by the ARP
+          sweep.</li>
+      <li>The kernel neighbour table is only a cache; <code>gnulte-scan</code> sweeps
+          the interface subnet so the answer does not depend on prior traffic.</li>
+    </ul>
+
+    <h3>&ldquo;gnulte-trace shows only <code>*</code> for every hop&rdquo;</h3>
+    <p>The path probes need raw ICMP sockets and therefore root; routers along the path
+    may also rate-limit their ICMP replies, which shows up as per-hop loss rather than
+    as total failure. Loss is part of the measurement.</p>
+
+    <h3>&ldquo;gnulte-top / flows screen: no per-host rates&rdquo;</h3>
+    <p>The in-process AF_PACKET counter needs a capture socket, which needs root. Run
+    with <code>sudo</code>.</p>
+
+    <h3>&ldquo;gnulte-wifi injects nothing&rdquo;</h3>
+    <ul>
+      <li>The interface must already be in monitor mode
+          (<code>airmon-ng start wlan0</code> or <code>iw dev wlan0 set type monitor</code>).
+          GNULTE does not change the interface mode itself.</li>
+      <li>Some adapters cap injection rates: a single frame rarely lands. Raise
+          <code>--count</code>.</li>
+    </ul>
+
+    <h3>&ldquo;Permission denied&rdquo; writing a report or capture</h3>
+    <p>Reports go to <code>~/GNULTE Reports/</code>, created with your user's ownership;
+    a report written from a root process is handed back to the invoking user. If you
+    name the file yourself (<code>--report FILE</code>, <code>--capture FILE</code>),
+    make sure the directory is writable by the user you started from.</p>
+
+    <h3>&ldquo;Two hosts answer for the same IP&rdquo;</h3>
+    <p>Check for conflicts before blaming the toolkit:</p>
+<pre><code>gnulte --dupcheck   # scan the LAN for duplicate IPs / ARP conflicts and exit</code></pre>
+    <p>The doctor also reports duplicate IPs as a WARN during its route checks.</p>
+
+    <h3>&ldquo;Ctrl+C takes a moment to exit&rdquo;</h3>
+    <p>By design: the first <kbd>Ctrl+C</kbd> restores the screen and terminal and runs
+    the full teardown (un-spoof, restore qdisc, restore <code>ip_forward</code>). Only a
+    second <kbd>Ctrl+C</kbd> — or a stuck teardown after the grace period — forces the
+    exit. Before v16.0 a hard exit could leave targets with a poisoned ARP cache.</p>
+
+    <h2>Still stuck?</h2>
+    <p>Open an issue on the
+    <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a>
+    with the output of <code>gnulte-doctor --json</code>, the exact command line, your
+    distribution and kernel version. That is most of a diagnosis already.</p>
+  </div>
+
+  <div class="col-right">
+    <div class="box">
+      <h3>In this section</h3>
+      <div class="b">
+        <ul>
+          <li><a href="troubleshooting.html">Troubleshooting</a></li>
+          <li><a href="faq.html">FAQ</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="box">
+      <h3>Related</h3>
+      <div class="b">
+        <ul>
+          <li><a href="gnulte-doctor.html">gnulte-doctor reference</a></li>
+          <li><a href="install.html">Installation</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div><!-- .cols -->
+
+<div class="foot">
+  <p class="foot-nav">
+    <a href="../index.html">Home</a>
+    <a href="../tools.html">Tools</a>
+    <a href="../docs.html">Documentation</a>
+    <a href="../downloads.html">Downloads</a>
+    <a href="../changelog.html">Changelog</a>
+    <a href="../about.html">About</a>
+    <a href="../search.html">Search</a>
+    <a href="../feed.xml">News feed</a>
+  </p>
+  <p>Copyright &copy; 2026 Neptune Productions. GNULTE is free software released under the
+     <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL version 3 or later</a>.</p>
+  <p>Source: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">github.com/notmicrosoft2000-cmd/gnulte-go</a>
+     &middot; Issues: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a>
+     &middot; Authorised network testing only.</p>
+  <p>This page last updated: 2026-10-15.</p>
+</div>
+
+</div><!-- .wrap -->
+<script src="../js/search.js?v=16.13-r4"></script>
+</body>
+</html>

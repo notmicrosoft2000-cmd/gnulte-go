@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>gnulte-lan — command reference — GNULTE documentation</title>
+<meta name="description" content="Command reference for gnulte-lan, the GNULTE live LAN watch: six screens, keys, alarms, export, JSON feed and history.">
+<link rel="icon" href="../img/favicon.ico">
+<link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
+<link rel="stylesheet" href="../css/gnulte.css?v=16.13-r4">
+</head>
+<body>
+<div class="wrap">
+
+<div class="head">
+  <a class="brand" href="../index.html">
+    <img src="../img/logo-48.png" alt="GNULTE icon" width="48" height="48">
+    <b>GNULTE</b>
+    <span class="tag">GNU LAN Network Testing Environment &middot; v16.13</span>
+  </a>
+  <form class="head-search" action="../search.html" method="get">
+    <label for="hq">Search</label>
+    <input id="hq" type="text" name="q" size="18">
+    <input type="submit" value="Go">
+  </form>
+</div>
+
+<ul class="nav">
+  <li><a href="../index.html">Home</a></li>
+  <li><a href="../tools.html">Tools</a></li>
+  <li><a class="active" href="../docs.html">Documentation</a></li>
+  <li><a href="../downloads.html">Downloads</a></li>
+  <li><a href="../changelog.html">Changelog</a></li>
+  <li><a href="../about.html">About</a></li>
+</ul>
+
+<div class="cols">
+
+  <div class="col-left">
+    <div class="box">
+      <h3>Documentation</h3>
+      <ul class="navlist">
+        <li><a href="../docs.html">Introduction</a></li>
+        <li><a href="install.html">Installation</a></li>
+        <li><a href="configuration.html">Configuration</a></li>
+        <li><a href="usage.html">Usage</a></li>
+        <li class="grp">Command reference</li>
+        <li><a href="gnulte.html">gnulte</a></li>
+        <li><a class="active" href="gnulte-lan.html">gnulte-lan</a></li>
+        <li><a href="gnulte-scan.html">gnulte-scan</a></li>
+        <li><a href="gnulte-devices.html">gnulte-devices</a></li>
+        <li><a href="gnulte-wifi.html">gnulte-wifi</a></li>
+        <li><a href="gnulte-doctor.html">gnulte-doctor</a></li>
+        <li><a href="gnulte-trace.html">gnulte-trace</a></li>
+        <li><a href="gnulte-top.html">gnulte-top</a></li>
+        <li class="grp">Help</li>
+        <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="col-main" role="main">
+    <p class="crumbs"><a href="../index.html">Home</a> &rsaquo; <a href="../docs.html">Documentation</a> &rsaquo; <a href="../tools.html">Tools</a> &rsaquo; gnulte-lan</p>
+    <h1>gnulte-lan(8) — the LAN watch</h1>
+    <p class="meta">Applies to gnulte-lan v16.13 &middot; last updated 2026-10-15</p>
+
+    <p>Discover what is online, identify each device (MAC, vendor, type, hostname), and
+    watch its down/up speed, packet rate and latency live — with alarms when a host
+    crosses a rate or latency threshold. Passive: frames are only counted, nothing is
+    shaped or intercepted.</p>
+
+    <h2>Requirements</h2>
+    <ul>
+      <li>Runs unprivileged. The <b>flows</b> screen (3) and the <b>map</b> (5) need the
+          root capture socket and show reduced data without it.</li>
+      <li>With no <code>-t</code>, the subnet is auto-discovered (your host and the
+          router are skipped).</li>
+    </ul>
+
+    <h2>Synopsis</h2>
+<pre><code>gnulte-lan [flags]</code></pre>
+
+    <h2>The six screens</h2>
+    <table class="data">
+      <tr><th style="width:22%">Key</th><th>Screen</th></tr>
+      <tr><td><kbd>1</kbd></td><td><b>Hosts</b> — live down/up speed, packet rate, latency and a health grade; every IP keeps one stable colour</td></tr>
+      <tr><td><kbd>2</kbd></td><td><b>Talkers</b> — ranked &darr;/&uarr; with bars and peer counts (<kbd>t</kbd>)</td></tr>
+      <tr><td><kbd>3</kbd></td><td><b>Flows</b> — per-pair conversations, A &harr; B with the root socket at the centre (<kbd>f</kbd>)</td></tr>
+      <tr><td><kbd>4</kbd></td><td><b>Neighbours</b> — the live ARP/neighbour table (<kbd>n</kbd>)</td></tr>
+      <tr><td><kbd>5</kbd></td><td><b>Map</b> — the live interconnection map: devices as nodes, live flows as pulsing edges (<kbd>m</kbd>)</td></tr>
+      <tr><td><kbd>6</kbd></td><td><b>History</b> — the session's alarms beside today's recorded up/down transitions</td></tr>
+    </table>
+
+    <h2>Keys</h2>
+    <table class="data">
+      <tr><th style="width:26%">Key</th><th>Action</th></tr>
+      <tr><td><kbd>&uarr;&darr;</kbd></td><td>browse hosts (one row per press; no phantom repeat)</td></tr>
+      <tr><td><kbd>&#9166;</kbd> / <kbd>g</kbd></td><td>hand off to <code>gnulte -t &lt;ip&gt;</code> — opens a terminal with the target loaded</td></tr>
+      <tr><td><kbd>Tab</kbd> / <kbd>d</kbd></td><td>host detail pane</td></tr>
+      <tr><td><kbd>1</kbd>&ndash;<kbd>6</kbd></td><td>screens (also <kbd>t</kbd>/<kbd>f</kbd>/<kbd>n</kbd>/<kbd>m</kbd>)</td></tr>
+      <tr><td><kbd>x</kbd></td><td>save the watch to the shared device store (<code>~/.config/gnulte-go/devices.json</code>)</td></tr>
+      <tr><td><kbd>s</kbd></td><td>sort</td></tr>
+      <tr><td><kbd>a</kbd></td><td>alarm-only view</td></tr>
+      <tr><td><kbd>o</kbd></td><td>settings editor</td></tr>
+      <tr><td><kbd>h</kbd></td><td>help</td></tr>
+      <tr><td><kbd>q</kbd> / <kbd>Esc</kbd></td><td>quit / peel back a pane</td></tr>
+    </table>
+
+    <h2>Options</h2>
+    <table class="data">
+      <tr><th style="width:30%">Flag</th><th>Description</th></tr>
+      <tr><td><code>-t IP[,IP...]</code></td><td>host IP(s) to watch (empty = watch the whole LAN)</td></tr>
+      <tr><td><code>-i IFACE</code></td><td>network interface (default: auto-detect)</td></tr>
+      <tr><td><code>-interval N</code></td><td>seconds between updates (0 = settings/1)</td></tr>
+      <tr><td><code>-duration N</code></td><td>auto-stop after N seconds (0 = until interrupt)</td></tr>
+      <tr><td><code>-history N</code></td><td>rate/ping samples kept per host (0 = settings/60)</td></tr>
+      <tr><td><code>-alarm-rate N</code></td><td>alarm hosts above N kbps (0 = settings)</td></tr>
+      <tr><td><code>-alarm-latency-ms N</code></td><td>alarm hosts above N ms average ping (0 = settings)</td></tr>
+      <tr><td><code>-alert-debounce N</code></td><td>consecutive samples before an up/down transition is believed (v16.13)</td></tr>
+      <tr><td><code>--json</code></td><td>emit a JSON-lines event feed on stdout: a baseline object, a per-second object of host rates and latency, and an alert per transition. All human output moves to stderr (v16.13)</td></tr>
+      <tr><td><code>-export FILE</code></td><td>append per-tick samples as CSV to FILE</td></tr>
+      <tr><td><code>--history-file FILE</code></td><td>up/down timeline store (default <code>~/.config/gnulte-go/watch-history.jsonl</code>)</td></tr>
+      <tr><td><code>--no-history</code></td><td>do not read or write the up/down timeline store</td></tr>
+      <tr><td><code>-no-report</code></td><td>skip the end-of-session HTML report</td></tr>
+      <tr><td><code>-q</code></td><td>quiet: no banner, plain transcript</td></tr>
+      <tr><td><code>-version</code></td><td>print version and exit</td></tr>
+    </table>
+
+    <h2>Examples</h2>
+<pre><code>gnulte-lan                                    # watch the whole LAN (auto-discovery)
+gnulte-lan -t 192.168.1.20 --duration 60      # one host, up close
+gnulte-lan --duration 60 --export watch.csv --alarm-rate 500
+gnulte-lan --json | jq 'select(.kind=="alert")'   # alerts only (narrative is on stderr)</code></pre>
+
+    <h2>Reports and history</h2>
+    <p>An HTML report is written at the end of the session (suppress with
+    <code>-no-report</code>). Since v16.13 it carries a 7-day latency bar chart per host
+    and a blunt 0&ndash;100 health score (loss first, then drift from the host's own
+    baseline, spread, and up/down churn). The up/down timeline it is built from is a
+    plain JSONL file you can process yourself.</p>
+
+    <h2>Installation</h2>
+    <p>Part of the GNULTE suite. Build and install everything at once;</p>
+<pre><code>git clone https://github.com/notmicrosoft2000-cmd/gnulte-go.git
+cd gnulte-go
+./build.sh          # builds all eight binaries, runs go vet + go test ./...
+sudo ./install.sh   # installs to /usr/local/bin + safety docs</code></pre>
+    <p>installs <code>gnulte-lan</code> to <code>/usr/local/bin/gnulte-lan</code>. See
+    <a href="install.html">installation</a> for requirements.</p>
+
+    <h2>Common errors</h2>
+    <dl class="defs">
+      <dt>Screens 3 and 5 are empty</dt>
+      <dd>The flows and map screens need the root capture socket; run with <code>sudo</code>.</dd>
+      <dt>No alarms</dt>
+      <dd>Set thresholds with <code>-alarm-rate</code> / <code>-alarm-latency-ms</code>, or in the settings editor (<code>o</code>); raise <code>-alert-debounce</code> if a flapping host alarms constantly.</dd>
+      <dt>A host never appears</dt>
+      <dd>With no <code>-t</code> the watch auto-discovers the subnet and skips your host and the gateway; a sleeping device that sends no traffic may only be visible on the neighbours screen.</dd>
+    </dl>
+
+    <h2>Related tools</h2>
+    <ul>
+      <li><a href="gnulte.html">gnulte</a> — the hand-off target: test a host from the watch</li>
+      <li><a href="gnulte-scan.html">gnulte-scan</a> — deeper identification and port scanning</li>
+      <li><a href="gnulte-top.html">gnulte-top</a> — the same counter without the console UI</li>
+    </ul>
+  </div>
+
+  <div class="col-right">
+    <div class="box">
+      <h3>At a glance</h3>
+      <div class="b">
+        <dl>
+          <dt>Root</dt><dd>optional (flows &amp; map need it)</dd>
+          <dt>Output</dt><dd>console, CSV export, JSON-lines feed, HTML report</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="box">
+      <h3>See also</h3>
+      <div class="b">
+        <ul>
+          <li><a href="usage.html">Usage recipes</a></li>
+          <li><a href="configuration.html">Configuration</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div><!-- .cols -->
+
+<div class="foot">
+  <p class="foot-nav">
+    <a href="../index.html">Home</a>
+    <a href="../tools.html">Tools</a>
+    <a href="../docs.html">Documentation</a>
+    <a href="../downloads.html">Downloads</a>
+    <a href="../changelog.html">Changelog</a>
+    <a href="../about.html">About</a>
+    <a href="../search.html">Search</a>
+    <a href="../feed.xml">News feed</a>
+  </p>
+  <p>Copyright &copy; 2026 Neptune Productions. GNULTE is free software released under the
+     <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL version 3 or later</a>.</p>
+  <p>Source: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">github.com/notmicrosoft2000-cmd/gnulte-go</a>
+     &middot; Issues: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a>
+     &middot; Authorised network testing only.</p>
+  <p>This page last updated: 2026-10-15.</p>
+</div>
+
+</div><!-- .wrap -->
+<script src="../js/search.js?v=16.13-r4"></script>
+</body>
+</html>

@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>gnulte-scan — command reference — GNULTE documentation</title>
+<meta name="description" content="Command reference for gnulte-scan, the GNULTE scanner: sweep, deep port scan, OS fingerprinting, --watch re-scanning and output formats.">
+<link rel="icon" href="../img/favicon.ico">
+<link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
+<link rel="stylesheet" href="../css/gnulte.css?v=16.13-r4">
+</head>
+<body>
+<div class="wrap">
+
+<div class="head">
+  <a class="brand" href="../index.html">
+    <img src="../img/logo-48.png" alt="GNULTE icon" width="48" height="48">
+    <b>GNULTE</b>
+    <span class="tag">GNU LAN Network Testing Environment &middot; v16.13</span>
+  </a>
+  <form class="head-search" action="../search.html" method="get">
+    <label for="hq">Search</label>
+    <input id="hq" type="text" name="q" size="18">
+    <input type="submit" value="Go">
+  </form>
+</div>
+
+<ul class="nav">
+  <li><a href="../index.html">Home</a></li>
+  <li><a href="../tools.html">Tools</a></li>
+  <li><a class="active" href="../docs.html">Documentation</a></li>
+  <li><a href="../downloads.html">Downloads</a></li>
+  <li><a href="../changelog.html">Changelog</a></li>
+  <li><a href="../about.html">About</a></li>
+</ul>
+
+<div class="cols">
+
+  <div class="col-left">
+    <div class="box">
+      <h3>Documentation</h3>
+      <ul class="navlist">
+        <li><a href="../docs.html">Introduction</a></li>
+        <li><a href="install.html">Installation</a></li>
+        <li><a href="configuration.html">Configuration</a></li>
+        <li><a href="usage.html">Usage</a></li>
+        <li class="grp">Command reference</li>
+        <li><a href="gnulte.html">gnulte</a></li>
+        <li><a href="gnulte-lan.html">gnulte-lan</a></li>
+        <li><a class="active" href="gnulte-scan.html">gnulte-scan</a></li>
+        <li><a href="gnulte-devices.html">gnulte-devices</a></li>
+        <li><a href="gnulte-wifi.html">gnulte-wifi</a></li>
+        <li><a href="gnulte-doctor.html">gnulte-doctor</a></li>
+        <li><a href="gnulte-trace.html">gnulte-trace</a></li>
+        <li><a href="gnulte-top.html">gnulte-top</a></li>
+        <li class="grp">Help</li>
+        <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="col-main" role="main">
+    <p class="crumbs"><a href="../index.html">Home</a> &rsaquo; <a href="../docs.html">Documentation</a> &rsaquo; <a href="../tools.html">Tools</a> &rsaquo; gnulte-scan</p>
+    <h1>gnulte-scan(8) — the scanner</h1>
+    <p class="meta">Applies to gnulte-scan v16.13 &middot; last updated 2026-10-15</p>
+
+    <p>Sweep or read the neighbour table; each device comes back with its vendor (from
+    the embedded OUI registry), mDNS <code>.local</code> names, reverse DNS, open ports,
+    a device-type guess and an OS fingerprint. Root is optional: without it the sweep is
+    ICMP-only, with it the in-process ARP sweep also catches hosts that block ping.</p>
+
+    <h2>Requirements</h2>
+    <ul>
+      <li>Runs unprivileged. Root enables the ARP sweep (automatic) and catches devices
+          that filter ICMP.</li>
+      <li>No <code>arp-scan</code>, <code>arping</code> or <code>nmap</code>: the sweep
+          and the port scanner are in-process (since v16.6).</li>
+    </ul>
+
+    <h2>Synopsis</h2>
+<pre><code>gnulte-scan [options]</code></pre>
+
+    <h2>Options</h2>
+    <table class="data">
+      <tr><th style="width:30%">Option</th><th>Description</th></tr>
+      <tr><td><code>-i, --interface IFACE</code></td><td>network interface (default: auto-detect)</td></tr>
+      <tr><td><code>-C, --cidr CIDR</code></td><td>subnet to scan (default: from interface)</td></tr>
+      <tr><td><code>-t, --threads N</code></td><td>parallel ping workers (default: 64)</td></tr>
+      <tr><td><code>-d, --deep</code></td><td>deep scan alive hosts with the in-Go port scanner (banner, TLS/SSH/SMB fingerprinting)</td></tr>
+      <tr><td><code>-T, --interactive</code></td><td>interactive full-screen browser with Devices / Log / Summary tabs; <code>r</code> re-scans on demand, <code>o</code> opens the settings page</td></tr>
+      <tr><td><code>--watch N</code></td><td>re-scan every N seconds, marking <code>&#9650; NEW</code> / <code>&#9660; GONE</code> / <code>~ CHANGED</code> hosts live; with <code>--json</code> it streams a JSON-lines delta feed (baseline + per-sweep changes)</td></tr>
+      <tr><td><code>--arp</code> / <code>--no-arp</code></td><td>force or disable the in-process ARP sweep (automatic when root)</td></tr>
+      <tr><td><code>-j, --json</code></td><td>output JSON</td></tr>
+      <tr><td><code>-y, --yaml</code></td><td>output YAML</td></tr>
+      <tr><td><code>-c, --csv</code></td><td>output CSV</td></tr>
+      <tr><td><code>-q, --quiet</code></td><td>results only, no header/summary</td></tr>
+      <tr><td><code>--sound</code></td><td>play a tone per result</td></tr>
+      <tr><td><code>--report FILE</code> / <code>--no-report</code></td><td>write (default) or skip the HTML report</td></tr>
+      <tr><td><code>--oui-file FILE</code></td><td>merge an operator CSV vendor table (<code>prefix,vendor</code>) over the built-in OUI data</td></tr>
+      <tr><td><code>--settings</code></td><td>open the settings editor and exit</td></tr>
+      <tr><td><code>--docs</code></td><td>print the safety documents and exit</td></tr>
+      <tr><td><code>--reset-safety</code></td><td>remove the acceptance record and exit</td></tr>
+      <tr><td><code>--version</code></td><td>print version and exit</td></tr>
+      <tr><td><code>-h, --help</code></td><td>show the built-in help</td></tr>
+    </table>
+    <p>In the <code>-T</code> browser, devices the shared store already knows are marked
+    <code>*</code> in the target picker, and you can select by keyword
+    (<code>Mobile</code>, <code>@hostname</code>).</p>
+
+    <h2>Examples</h2>
+<pre><code>gnulte-scan --deep                        # sweep + port scan + OS fingerprint
+gnulte-scan --watch 5                     # live re-scan: &#9650; new &#9660; gone ~ changed
+gnulte-scan --watch 5 --json | jq 'select(.kind=="delta")'   # a motion sensor
+gnulte-scan -C 192.168.1.0/24 -t 128 -q   # quiet CSV-free text results, more workers
+gnulte-scan -T                            # the tabbed browser</code></pre>
+
+    <h2>Output</h2>
+    <p>Per device: IP, MAC, vendor, hostname(s), device-type guess, open ports (deep
+    mode) and an OS fingerprint with a confidence score (v12+). <code>--watch</code>
+    output marks movement per sweep; <code>--json</code> turns that into one JSON object
+    per sweep on stdout, with the narrative on stderr — so
+    <code>gnulte-scan --watch 5 --json | jq</code> is a working motion sensor.</p>
+
+    <h2>Installation</h2>
+    <p>Part of the GNULTE suite. Build and install everything at once;</p>
+<pre><code>git clone https://github.com/notmicrosoft2000-cmd/gnulte-go.git
+cd gnulte-go
+./build.sh          # builds all eight binaries, runs go vet + go test ./...
+sudo ./install.sh   # installs to /usr/local/bin + safety docs</code></pre>
+    <p>installs <code>gnulte-scan</code> to <code>/usr/local/bin/gnulte-scan</code>. See
+    <a href="install.html">installation</a> for requirements.</p>
+
+    <h2>Common errors</h2>
+    <dl class="defs">
+      <dt>A host is missing from the sweep</dt>
+      <dd>Use <code>--arp</code> (automatic as root): devices that block ICMP but answer ARP are caught by the ARP sweep.</dd>
+      <dt><code>-T</code> will not open</dt>
+      <dd>The interactive browser needs a real terminal; use plain output in scripts or pipes.</dd>
+      <dt>Vendor shows as unknown</dt>
+      <dd>Merge your own table with <code>--oui-file</code> (<code>prefix,vendor</code> CSV) over the built-in OUI data.</dd>
+    </dl>
+
+    <h2>Related tools</h2>
+    <ul>
+      <li><a href="gnulte-devices.html">gnulte-devices</a> — the same inventory in one pass, no sweep</li>
+      <li><a href="gnulte-lan.html">gnulte-lan</a> — continuous watching instead of periodic sweeps</li>
+      <li><a href="gnulte.html">gnulte</a> — turn a discovered host into a test target</li>
+    </ul>
+  </div>
+
+  <div class="col-right">
+    <div class="box">
+      <h3>At a glance</h3>
+      <div class="b">
+        <dl>
+          <dt>Root</dt><dd>optional</dd>
+          <dt>Output</dt><dd>console, JSON, YAML, CSV, HTML report</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="box">
+      <h3>See also</h3>
+      <div class="b">
+        <ul>
+          <li><a href="usage.html">Usage recipes</a></li>
+          <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div><!-- .cols -->
+
+<div class="foot">
+  <p class="foot-nav">
+    <a href="../index.html">Home</a>
+    <a href="../tools.html">Tools</a>
+    <a href="../docs.html">Documentation</a>
+    <a href="../downloads.html">Downloads</a>
+    <a href="../changelog.html">Changelog</a>
+    <a href="../about.html">About</a>
+    <a href="../search.html">Search</a>
+    <a href="../feed.xml">News feed</a>
+  </p>
+  <p>Copyright &copy; 2026 Neptune Productions. GNULTE is free software released under the
+     <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL version 3 or later</a>.</p>
+  <p>Source: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">github.com/notmicrosoft2000-cmd/gnulte-go</a>
+     &middot; Issues: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a>
+     &middot; Authorised network testing only.</p>
+  <p>This page last updated: 2026-10-15.</p>
+</div>
+
+</div><!-- .wrap -->
+<script src="../js/search.js?v=16.13-r4"></script>
+</body>
+</html>

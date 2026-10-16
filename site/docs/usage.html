@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Usage — GNULTE documentation</title>
+<meta name="description" content="GNULTE usage: quick start, common recipes, the LAN-watch keys, the watch-to-test hand-off and machine-readable feeds.">
+<link rel="icon" href="../img/favicon.ico">
+<link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
+<link rel="stylesheet" href="../css/gnulte.css?v=16.13-r4">
+</head>
+<body>
+<div class="wrap">
+
+<div class="head">
+  <a class="brand" href="../index.html">
+    <img src="../img/logo-48.png" alt="GNULTE icon" width="48" height="48">
+    <b>GNULTE</b>
+    <span class="tag">GNU LAN Network Testing Environment &middot; v16.13</span>
+  </a>
+  <form class="head-search" action="../search.html" method="get">
+    <label for="hq">Search</label>
+    <input id="hq" type="text" name="q" size="18">
+    <input type="submit" value="Go">
+  </form>
+</div>
+
+<ul class="nav">
+  <li><a href="../index.html">Home</a></li>
+  <li><a href="../tools.html">Tools</a></li>
+  <li><a class="active" href="../docs.html">Documentation</a></li>
+  <li><a href="../downloads.html">Downloads</a></li>
+  <li><a href="../changelog.html">Changelog</a></li>
+  <li><a href="../about.html">About</a></li>
+</ul>
+
+<div class="cols">
+
+  <div class="col-left">
+    <div class="box">
+      <h3>Documentation</h3>
+      <ul class="navlist">
+        <li><a href="../docs.html">Introduction</a></li>
+        <li><a href="install.html">Installation</a></li>
+        <li><a href="configuration.html">Configuration</a></li>
+        <li><a class="active" href="usage.html">Usage</a></li>
+        <li class="grp">Command reference</li>
+        <li><a href="gnulte.html">gnulte</a></li>
+        <li><a href="gnulte-lan.html">gnulte-lan</a></li>
+        <li><a href="gnulte-scan.html">gnulte-scan</a></li>
+        <li><a href="gnulte-devices.html">gnulte-devices</a></li>
+        <li><a href="gnulte-wifi.html">gnulte-wifi</a></li>
+        <li><a href="gnulte-doctor.html">gnulte-doctor</a></li>
+        <li><a href="gnulte-trace.html">gnulte-trace</a></li>
+        <li><a href="gnulte-top.html">gnulte-top</a></li>
+        <li class="grp">Help</li>
+        <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="col-main" role="main">
+    <p class="crumbs"><a href="../index.html">Home</a> &rsaquo; <a href="../docs.html">Documentation</a> &rsaquo; Usage</p>
+    <h1>Usage</h1>
+    <p class="meta">Applies to GNULTE v16.13 &middot; last updated 2026-10-15</p>
+
+    <div class="warn">
+      <b>Before you start:</b> these tools shape, spoof, capture and inject on a live
+      network. Only run them on networks you own or are explicitly authorised to test.
+      If in doubt, run <code>gnulte-doctor</code> and read <a href="../about.html#safety">authorised use</a>.
+    </div>
+
+    <h2>Quick start</h2>
+<pre><code>sudo gnulte                                            # guided menu: target -&gt; conditions -&gt; run
+sudo gnulte -t 192.168.1.50 -l 300 -j 30 --duration 90 # 300ms latency + 30ms jitter, 90s auto-stop
+sudo gnulte -r 192.168.1.0/24 -w 192.168.1.100 --profile throttle --duration 600
+
+gnulte-lan                                             # six-screen live watch (auto-discovers subnet)
+gnulte-lan -t 192.168.1.20 --duration 60               # one host, up close
+gnulte-scan --deep                                     # sweep + in-Go port scan + OS fingerprint
+gnulte-scan --watch 5                                  # live re-scan: &#9650; new &#9660; gone ~ changed
+gnulte-scan -T                                         # tabbed browser: Devices / Log / Summary
+gnulte-devices -s                                      # instant ARP inventory + optional sweep</code></pre>
+
+    <h2>Recipe: shape one host and keep the evidence</h2>
+    <p>A labelled run that auto-stops, records the traffic and files a report:</p>
+<pre><code>sudo gnulte -t 192.168.1.50 -l 250 -j 40 -p 2 \
+  --duration 300 --note gaming-latency-test-3 \
+  --capture session.pcap</code></pre>
+    <p>The dashboard shows per-second ping results while the run lasts and a live
+    <code>netem live</code> line straight from <code>tc -s qdisc</code>; when it ends,
+    a session summary (min/avg/p95/max, jitter, loss distribution, a rough E-model MOS)
+    is printed and the HTML report lands in <code>~/GNULTE Reports/</code>.</p>
+
+    <h2>Recipe: watch first, then test</h2>
+    <p>The tools are designed to hand off to each other. Start a watch, pick the noisy
+    host, and press <kbd>&#9166;</kbd> to open <code>gnulte -t &lt;ip&gt;</code> in a
+    terminal window with that host already loaded:</p>
+<pre><code>gnulte-lan                    # discover and watch the whole LAN
+# ... find the host, press &#9166; to test it, or x to save the watch to the device store</code></pre>
+    <p>The device store is shared: <code>gnulte</code> reads it with <code>w</code> in
+    the target picker, and <code>gnulte-scan</code> marks devices it already knows with
+    <code>*</code>.</p>
+
+    <h2>The LAN-watch screens and keys</h2>
+    <table class="data">
+      <tr><th style="width:22%">Screen</th><th>Shows</th></tr>
+      <tr><td><kbd>1</kbd> hosts</td><td>every host with live down/up speed, packet rate, latency and a health grade; one stable colour per IP</td></tr>
+      <tr><td><kbd>2</kbd> talkers</td><td>top talkers ranked with bars and peer counts</td></tr>
+      <tr><td><kbd>3</kbd> flows</td><td>per-pair conversations (needs the root capture socket)</td></tr>
+      <tr><td><kbd>4</kbd> neighbours</td><td>the ARP/neighbour table</td></tr>
+      <tr><td><kbd>5</kbd> map</td><td>the live interconnection map: devices as nodes, live pairs as edges (root)</td></tr>
+      <tr><td><kbd>6</kbd> history</td><td>the session's alarms beside today's recorded up/down transitions</td></tr>
+    </table>
+    <p>Keys: <kbd>&uarr;&darr;</kbd> browse &middot;
+    <kbd>&#9166;</kbd>/<kbd>g</kbd> hand off to <code>gnulte -t &lt;ip&gt;</code> &middot;
+    <kbd>Tab</kbd>/<kbd>d</kbd> detail &middot;
+    <kbd>1</kbd>&ndash;<kbd>6</kbd> (or <kbd>t</kbd>/<kbd>f</kbd>/<kbd>n</kbd>/<kbd>m</kbd>) screens &middot;
+    <kbd>x</kbd> save the watch to the shared store &middot;
+    <kbd>s</kbd> sort &middot; <kbd>a</kbd> alarm-only &middot; <kbd>o</kbd> settings &middot;
+    <kbd>h</kbd> help &middot; <kbd>q</kbd> quit.</p>
+
+    <h2>Recipe: motion detection with jq</h2>
+    <p>Several tools emit machine-readable feeds. <code>gnulte-scan --watch N --json</code>
+    prints one JSON object per sweep — a <code>{"kind":"baseline"}</code> object, then
+    <code>{"kind":"delta"}</code> objects with the movement — while the narrative goes to
+    stderr:</p>
+<pre><code>gnulte-scan --watch 5 --json | jq 'select(.kind=="delta")'
+
+gnulte-lan --json | jq .          # JSON-lines: baseline, per-second rates + alerts
+gnulte-top --json                 # one bandwidth sample as JSON
+gnulte-trace --json               # the finished path table as JSON
+gnulte-doctor --json              # the pre-flight report as JSON</code></pre>
+
+    <h2>Recipe: find what a slow network is doing to a path</h2>
+<pre><code>sudo gnulte-trace 1.1.1.1                 # live hop-by-hop table with loss per hop
+sudo gnulte-trace -m 20 --html trace.html # bounded, with a self-contained report</code></pre>
+
+    <h2>Ending a run</h2>
+    <p>The first <kbd>Ctrl+C</kbd> restores the screen and lets the shutdown finish —
+    previous qdisc and <code>ip_forward</code> value restored, ARP caches repaired. A
+    second <kbd>Ctrl+C</kbd> (or a grace-period timeout) forces the exit if a teardown
+    really is stuck. Do not <code>kill -9</code> a shaping run: it leaves targets
+    mid-spoof.</p>
+
+    <p>Per-tool flags and options: the <a href="../tools.html">tool directory</a> and the
+    <a href="../docs.html">command reference</a>.</p>
+  </div>
+
+  <div class="col-right">
+    <div class="box">
+      <h3>In this section</h3>
+      <div class="b">
+        <ul>
+          <li><a href="install.html">Installation</a></li>
+          <li><a href="configuration.html">Configuration</a></li>
+          <li><a href="usage.html">Usage</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="box">
+      <h3>Related</h3>
+      <div class="b">
+        <ul>
+          <li><a href="gnulte-lan.html">gnulte-lan reference</a></li>
+          <li><a href="gnulte.html">gnulte reference</a></li>
+          <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div><!-- .cols -->
+
+<div class="foot">
+  <p class="foot-nav">
+    <a href="../index.html">Home</a>
+    <a href="../tools.html">Tools</a>
+    <a href="../docs.html">Documentation</a>
+    <a href="../downloads.html">Downloads</a>
+    <a href="../changelog.html">Changelog</a>
+    <a href="../about.html">About</a>
+    <a href="../search.html">Search</a>
+    <a href="../feed.xml">News feed</a>
+  </p>
+  <p>Copyright &copy; 2026 Neptune Productions. GNULTE is free software released under the
+     <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL version 3 or later</a>.</p>
+  <p>Source: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">github.com/notmicrosoft2000-cmd/gnulte-go</a>
+     &middot; Issues: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a>
+     &middot; Authorised network testing only.</p>
+  <p>This page last updated: 2026-10-15.</p>
+</div>
+
+</div><!-- .wrap -->
+<script src="../js/search.js?v=16.13-r4"></script>
+</body>
+</html>

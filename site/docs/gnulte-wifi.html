@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>gnulte-wifi — command reference — GNULTE documentation</title>
+<meta name="description" content="Command reference for gnulte-wifi, the GNULTE 802.11 deauthentication tester: monitor mode, bursts, reason codes, jitter and channel hopping.">
+<link rel="icon" href="../img/favicon.ico">
+<link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
+<link rel="stylesheet" href="../css/gnulte.css?v=16.13-r4">
+</head>
+<body>
+<div class="wrap">
+
+<div class="head">
+  <a class="brand" href="../index.html">
+    <img src="../img/logo-48.png" alt="GNULTE icon" width="48" height="48">
+    <b>GNULTE</b>
+    <span class="tag">GNU LAN Network Testing Environment &middot; v16.13</span>
+  </a>
+  <form class="head-search" action="../search.html" method="get">
+    <label for="hq">Search</label>
+    <input id="hq" type="text" name="q" size="18">
+    <input type="submit" value="Go">
+  </form>
+</div>
+
+<ul class="nav">
+  <li><a href="../index.html">Home</a></li>
+  <li><a href="../tools.html">Tools</a></li>
+  <li><a class="active" href="../docs.html">Documentation</a></li>
+  <li><a href="../downloads.html">Downloads</a></li>
+  <li><a href="../changelog.html">Changelog</a></li>
+  <li><a href="../about.html">About</a></li>
+</ul>
+
+<div class="cols">
+
+  <div class="col-left">
+    <div class="box">
+      <h3>Documentation</h3>
+      <ul class="navlist">
+        <li><a href="../docs.html">Introduction</a></li>
+        <li><a href="install.html">Installation</a></li>
+        <li><a href="configuration.html">Configuration</a></li>
+        <li><a href="usage.html">Usage</a></li>
+        <li class="grp">Command reference</li>
+        <li><a href="gnulte.html">gnulte</a></li>
+        <li><a href="gnulte-lan.html">gnulte-lan</a></li>
+        <li><a href="gnulte-scan.html">gnulte-scan</a></li>
+        <li><a href="gnulte-devices.html">gnulte-devices</a></li>
+        <li><a class="active" href="gnulte-wifi.html">gnulte-wifi</a></li>
+        <li><a href="gnulte-doctor.html">gnulte-doctor</a></li>
+        <li><a href="gnulte-trace.html">gnulte-trace</a></li>
+        <li><a href="gnulte-top.html">gnulte-top</a></li>
+        <li class="grp">Help</li>
+        <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="col-main" role="main">
+    <p class="crumbs"><a href="../index.html">Home</a> &rsaquo; <a href="../docs.html">Documentation</a> &rsaquo; <a href="../tools.html">Tools</a> &rsaquo; gnulte-wifi</p>
+    <h1>gnulte-wifi(8) — Wi-Fi disassociation testing</h1>
+    <p class="meta">Applies to gnulte-wifi v16.13 &middot; last updated 2026-10-15</p>
+
+    <p>An 802.11 Deauthentication frame is crafted with the source MAC set to the
+    access point's BSSID and the destination set to one station. The station assumes its
+    router disconnected it and drops the Wi-Fi association — the same behaviour as a
+    router's &ldquo;kick client&rdquo; control, reproduced for authorised testing.</p>
+
+    <div class="warn">
+      <b>Authorised testing only.</b> Deauthenticating clients on a network you do not
+      own or are not explicitly authorised to test is illegal in most jurisdictions.
+      GNULTE requires an explicit acceptance record before it will run.
+    </div>
+
+    <h2>Requirements</h2>
+    <ul>
+      <li><b>Root.</b></li>
+      <li>A wireless interface <b>already in monitor mode</b>
+          (<code>airmon-ng start wlan0</code> or
+          <code>iw dev wlan0 set type monitor</code>). GNULTE does not change the
+          interface mode itself.</li>
+      <li>An adapter that supports injection; some cap injection rates (raise
+          <code>--count</code> if a single frame rarely lands).</li>
+    </ul>
+
+    <h2>Synopsis</h2>
+<pre><code>sudo gnulte-wifi -i IFACE -a APBSSID -s STATIONMAC
+
+sudo gnulte-wifi -i wlan0mon -a 00:0c:41:63:45:6a -s aa:bb:cc:dd:ee:ff</code></pre>
+
+    <h2>Options</h2>
+    <table class="data">
+      <tr><th style="width:30%">Option</th><th>Description</th></tr>
+      <tr><td><code>-i, --interface IFACE</code></td><td>wireless interface in monitor mode (e.g. <code>wlan0mon</code>)</td></tr>
+      <tr><td><code>-a, --ap MAC</code></td><td>access point BSSID (the router's MAC)</td></tr>
+      <tr><td><code>-s, --station MAC</code></td><td>station to disconnect; <code>ff:ff:ff:ff:ff:ff</code> = every client on the BSSID</td></tr>
+      <tr><td><code>--reason CODE</code></td><td>802.11 deauth reason code (default 7 = STA leaving BSS)</td></tr>
+      <tr><td><code>--count N</code></td><td>frames per burst (default 64)</td></tr>
+      <tr><td><code>--delay SECONDS</code></td><td>seconds between bursts (repeat kicks a client that reconnects; default 5)</td></tr>
+      <tr><td><code>--jitter-ms N</code></td><td>random 0&ndash;N ms delay before each frame — irregular timing defeats reconnect timers (0 = no jitter)</td></tr>
+      <tr><td><code>--mix</code></td><td>rotate the reason code each burst (default on; off when <code>--reason</code> is given explicitly)</td></tr>
+      <tr><td><code>--hop-channels</code></td><td>hop the adapter through a channel list after each burst, so a channel-hopping AP stays in range</td></tr>
+      <tr><td><code>--channels LIST</code></td><td>hop list, comma-separated (default <code>1,6,11</code>)</td></tr>
+      <tr><td><code>--once</code></td><td>send a single burst and exit</td></tr>
+      <tr><td><code>--duration SECONDS</code></td><td>auto-stop after N seconds (0 = until Ctrl+C)</td></tr>
+      <tr><td><code>--force</code></td><td>skip interactive confirmations</td></tr>
+      <tr><td><code>--no-banner</code></td><td>skip the banner (alias: <code>--minimal</code>)</td></tr>
+      <tr><td><code>-q, --quiet</code></td><td>results only</td></tr>
+      <tr><td><code>--settings</code></td><td>open the settings editor and exit</td></tr>
+      <tr><td><code>--docs</code></td><td>print the safety documents and exit</td></tr>
+      <tr><td><code>--reset-safety</code></td><td>remove the acceptance record and exit</td></tr>
+      <tr><td><code>--version</code></td><td>print version and exit</td></tr>
+      <tr><td><code>-h, --help</code></td><td>show the built-in help</td></tr>
+    </table>
+
+    <h2>Examples</h2>
+<pre><code>sudo gnulte-wifi -i wlan0mon -a 00:0c:41:63:45:6a -s aa:bb:cc:dd:ee:ff --once
+sudo gnulte-wifi -i wlan0mon -a 00:0c:41:63:45:6a -s ff:ff:ff:ff:ff:ff --duration 60 --jitter-ms 150</code></pre>
+
+    <h2>Installation</h2>
+    <p>Part of the GNULTE suite. Build and install everything at once;</p>
+<pre><code>git clone https://github.com/notmicrosoft2000-cmd/gnulte-go.git
+cd gnulte-go
+./build.sh          # builds all eight binaries, runs go vet + go test ./...
+sudo ./install.sh   # installs to /usr/local/bin + safety docs</code></pre>
+    <p>installs <code>gnulte-wifi</code> to <code>/usr/local/bin/gnulte-wifi</code>. See
+    <a href="install.html">installation</a> for requirements.</p>
+
+    <h2>Common errors</h2>
+    <dl class="defs">
+      <dt>Nothing is injected</dt>
+      <dd>Check the interface is in monitor mode (<code>airmon-ng start</code> / <code>iw dev ... set type monitor</code>); GNULTE does not switch the mode itself.</dd>
+      <dt>The station rarely drops</dt>
+      <dd>Some adapters cap injection rates: raise <code>--count</code>, add <code>--jitter-ms</code>, and repeat with <code>--delay</code>.</dd>
+      <dt>The client will not stay disconnected</dt>
+      <dd>That is expected for a single burst — a station that rejoins is kicked again on the next burst, which is what <code>--delay</code> repeats.</dd>
+    </dl>
+
+    <h2>Related tools</h2>
+    <ul>
+      <li><a href="gnulte.html">gnulte</a> — the wired equivalent: impair rather than disconnect</li>
+      <li><a href="gnulte-scan.html">gnulte-scan</a> — identify the clients before testing them</li>
+    </ul>
+  </div>
+
+  <div class="col-right">
+    <div class="box">
+      <h3>At a glance</h3>
+      <div class="b">
+        <dl>
+          <dt>Root</dt><dd>yes</dd>
+          <dt>Needs</dt><dd>monitor-mode interface</dd>
+          <dt>Output</dt><dd>console</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="box">
+      <h3>Safety</h3>
+      <div class="b">
+        <p>Consent-gated: requires the acceptance record; clear it with
+        <code>--reset-safety</code>.</p>
+        <p><a href="../about.html#safety">Authorised use &raquo;</a></p>
+      </div>
+    </div>
+  </div>
+
+</div><!-- .cols -->
+
+<div class="foot">
+  <p class="foot-nav">
+    <a href="../index.html">Home</a>
+    <a href="../tools.html">Tools</a>
+    <a href="../docs.html">Documentation</a>
+    <a href="../downloads.html">Downloads</a>
+    <a href="../changelog.html">Changelog</a>
+    <a href="../about.html">About</a>
+    <a href="../search.html">Search</a>
+    <a href="../feed.xml">News feed</a>
+  </p>
+  <p>Copyright &copy; 2026 Neptune Productions. GNULTE is free software released under the
+     <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL version 3 or later</a>.</p>
+  <p>Source: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">github.com/notmicrosoft2000-cmd/gnulte-go</a>
+     &middot; Issues: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a>
+     &middot; Authorised network testing only.</p>
+  <p>This page last updated: 2026-10-15.</p>
+</div>
+
+</div><!-- .wrap -->
+<script src="../js/search.js?v=16.13-r4"></script>
+</body>
+</html>

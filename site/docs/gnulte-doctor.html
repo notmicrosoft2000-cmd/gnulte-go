@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>gnulte-doctor — command reference — GNULTE documentation</title>
+<meta name="description" content="Command reference for gnulte-doctor, the GNULTE pre-flight health check: privileges, tc/iptables, ip_forward, kernel modules, routes and duplicate IPs.">
+<link rel="icon" href="../img/favicon.ico">
+<link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
+<link rel="stylesheet" href="../css/gnulte.css?v=16.13-r4">
+</head>
+<body>
+<div class="wrap">
+
+<div class="head">
+  <a class="brand" href="../index.html">
+    <img src="../img/logo-48.png" alt="GNULTE icon" width="48" height="48">
+    <b>GNULTE</b>
+    <span class="tag">GNU LAN Network Testing Environment &middot; v16.13</span>
+  </a>
+  <form class="head-search" action="../search.html" method="get">
+    <label for="hq">Search</label>
+    <input id="hq" type="text" name="q" size="18">
+    <input type="submit" value="Go">
+  </form>
+</div>
+
+<ul class="nav">
+  <li><a href="../index.html">Home</a></li>
+  <li><a href="../tools.html">Tools</a></li>
+  <li><a class="active" href="../docs.html">Documentation</a></li>
+  <li><a href="../downloads.html">Downloads</a></li>
+  <li><a href="../changelog.html">Changelog</a></li>
+  <li><a href="../about.html">About</a></li>
+</ul>
+
+<div class="cols">
+
+  <div class="col-left">
+    <div class="box">
+      <h3>Documentation</h3>
+      <ul class="navlist">
+        <li><a href="../docs.html">Introduction</a></li>
+        <li><a href="install.html">Installation</a></li>
+        <li><a href="configuration.html">Configuration</a></li>
+        <li><a href="usage.html">Usage</a></li>
+        <li class="grp">Command reference</li>
+        <li><a href="gnulte.html">gnulte</a></li>
+        <li><a href="gnulte-lan.html">gnulte-lan</a></li>
+        <li><a href="gnulte-scan.html">gnulte-scan</a></li>
+        <li><a href="gnulte-devices.html">gnulte-devices</a></li>
+        <li><a href="gnulte-wifi.html">gnulte-wifi</a></li>
+        <li><a class="active" href="gnulte-doctor.html">gnulte-doctor</a></li>
+        <li><a href="gnulte-trace.html">gnulte-trace</a></li>
+        <li><a href="gnulte-top.html">gnulte-top</a></li>
+        <li class="grp">Help</li>
+        <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="col-main" role="main">
+    <p class="crumbs"><a href="../index.html">Home</a> &rsaquo; <a href="../docs.html">Documentation</a> &rsaquo; <a href="../tools.html">Tools</a> &rsaquo; gnulte-doctor</p>
+    <h1>gnulte-doctor(8) — the pre-flight check</h1>
+    <p class="meta">Applies to gnulte-doctor v16.13 &middot; last updated 2026-10-15</p>
+
+    <p>A zero-dependency check of whether this machine is ready to run the toolkit. Run
+    it before the first real test and whenever something behaves strangely — most
+    GNULTE problems are a WARN or FAIL it can already name.</p>
+
+    <h2>Requirements</h2>
+    <ul>
+      <li>No privileges needed; running it as root adds the privilege-related checks.</li>
+      <li>Added in v16.9; no external tools of any kind.</li>
+    </ul>
+
+    <h2>Synopsis</h2>
+<pre><code>gnulte-doctor [flags]</code></pre>
+
+    <h2>What it checks</h2>
+    <table class="data">
+      <tr><th style="width:30%">Check</th><th>Notes</th></tr>
+      <tr><td>Privileges</td><td>whether the tools that need root can get it</td></tr>
+      <tr><td><code>tc</code> / <code>iptables</code></td><td>binaries present (the kernel interface for shaping)</td></tr>
+      <tr><td><code>ip_forward</code></td><td>IPv4 forwarding state, as the engine expects to find it</td></tr>
+      <tr><td>netem / netfilter modules</td><td>whether the kernel modules are loaded or loadable</td></tr>
+      <tr><td>Default route and interface</td><td>that there is a usable default route and a sane egress interface</td></tr>
+      <tr><td>Duplicate IPs</td><td>two hosts answering for the same address (ARP conflicts)</td></tr>
+      <tr><td>Safety record</td><td>the state of the authorised-use acceptance record</td></tr>
+    </table>
+
+    <h2>Options</h2>
+    <table class="data">
+      <tr><th style="width:26%">Flag</th><th>Description</th></tr>
+      <tr><td><code>--json</code></td><td>output the report as JSON, for scripts and bug reports</td></tr>
+      <tr><td><code>-q</code></td><td>quiet: print only warnings and failures</td></tr>
+      <tr><td><code>--version</code></td><td>print version and exit</td></tr>
+    </table>
+
+    <h2>Examples</h2>
+<pre><code>gnulte-doctor          # human-readable PASS/WARN/FAIL table
+gnulte-doctor --json   # machine-readable, for bug reports and gating
+gnulte-doctor -q       # warnings and failures only</code></pre>
+
+    <h2>Exit status</h2>
+    <p>Exits non-zero when any check fails, so a script can gate on it:</p>
+<pre><code>gnulte-doctor -q || exit 1
+gnulte-doctor --json | jq '.checks[] | select(.status=="FAIL")'</code></pre>
+
+    <h2>Reading the result</h2>
+    <ul>
+      <li><b>PASS</b> — the machine is fine for that check.</li>
+      <li><b>WARN</b> — usable, but something will behave differently (a missing
+          optional module, an unusual route, a duplicate IP).</li>
+      <li><b>FAIL</b> — a tool will not work until this is fixed; the table includes a
+          fix-it hint.</li>
+    </ul>
+
+    <h2>Installation</h2>
+    <p>Part of the GNULTE suite. Build and install everything at once;</p>
+<pre><code>git clone https://github.com/notmicrosoft2000-cmd/gnulte-go.git
+cd gnulte-go
+./build.sh          # builds all eight binaries, runs go vet + go test ./...
+sudo ./install.sh   # installs to /usr/local/bin + safety docs</code></pre>
+    <p>installs <code>gnulte-doctor</code> to <code>/usr/local/bin/gnulte-doctor</code>. See
+    <a href="install.html">installation</a> for requirements.</p>
+
+    <h2>Common errors</h2>
+    <dl class="defs">
+      <dt>Non-zero exit status</dt>
+      <dd>At least one check FAILed; the table names it with a fix-it hint. In scripts, gate with <code>gnulte-doctor -q || ...</code>.</dd>
+      <dt>Everything PASSes but shaping still fails</dt>
+      <dd>Re-run as root so the privilege checks are meaningful, then see <a href="troubleshooting.html">troubleshooting</a>.</dd>
+    </dl>
+
+    <h2>Related tools</h2>
+    <ul>
+      <li><a href="troubleshooting.html">Troubleshooting</a> — the manual version of the same diagnosis</li>
+      <li>every other tool in the suite — doctor is the first step of all of them</li>
+    </ul>
+  </div>
+
+  <div class="col-right">
+    <div class="box">
+      <h3>At a glance</h3>
+      <div class="b">
+        <dl>
+          <dt>Root</dt><dd>no</dd>
+          <dt>Output</dt><dd>console table, JSON</dd>
+          <dt>Since</dt><dd>v16.9</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="box">
+      <h3>See also</h3>
+      <div class="b">
+        <ul>
+          <li><a href="troubleshooting.html">Troubleshooting</a></li>
+          <li><a href="install.html">Installation</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div><!-- .cols -->
+
+<div class="foot">
+  <p class="foot-nav">
+    <a href="../index.html">Home</a>
+    <a href="../tools.html">Tools</a>
+    <a href="../docs.html">Documentation</a>
+    <a href="../downloads.html">Downloads</a>
+    <a href="../changelog.html">Changelog</a>
+    <a href="../about.html">About</a>
+    <a href="../search.html">Search</a>
+    <a href="../feed.xml">News feed</a>
+  </p>
+  <p>Copyright &copy; 2026 Neptune Productions. GNULTE is free software released under the
+     <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL version 3 or later</a>.</p>
+  <p>Source: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">github.com/notmicrosoft2000-cmd/gnulte-go</a>
+     &middot; Issues: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a>
+     &middot; Authorised network testing only.</p>
+  <p>This page last updated: 2026-10-15.</p>
+</div>
+
+</div><!-- .wrap -->
+<script src="../js/search.js?v=16.13-r4"></script>
+</body>
+</html>

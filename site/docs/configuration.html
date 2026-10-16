@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Configuration — GNULTE documentation</title>
+<meta name="description" content="GNULTE configuration: the settings editor, saved defaults, the twelve built-in impairment profiles, scenario scripts and per-target overrides.">
+<link rel="icon" href="../img/favicon.ico">
+<link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
+<link rel="stylesheet" href="../css/gnulte.css?v=16.13-r4">
+</head>
+<body>
+<div class="wrap">
+
+<div class="head">
+  <a class="brand" href="../index.html">
+    <img src="../img/logo-48.png" alt="GNULTE icon" width="48" height="48">
+    <b>GNULTE</b>
+    <span class="tag">GNU LAN Network Testing Environment &middot; v16.13</span>
+  </a>
+  <form class="head-search" action="../search.html" method="get">
+    <label for="hq">Search</label>
+    <input id="hq" type="text" name="q" size="18">
+    <input type="submit" value="Go">
+  </form>
+</div>
+
+<ul class="nav">
+  <li><a href="../index.html">Home</a></li>
+  <li><a href="../tools.html">Tools</a></li>
+  <li><a class="active" href="../docs.html">Documentation</a></li>
+  <li><a href="../downloads.html">Downloads</a></li>
+  <li><a href="../changelog.html">Changelog</a></li>
+  <li><a href="../about.html">About</a></li>
+</ul>
+
+<div class="cols">
+
+  <div class="col-left">
+    <div class="box">
+      <h3>Documentation</h3>
+      <ul class="navlist">
+        <li><a href="../docs.html">Introduction</a></li>
+        <li><a href="install.html">Installation</a></li>
+        <li><a class="active" href="configuration.html">Configuration</a></li>
+        <li><a href="usage.html">Usage</a></li>
+        <li class="grp">Command reference</li>
+        <li><a href="gnulte.html">gnulte</a></li>
+        <li><a href="gnulte-lan.html">gnulte-lan</a></li>
+        <li><a href="gnulte-scan.html">gnulte-scan</a></li>
+        <li><a href="gnulte-devices.html">gnulte-devices</a></li>
+        <li><a href="gnulte-wifi.html">gnulte-wifi</a></li>
+        <li><a href="gnulte-doctor.html">gnulte-doctor</a></li>
+        <li><a href="gnulte-trace.html">gnulte-trace</a></li>
+        <li><a href="gnulte-top.html">gnulte-top</a></li>
+        <li class="grp">Help</li>
+        <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="col-main" role="main">
+    <p class="crumbs"><a href="../index.html">Home</a> &rsaquo; <a href="../docs.html">Documentation</a> &rsaquo; Configuration</p>
+    <h1>Configuration</h1>
+    <p class="meta">Applies to GNULTE v16.13 &middot; last updated 2026-10-15</p>
+
+    <p>GNULTE has no system-wide configuration. Every tool ships with working defaults;
+    what you can tune is saved per user, under <code>~/.config/gnulte-go/</code>.</p>
+
+    <h2>The settings editor</h2>
+    <p>Most tools accept <code>--settings</code>, which opens a small full-screen editor
+    for that tool's saved defaults (alarm thresholds, update intervals, history depth,
+    sounds, report behaviour) and exits. Settings are stored in
+    <code>~/.config/gnulte-go/config.json</code> and apply to every future run of that
+    tool; command-line flags always override them for a single run.</p>
+    <p>Editors inside the tools: press <code>o</code> in <code>gnulte-lan</code> and in
+    the <code>gnulte-scan -T</code> browser.</p>
+
+    <h2>Impairment profiles</h2>
+    <p>The shaping engine ships with twelve built-in profiles. List them with:</p>
+<pre><code>gnulte --list-profiles</code></pre>
+    <table class="data">
+      <tr><th>Profile</th><th>Latency</th><th>Jitter</th><th>Loss</th><th>Dup</th><th>Reorder</th><th>Cap</th></tr>
+      <tr><td><code>gaming</code></td><td>1500 ms</td><td>300 ms</td><td>2 %</td><td>0 %</td><td>0 %</td><td>&mdash;</td></tr>
+      <tr><td><code>streaming</code></td><td>2500 ms</td><td>500 ms</td><td>5 %</td><td>0 %</td><td>0 %</td><td>&mdash;</td></tr>
+      <tr><td><code>voip</code></td><td>3000 ms</td><td>200 ms</td><td>0 %</td><td>0 %</td><td>5 %</td><td>&mdash;</td></tr>
+      <tr><td><code>web</code></td><td>2000 ms</td><td>400 ms</td><td>3 %</td><td>0 %</td><td>0 %</td><td>&mdash;</td></tr>
+      <tr><td><code>extreme</code></td><td>5000 ms</td><td>1000 ms</td><td>10 %</td><td>5 %</td><td>5 %</td><td>&mdash;</td></tr>
+      <tr><td><code>throttle</code></td><td>500 ms</td><td>200 ms</td><td>0 %</td><td>0 %</td><td>0 %</td><td>512 kbps</td></tr>
+      <tr><td><code>satellite</code></td><td>600 ms</td><td>40 ms</td><td>1 %</td><td>0 %</td><td>0 %</td><td>&mdash;</td></tr>
+      <tr><td><code>cellular</code></td><td>150 ms</td><td>90 ms</td><td>2 %</td><td>1 %</td><td>0 %</td><td>&mdash;</td></tr>
+      <tr><td><code>dialup</code></td><td>200 ms</td><td>120 ms</td><td>0 %</td><td>0 %</td><td>0 %</td><td>56 kbps</td></tr>
+      <tr><td><code>congested</code></td><td>400 ms</td><td>350 ms</td><td>5 %</td><td>3 %</td><td>2 %</td><td>&mdash;</td></tr>
+      <tr><td><code>bufferbloat</code></td><td>60 ms</td><td>200 ms</td><td>0 %</td><td>0 %</td><td>0 %</td><td>&mdash;</td></tr>
+      <tr><td><code>nightmare</code></td><td>8000 ms</td><td>2000 ms</td><td>25 %</td><td>10 %</td><td>10 %</td><td>&mdash;</td></tr>
+    </table>
+    <p>Apply one with <code>--profile NAME</code>. Save your own from the current
+    command line with <code>--profile save:NAME</code>; user profiles live in
+    <code>~/.config/gnulte-go/profiles.json</code> and appear in
+    <code>--list-profiles</code> alongside the built-ins.</p>
+
+    <h2>Scenario scripts</h2>
+    <p>A scenario turns one run into a sequence of timed phases — the shape of a real
+    bad day rather than a constant. Pass it with <code>--scenario FILE</code>; the
+    dashboard names the phase currently in force.</p>
+    <p>A scenario file is JSON: a name, an optional loop flag, and an ordered list of
+    phases. Each phase has a duration in seconds and any of the usual impairment keys
+    (<code>latency</code>, <code>jitter</code>, <code>loss</code>, <code>dup</code>,
+    <code>reorder</code>, <code>bandwidth</code>), plus an optional
+    <code>wobble</code> or <code>burst</code> generator:</p>
+<pre><code>{
+  "name": "storm-drill",
+  "loop": false,
+  "phases": [
+    { "name": "baseline",  "duration": 60 },
+    { "name": "congested", "duration": 120, "latency": 200, "jitter": 100, "loss": 3,
+      "wobble": { "type": "sine", "amplitude_ms": 80, "period_s": 20 } },
+    { "name": "lossy",     "duration": 60,  "latency": 120, "loss": 1,
+      "burst": { "loss_pct": 20, "on_s": 2, "off_s": 5 } }
+  ]
+}</code></pre>
+    <p><code>wobble</code> modulates the phase's base latency — <code>"sine"</code>
+    swings it by <code>amplitude_ms</code> either side of the base,
+    <code>"sawtooth"</code> rises from the base to base + amplitude and snaps back.
+    <code>burst</code> overrides the phase's loss with <code>loss_pct</code> for
+    <code>on_s</code> seconds every <code>on_s + off_s</code>. Unknown JSON keys are
+    rejected, so a typo like <code>"latancy"</code> is an error rather than a silently
+    ignored field.</p>
+
+    <h2>Per-target overrides</h2>
+    <p>With several targets, one set of conditions is rarely what you want.
+    <code>--per-target FILE</code> maps a target IP to a <i>partial</i> impairment
+    override; every key you leave out is inherited from the command line:</p>
+<pre><code>{
+  "192.168.1.50": { "latency": 400, "loss": 10 },
+  "192.168.1.62": { "bandwidth": 256 }
+}</code></pre>
+    <p>Each override becomes its own <code>tc</code>/netem class, so the targets really
+    do get different networks. Keys: <code>latency</code>, <code>jitter</code>,
+    <code>loss</code>, <code>dup</code>, <code>reorder</code>, <code>bandwidth</code>
+    (milliseconds, percent and kbps as on the command line).</p>
+
+    <h2>Other files</h2>
+    <table class="data">
+      <tr><th style="width:38%">File</th><th>Written by / read by</th></tr>
+      <tr><td><code>devices.json</code></td><td>the shared device store — written by
+          <code>gnulte-lan</code> (<code>x</code> to save a watch) and
+          <code>gnulte-scan</code>, read by <code>gnulte</code>'s target picker
+          (<code>w</code>) and by the scanner for cross-reference.</td></tr>
+      <tr><td><code>watch-history.jsonl</code></td><td>the LAN-watch up/down timeline
+          (v16.13+); one JSON object per debounced transition. Controlled with
+          <code>--history-file</code> and <code>--no-history</code>.</td></tr>
+      <tr><td><code>acceptance.json</code></td><td>the authorised-use acceptance record;
+          clear it with <code>--reset-safety</code> on any tool that asks for consent.</td></tr>
+    </table>
+
+    <p>Reports are written to <code>~/GNULTE Reports/</code> unless you name a file
+    (<code>--report FILE</code>) or suppress them (<code>--no-report</code>).</p>
+  </div>
+
+  <div class="col-right">
+    <div class="box">
+      <h3>In this section</h3>
+      <div class="b">
+        <ul>
+          <li><a href="install.html">Installation</a></li>
+          <li><a href="configuration.html">Configuration</a></li>
+          <li><a href="usage.html">Usage</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="box">
+      <h3>Related</h3>
+      <div class="b">
+        <ul>
+          <li><a href="gnulte.html">gnulte reference</a></li>
+          <li><a href="faq.html">FAQ</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div><!-- .cols -->
+
+<div class="foot">
+  <p class="foot-nav">
+    <a href="../index.html">Home</a>
+    <a href="../tools.html">Tools</a>
+    <a href="../docs.html">Documentation</a>
+    <a href="../downloads.html">Downloads</a>
+    <a href="../changelog.html">Changelog</a>
+    <a href="../about.html">About</a>
+    <a href="../search.html">Search</a>
+    <a href="../feed.xml">News feed</a>
+  </p>
+  <p>Copyright &copy; 2026 Neptune Productions. GNULTE is free software released under the
+     <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL version 3 or later</a>.</p>
+  <p>Source: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">github.com/notmicrosoft2000-cmd/gnulte-go</a>
+     &middot; Issues: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a>
+     &middot; Authorised network testing only.</p>
+  <p>This page last updated: 2026-10-15.</p>
+</div>
+
+</div><!-- .wrap -->
+<script src="../js/search.js?v=16.13-r4"></script>
+</body>
+</html>

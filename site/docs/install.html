@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Installation — GNULTE documentation</title>
+<meta name="description" content="GNULTE requirements, building from source, install.sh, updating, uninstalling, state and report directories.">
+<link rel="icon" href="../img/favicon.ico">
+<link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
+<link rel="stylesheet" href="../css/gnulte.css?v=16.13-r4">
+</head>
+<body>
+<div class="wrap">
+
+<div class="head">
+  <a class="brand" href="../index.html">
+    <img src="../img/logo-48.png" alt="GNULTE icon" width="48" height="48">
+    <b>GNULTE</b>
+    <span class="tag">GNU LAN Network Testing Environment &middot; v16.13</span>
+  </a>
+  <form class="head-search" action="../search.html" method="get">
+    <label for="hq">Search</label>
+    <input id="hq" type="text" name="q" size="18">
+    <input type="submit" value="Go">
+  </form>
+</div>
+
+<ul class="nav">
+  <li><a href="../index.html">Home</a></li>
+  <li><a href="../tools.html">Tools</a></li>
+  <li><a class="active" href="../docs.html">Documentation</a></li>
+  <li><a href="../downloads.html">Downloads</a></li>
+  <li><a href="../changelog.html">Changelog</a></li>
+  <li><a href="../about.html">About</a></li>
+</ul>
+
+<div class="cols">
+
+  <div class="col-left">
+    <div class="box">
+      <h3>Documentation</h3>
+      <ul class="navlist">
+        <li><a href="../docs.html">Introduction</a></li>
+        <li><a class="active" href="install.html">Installation</a></li>
+        <li><a href="configuration.html">Configuration</a></li>
+        <li><a href="usage.html">Usage</a></li>
+        <li class="grp">Command reference</li>
+        <li><a href="gnulte.html">gnulte</a></li>
+        <li><a href="gnulte-lan.html">gnulte-lan</a></li>
+        <li><a href="gnulte-scan.html">gnulte-scan</a></li>
+        <li><a href="gnulte-devices.html">gnulte-devices</a></li>
+        <li><a href="gnulte-wifi.html">gnulte-wifi</a></li>
+        <li><a href="gnulte-doctor.html">gnulte-doctor</a></li>
+        <li><a href="gnulte-trace.html">gnulte-trace</a></li>
+        <li><a href="gnulte-top.html">gnulte-top</a></li>
+        <li class="grp">Help</li>
+        <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="col-main" role="main">
+    <p class="crumbs"><a href="../index.html">Home</a> &rsaquo; <a href="../docs.html">Documentation</a> &rsaquo; Installation</p>
+    <h1>Installation</h1>
+    <p class="meta">Applies to GNULTE v16.13 &middot; last updated 2026-10-15</p>
+
+    <h2>Requirements</h2>
+    <table class="data">
+      <tr><th style="width:26%">Component</th><th>Required for</th></tr>
+      <tr><td>Linux</td><td>running the toolkit. The code is portable where it can be
+          (platform-specific files sit behind <code>*_linux.go</code> build tags and
+          <code>GOOS=darwin go vet</code> stays clean), but Linux is the supported
+          platform.</td></tr>
+      <tr><td><a href="https://go.dev/dl/">Go 1.21+</a></td><td>building. There are no
+          third-party modules; the standard library is enough.</td></tr>
+      <tr><td><code>iproute2</code> (<code>tc</code>)</td><td>shaping
+          (<code>gnulte</code>). This <i>is</i> the kernel interface and stays a
+          dependency by design.</td></tr>
+      <tr><td><code>iptables</code></td><td>forwarding rules during a shaping run;
+          restored on exit.</td></tr>
+      <tr><td><code>iputils</code> (<code>ping</code>)</td><td>optional fallback: non-root
+          tools fall back to the system <code>ping</code> when raw sockets are
+          unavailable. Not required since v16.7 for the engine.</td></tr>
+      <tr><td>root (sudo)</td><td>shaping, ARP spoofing, injection and packet capture.
+          Scanning, inventory and <code>gnulte-doctor</code> work unprivileged.</td></tr>
+    </table>
+    <p>No <code>arping</code>, <code>arp-scan</code>, <code>tcpdump</code> or
+    <code>traceroute(8)</code> is needed anywhere — those shell-outs were replaced by
+    in-process code in the <a href="../changelog.html#unplugged">Unplugged</a>
+    increments (v16.6&ndash;v16.10).</p>
+
+    <h2>Build and install</h2>
+<pre><code>git clone https://github.com/notmicrosoft2000-cmd/gnulte-go.git
+cd gnulte-go
+./build.sh          # builds all eight binaries, runs go vet + go test ./...
+sudo ./install.sh   # installs to /usr/local/bin + safety docs</code></pre>
+    <p><code>build.sh</code> refuses to hand you binaries that fail
+    <code>go vet</code> or <code>go test ./...</code>. <code>install.sh</code> copies the
+    binaries to <code>/usr/local/bin</code> together with the safety documents, and reads
+    the version from the freshly built binaries — aborting if they disagree — so an
+    installed copy can never silently drift behind the source tree.</p>
+
+    <h2>Updating</h2>
+<pre><code>git pull
+sudo ./install.sh</code></pre>
+
+    <h2>Uninstalling</h2>
+<pre><code>sudo ./uninstall.sh            # remove the binaries and safety docs
+sudo ./uninstall.sh --purge    # also remove ~/.config/gnulte-go and the reports</code></pre>
+
+    <h2>Where things live</h2>
+    <table class="data">
+      <tr><th style="width:34%">Path</th><th>Contents</th></tr>
+      <tr><td><code>~/.config/gnulte-go/config.json</code></td><td>saved defaults from the settings editor (<code>--settings</code>)</td></tr>
+      <tr><td><code>~/.config/gnulte-go/devices.json</code></td><td>the shared device store every tool reads and writes</td></tr>
+      <tr><td><code>~/.config/gnulte-go/acceptance.json</code></td><td>the authorised-use acceptance record</td></tr>
+      <tr><td><code>~/.config/gnulte-go/profiles.json</code></td><td>user-saved impairment profiles</td></tr>
+      <tr><td><code>~/.config/gnulte-go/watch-history.jsonl</code></td><td>the LAN-watch up/down timeline (v16.13+)</td></tr>
+      <tr><td><code>~/GNULTE Reports/</code></td><td>HTML reports written after each run</td></tr>
+    </table>
+    <p>State is per-user and nothing is written outside your home directory and
+    <code>/usr/local/bin</code>.</p>
+
+    <h2>First run</h2>
+    <p>Run the pre-flight check before anything else:</p>
+<pre><code>gnulte-doctor</code></pre>
+    <p>It reports PASS/WARN/FAIL for privileges, <code>tc</code>/<code>iptables</code>,
+    <code>ip_forward</code>, the netem/netfilter modules, the default route and
+    interface, duplicate IPs and the safety record — with fix-it hints. If anything
+    fails, see <a href="troubleshooting.html">troubleshooting</a>.</p>
+  </div>
+
+  <div class="col-right">
+    <div class="box">
+      <h3>In this section</h3>
+      <div class="b">
+        <ul>
+          <li><a href="install.html">Installation</a></li>
+          <li><a href="configuration.html">Configuration</a></li>
+          <li><a href="usage.html">Usage</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="box">
+      <h3>Current release</h3>
+      <div class="b">
+        <dl>
+          <dt>Version</dt><dd>16.13</dd>
+          <dt>Released</dt><dd>2026-10-03</dd>
+        </dl>
+        <p><a href="../downloads.html">Downloads &raquo;</a></p>
+      </div>
+    </div>
+
+    <div class="box">
+      <h3>Related</h3>
+      <div class="b">
+        <ul>
+          <li><a href="faq.html">FAQ</a></li>
+          <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div><!-- .cols -->
+
+<div class="foot">
+  <p class="foot-nav">
+    <a href="../index.html">Home</a>
+    <a href="../tools.html">Tools</a>
+    <a href="../docs.html">Documentation</a>
+    <a href="../downloads.html">Downloads</a>
+    <a href="../changelog.html">Changelog</a>
+    <a href="../about.html">About</a>
+    <a href="../search.html">Search</a>
+    <a href="../feed.xml">News feed</a>
+  </p>
+  <p>Copyright &copy; 2026 Neptune Productions. GNULTE is free software released under the
+     <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL version 3 or later</a>.</p>
+  <p>Source: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">github.com/notmicrosoft2000-cmd/gnulte-go</a>
+     &middot; Issues: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a>
+     &middot; Authorised network testing only.</p>
+  <p>This page last updated: 2026-10-15.</p>
+</div>
+
+</div><!-- .wrap -->
+<script src="../js/search.js?v=16.13-r4"></script>
+</body>
+</html>

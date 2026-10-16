@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>gnulte — command reference — GNULTE documentation</title>
+<meta name="description" content="Command reference for gnulte, the GNULTE shaping engine: targeting, impairment parameters, profiles, capture, reports and all options.">
+<link rel="icon" href="../img/favicon.ico">
+<link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
+<link rel="stylesheet" href="../css/gnulte.css?v=16.13-r4">
+</head>
+<body>
+<div class="wrap">
+
+<div class="head">
+  <a class="brand" href="../index.html">
+    <img src="../img/logo-48.png" alt="GNULTE icon" width="48" height="48">
+    <b>GNULTE</b>
+    <span class="tag">GNU LAN Network Testing Environment &middot; v16.13</span>
+  </a>
+  <form class="head-search" action="../search.html" method="get">
+    <label for="hq">Search</label>
+    <input id="hq" type="text" name="q" size="18">
+    <input type="submit" value="Go">
+  </form>
+</div>
+
+<ul class="nav">
+  <li><a href="../index.html">Home</a></li>
+  <li><a href="../tools.html">Tools</a></li>
+  <li><a class="active" href="../docs.html">Documentation</a></li>
+  <li><a href="../downloads.html">Downloads</a></li>
+  <li><a href="../changelog.html">Changelog</a></li>
+  <li><a href="../about.html">About</a></li>
+</ul>
+
+<div class="cols">
+
+  <div class="col-left">
+    <div class="box">
+      <h3>Documentation</h3>
+      <ul class="navlist">
+        <li><a href="../docs.html">Introduction</a></li>
+        <li><a href="install.html">Installation</a></li>
+        <li><a href="configuration.html">Configuration</a></li>
+        <li><a href="usage.html">Usage</a></li>
+        <li class="grp">Command reference</li>
+        <li><a class="active" href="gnulte.html">gnulte</a></li>
+        <li><a href="gnulte-lan.html">gnulte-lan</a></li>
+        <li><a href="gnulte-scan.html">gnulte-scan</a></li>
+        <li><a href="gnulte-devices.html">gnulte-devices</a></li>
+        <li><a href="gnulte-wifi.html">gnulte-wifi</a></li>
+        <li><a href="gnulte-doctor.html">gnulte-doctor</a></li>
+        <li><a href="gnulte-trace.html">gnulte-trace</a></li>
+        <li><a href="gnulte-top.html">gnulte-top</a></li>
+        <li class="grp">Help</li>
+        <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="col-main" role="main">
+    <p class="crumbs"><a href="../index.html">Home</a> &rsaquo; <a href="../docs.html">Documentation</a> &rsaquo; <a href="../tools.html">Tools</a> &rsaquo; gnulte</p>
+    <h1>gnulte(8) — the shaping engine</h1>
+    <p class="meta">Applies to gnulte v16.13 &middot; last updated 2026-10-15</p>
+
+    <p>The core of the suite: route a target's traffic through your machine with ARP
+    spoofing and impair it with real kernel <code>tc netem</code> — latency, jitter,
+    loss, duplication, reordering and bandwidth caps — while a live dashboard shows the
+    round-trip picture and the kernel's own queue statistics. When the run ends, a
+    session summary and an HTML report are filed.</p>
+
+    <h2>Requirements</h2>
+    <ul>
+      <li><b>Root.</b> The engine re-execs itself for sudo on first launch.</li>
+      <li><code>tc</code> (iproute2), <code>iptables</code>; the <code>sch_netem</code>
+          module loaded or loadable.</li>
+      <li><code>ping</code> is not required (since v16.7); <code>tcpdump</code> is not
+          required for <code>--capture</code> (since v16.8).</li>
+    </ul>
+
+    <h2>Synopsis</h2>
+<pre><code>gnulte [options]        (prompts for sudo on first launch)
+sudo gnulte [options]</code></pre>
+
+    <h2>Options</h2>
+    <p>Every option accepts both <code>-flag</code> and <code>--flag</code>.</p>
+
+    <h3>Targeting</h3>
+    <table class="data">
+      <tr><th style="width:32%">Option</th><th>Description</th></tr>
+      <tr><td><code>-t, --target IP</code></td><td>target IP(s), comma-separated (hostnames and <code>.local</code> names resolve automatically)</td></tr>
+      <tr><td><code>-m, --mac MAC</code></td><td>target by MAC address (resolved via ARP)</td></tr>
+      <tr><td><code>-r, --range CIDR</code></td><td>target an entire subnet (e.g. <code>192.168.1.0/24</code>)</td></tr>
+      <tr><td><code>-w, --whitelist IP</code></td><td>exclude IP(s) from a range (comma-separated)</td></tr>
+      <tr><td><code>--device-type KINDS</code></td><td>target every LAN device of these kinds (comma-separated, e.g. <code>phone,router,printer</code>)</td></tr>
+      <tr><td><code>--vendor NAMES</code></td><td>target every LAN device by vendor name (substring, e.g. <code>Xiaomi</code>)</td></tr>
+    </table>
+    <p>Targets can also be picked interactively from the last LAN watch: run
+    <code>gnulte</code> with no target and press <code>w</code> in the picker. The
+    gateway and the local machine are refused as targets.</p>
+
+    <h3>Parameters</h3>
+    <table class="data">
+      <tr><th style="width:32%">Option</th><th>Description</th></tr>
+      <tr><td><code>-l, --latency MS</code></td><td>base delay in ms</td></tr>
+      <tr><td><code>-j, --jitter MS</code></td><td>random variation in ms</td></tr>
+      <tr><td><code>-p, --loss %</code></td><td>packet drop %</td></tr>
+      <tr><td><code>-d, --duplicate %</code></td><td>duplicate packets %</td></tr>
+      <tr><td><code>-e, --reorder %</code></td><td>out-of-order packets %</td></tr>
+      <tr><td><code>-b, --bandwidth KBPS</code></td><td>bandwidth cap in kbps (0 = unlimited)</td></tr>
+    </table>
+    <p>Every parameter is validated before the run and its impact is estimated out loud.
+    Caps are chained so nothing is silently dropped.</p>
+
+    <h3>Profiles</h3>
+    <table class="data">
+      <tr><th style="width:32%">Option</th><th>Description</th></tr>
+      <tr><td><code>--profile NAME</code></td><td>apply a preset (see <code>--list-profiles</code>: 12 built-in); <code>save:NAME</code> stores the current flags as a reusable profile</td></tr>
+      <tr><td><code>--list-profiles</code></td><td>list the preset profiles and exit</td></tr>
+      <tr><td><code>--random</code></td><td>re-roll latency/jitter/loss every second</td></tr>
+      <tr><td><code>--scenario FILE</code></td><td>JSON scenario script of timed phases; see <a href="configuration.html">configuration</a></td></tr>
+      <tr><td><code>--per-target FILE</code></td><td>JSON file mapping target IP &rarr; impairment override</td></tr>
+    </table>
+
+    <h3>Watch</h3>
+    <table class="data">
+      <tr><th style="width:32%">Option</th><th>Description</th></tr>
+      <tr><td><code>--traffic-window</code></td><td>with 2+ targets, open the GNULTE-LAN watch in a separate terminal window</td></tr>
+      <tr><td><code>-q, --quiet</code></td><td>results only</td></tr>
+    </table>
+
+    <h3>Advanced</h3>
+    <table class="data">
+      <tr><th style="width:32%">Option</th><th>Description</th></tr>
+      <tr><td><code>--duration SECONDS</code></td><td>auto-stop after N seconds (0 = until interrupt)</td></tr>
+      <tr><td><code>--interval SECONDS</code></td><td>ping every N seconds (default 1)</td></tr>
+      <tr><td><code>-c, --capture FILE</code></td><td>capture target traffic to FILE as pcap (<code>-</code> = stdout)</td></tr>
+      <tr><td><code>-S, --stealth</code></td><td>stealth ARP spoofing: answer only when asked, slow jittered cache refresh — far less visible to other scanners on the LAN</td></tr>
+      <tr><td><code>--block</code></td><td>fully block the target (no forwarding) instead of shaping</td></tr>
+      <tr><td><code>--sound</code> / <code>--no-sound</code></td><td>beep per ping result, pitch scaled by latency (default: on)</td></tr>
+      <tr><td><code>--export FILE</code></td><td>stream per-second results to a CSV file</td></tr>
+      <tr><td><code>--note TEXT</code></td><td>label this session (shown in the console header and the report)</td></tr>
+      <tr><td><code>--report FILE</code> / <code>--no-report</code></td><td>write (default, to <code>~/GNULTE Reports/</code>) or skip the post-test HTML report</td></tr>
+      <tr><td><code>--probe-ports PORTS</code></td><td>TCP fallback probe ports when ICMP is filtered (default <code>443,80,53</code>)</td></tr>
+      <tr><td><code>--compare A B</code></td><td>diff two <code>-j</code> report JSON snapshots and exit (v16.14, unreleased); <code>--compare-html FILE</code> writes the diff as an HTML report</td></tr>
+      <tr><td><code>--force</code></td><td>skip interactive confirmations</td></tr>
+      <tr><td><code>--no-banner</code></td><td>skip the banner (alias: <code>--minimal</code>)</td></tr>
+      <tr><td><code>--dupcheck</code></td><td>scan the LAN for duplicate IPs / ARP conflicts and exit</td></tr>
+      <tr><td><code>--settings</code></td><td>open the settings editor (saved defaults) and exit</td></tr>
+      <tr><td><code>--docs</code></td><td>print the safety documents and exit</td></tr>
+      <tr><td><code>--reset-safety</code></td><td>remove the acceptance record and exit</td></tr>
+      <tr><td><code>--version</code></td><td>print version and exit</td></tr>
+      <tr><td><code>-h, --help</code></td><td>show the built-in help</td></tr>
+    </table>
+
+    <h2>Examples</h2>
+<pre><code>sudo gnulte                                            # guided menu: target -&gt; conditions -&gt; run
+sudo gnulte -t 192.168.1.50 -l 300 -j 30 --duration 90 # 300ms latency + 30ms jitter, 90s auto-stop
+sudo gnulte -r 192.168.1.0/24 -w 192.168.1.100 --profile throttle --duration 600
+sudo gnulte -t 192.168.1.50 --note gaming-test-3 -c session.pcap
+sudo gnulte -t 192.168.1.50 -l 250 -j 40 -p 2 --scenario storm-drill.json</code></pre>
+
+    <h2>Sample output — the built-in profiles</h2>
+    <p>Captured from <code>gnulte --list-profiles</code> (version 16.13):</p>
+<pre><code>Preset impairment profiles (latency|jitter|loss|dup|reorder|bandwidth-kbps):
+  gaming     1500ms jitter 300ms loss  2% dup 0% reorder 0% cap     0kbps
+  streaming  2500ms jitter 500ms loss  5% dup 0% reorder 0% cap     0kbps
+  voip       3000ms jitter 200ms loss  0% dup 0% reorder 5% cap     0kbps
+  throttle    500ms jitter 200ms loss  0% dup 0% reorder 0% cap   512kbps
+  ...
+  nightmare  8000ms jitter 2000ms loss 25% dup 10% reorder 10% cap     0kbps</code></pre>
+    <p>The complete list, with every column, is in
+    <a href="configuration.html">configuration</a>.</p>
+
+    <h2>During a run</h2>
+    <p>The dashboard pings every target once per second: last, min, max, average and
+    loss. A <code>netem live</code> line reads the kernel queue straight from
+    <code>tc -s qdisc</code> so you can see the hand your own network conditions are
+    dealing. When the run ends, the session summary rolls up min/avg/p95/max, jitter, a
+    loss run-length distribution and a rough E-model MOS, printed on the console and
+    embedded in the HTML report.</p>
+    <p>End a run with <kbd>Ctrl+C</kbd>: the first signal restores the previous qdisc and
+    <code>ip_forward</code> and finishes the teardown; a second forces the exit.</p>
+
+    <h2>Installation</h2>
+    <p>Part of the GNULTE suite. Build and install everything at once;</p>
+<pre><code>git clone https://github.com/notmicrosoft2000-cmd/gnulte-go.git
+cd gnulte-go
+./build.sh          # builds all eight binaries, runs go vet + go test ./...
+sudo ./install.sh   # installs to /usr/local/bin + safety docs</code></pre>
+    <p>installs <code>gnulte</code> to <code>/usr/local/bin/gnulte</code>. See
+    <a href="install.html">installation</a> for requirements.</p>
+
+    <h2>Common errors</h2>
+    <dl class="defs">
+      <dt><code>must be root</code> / permission denied on a raw socket</dt>
+      <dd>Run it with <code>sudo</code>. The engine re-execs itself once, but a restricted sudo setup can stop that.</dd>
+      <dt><code>tc: not found</code> / <code>iptables: not found</code></dt>
+      <dd>Install <code>iproute2</code> and <code>iptables</code>. These are the kernel interface for shaping and forwarding and cannot be replaced.</dd>
+      <dt>The target loses connectivity after a run</dt>
+      <dd>A run killed with <code>kill -9</code> never un-spoofed; end runs with <kbd>Ctrl+C</kbd> instead. If it has already happened, restart the interface (or wait for the ARP entry to expire).</dd>
+      <dt>The dashboard shows no results for a host</dt>
+      <dd>The host filters ICMP — name the ports it does answer on with <code>--probe-ports</code>.</dd>
+    </dl>
+
+    <h2>Related tools</h2>
+    <ul>
+      <li><a href="gnulte-lan.html">gnulte-lan</a> — find the target and hand off to the engine with <kbd>&#9166;</kbd></li>
+      <li><a href="gnulte-doctor.html">gnulte-doctor</a> — verify the machine before the run</li>
+      <li><a href="gnulte-top.html">gnulte-top</a> — measure what the shaping did to throughput</li>
+      <li><a href="gnulte-trace.html">gnulte-trace</a> — compare the shaped path against the clean one</li>
+    </ul>
+  </div>
+
+  <div class="col-right">
+    <div class="box">
+      <h3>At a glance</h3>
+      <div class="b">
+        <dl>
+          <dt>Root</dt><dd>yes</dd>
+          <dt>Output</dt><dd>console, CSV, pcap, HTML report</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="box">
+      <h3>See also</h3>
+      <div class="b">
+        <ul>
+          <li><a href="configuration.html">Profiles &amp; scenarios</a></li>
+          <li><a href="usage.html">Usage recipes</a></li>
+          <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div><!-- .cols -->
+
+<div class="foot">
+  <p class="foot-nav">
+    <a href="../index.html">Home</a>
+    <a href="../tools.html">Tools</a>
+    <a href="../docs.html">Documentation</a>
+    <a href="../downloads.html">Downloads</a>
+    <a href="../changelog.html">Changelog</a>
+    <a href="../about.html">About</a>
+    <a href="../search.html">Search</a>
+    <a href="../feed.xml">News feed</a>
+  </p>
+  <p>Copyright &copy; 2026 Neptune Productions. GNULTE is free software released under the
+     <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL version 3 or later</a>.</p>
+  <p>Source: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">github.com/notmicrosoft2000-cmd/gnulte-go</a>
+     &middot; Issues: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a>
+     &middot; Authorised network testing only.</p>
+  <p>This page last updated: 2026-10-15.</p>
+</div>
+
+</div><!-- .wrap -->
+<script src="../js/search.js?v=16.13-r4"></script>
+</body>
+</html>

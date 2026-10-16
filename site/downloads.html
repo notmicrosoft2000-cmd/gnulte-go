@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Downloads — GNULTE</title>
+<meta name="description" content="Download GNULTE: source tarballs and release tags from the GitHub repository, with build and install instructions.">
+<link rel="icon" href="img/favicon.ico">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+<link rel="stylesheet" href="css/gnulte.css?v=16.13-r4">
+</head>
+<body>
+<div class="wrap">
+
+<div class="head">
+  <a class="brand" href="index.html">
+    <img src="img/logo-48.png" alt="GNULTE icon" width="48" height="48">
+    <b>GNULTE</b>
+    <span class="tag">GNU LAN Network Testing Environment &middot; v16.13</span>
+  </a>
+  <form class="head-search" action="search.html" method="get">
+    <label for="hq">Search</label>
+    <input id="hq" type="text" name="q" size="18">
+    <input type="submit" value="Go">
+  </form>
+</div>
+
+<ul class="nav">
+  <li><a href="index.html">Home</a></li>
+  <li><a href="tools.html">Tools</a></li>
+  <li><a href="docs.html">Documentation</a></li>
+  <li><a class="active" href="downloads.html">Downloads</a></li>
+  <li><a href="changelog.html">Changelog</a></li>
+  <li><a href="about.html">About</a></li>
+</ul>
+
+<div class="cols2">
+
+  <div class="col-main" role="main">
+    <p class="crumbs"><a href="index.html">Home</a> &rsaquo; Downloads</p>
+    <h1>Downloads</h1>
+    <p class="meta">Applies to GNULTE v16.13 &middot; last updated 2026-10-15</p>
+
+    <p>GNULTE is distributed as <b>source code only</b>. There are no pre-built
+    binaries and no binary mirrors: you clone or download the tree and build it with
+    the Go toolchain, which takes under a minute and keeps the version you run in
+    step with the repository.</p>
+
+    <h2>Source</h2>
+    <table class="data">
+      <tr><th style="width:30%">File / channel</th><th>Contents</th><th style="width:20%">Notes</th></tr>
+      <tr>
+        <td><a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/archive/refs/heads/main.tar.gz">gnulte-go-main.tar.gz</a></td>
+        <td>Current development tree</td>
+        <td>may contain unreleased work</td>
+      </tr>
+      <tr>
+        <td><a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/archive/refs/heads/main.zip">gnulte-go-main.zip</a></td>
+        <td>Same tree, zip format</td>
+        <td>may contain unreleased work</td>
+      </tr>
+      <tr>
+        <td><a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/tags">Release tags</a></td>
+        <td>Archived trees, one per release (newest: <code>v16.13</code>)</td>
+        <td>recommended for repeatable installs</td>
+      </tr>
+      <tr>
+        <td><a href="https://github.com/notmicrosoft2000-cmd/gnulte-go.git">git clone</a></td>
+        <td><code>git clone https://github.com/notmicrosoft2000-cmd/gnulte-go.git</code></td>
+        <td>simplest path: <code>git pull</code> to update</td>
+      </tr>
+    </table>
+
+    <div class="note">
+      <b>Checksums and signatures.</b> No binaries are published, so there are no
+      binary checksums or GPG signatures to verify. To confirm the source you have is
+      authentic, check the commit hash in the <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/commits/main">commit log</a>
+      against the tag on GitHub, and read the code — it is the whole point of the
+      licence.
+    </div>
+
+    <h2>Build and install</h2>
+    <p>Requirements: <a href="https://go.dev/dl/">Go 1.21 or newer</a>, Linux, and for
+    shaping <code>iproute2</code>, <code>iptables</code> and <code>iputils</code>. No
+    third-party Go modules are used.</p>
+
+<pre><code>git clone https://github.com/notmicrosoft2000-cmd/gnulte-go.git
+cd gnulte-go
+./build.sh          # builds all eight binaries, runs go vet + go test ./...
+sudo ./install.sh   # installs to /usr/local/bin + safety docs</code></pre>
+
+    <p>Update with <code>git pull &amp;&amp; sudo ./install.sh</code> — the installer
+    reads the version from the freshly built binaries and aborts if they disagree, so an
+    install can never drift behind the source tree. Uninstall with
+    <code>sudo ./uninstall.sh [--purge]</code> (<code>--purge</code> also removes the
+    state directory and reports).</p>
+
+    <p>Full details, including where the tools keep their state:
+    <a href="docs/install.html">installation documentation</a>.</p>
+
+    <h2>Release information</h2>
+    <table class="data">
+      <tr><th style="width:22%">Field</th><th>Value</th></tr>
+      <tr><th>Current release</th><td>16.13 (2026-10-03)</td></tr>
+      <tr><th>Previous release</th><td>16.12 (2026-10-03)</td></tr>
+      <tr><th>Supported platform</th><td>Linux (amd64 and any arch Go supports; platform-specific code is behind <code>*_linux.go</code> build tags)</td></tr>
+      <tr><th>Package formats</th><td>tar.gz / zip source archives; no distribution packages are published</td></tr>
+      <tr><th>Release notes</th><td><a href="changelog.html">changelog</a> &middot; <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/commits/main">commit log</a></td></tr>
+    </table>
+
+    <p>Development snapshots of the changelog are on the
+    <a href="changelog.html">changelog page</a>, including the unreleased v16.14 work.</p>
+  </div>
+
+  <div class="col-right">
+    <div class="box">
+      <h3>Current release</h3>
+      <div class="b">
+        <dl>
+          <dt>Version</dt><dd>16.13</dd>
+          <dt>Released</dt><dd>2026-10-03</dd>
+          <dt>Platform</dt><dd>Linux</dd>
+          <dt>License</dt><dd>GPL-3.0-or-later</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="box">
+      <h3>Get it</h3>
+      <div class="b">
+        <ul>
+          <li><a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/archive/refs/heads/main.tar.gz">Source tarball</a></li>
+          <li><a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/tags">Release tags</a></li>
+          <li><a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">Browse the repository</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="box">
+      <h3>After installing</h3>
+      <div class="b">
+        <p>Run the pre-flight check before the first real test:</p>
+        <p><code>gnulte-doctor</code></p>
+        <p><a href="docs/troubleshooting.html">Troubleshooting &raquo;</a></p>
+      </div>
+    </div>
+  </div>
+
+</div><!-- .cols2 -->
+
+<div class="foot">
+  <p class="foot-nav">
+    <a href="index.html">Home</a>
+    <a href="tools.html">Tools</a>
+    <a href="docs.html">Documentation</a>
+    <a href="downloads.html">Downloads</a>
+    <a href="changelog.html">Changelog</a>
+    <a href="about.html">About</a>
+    <a href="search.html">Search</a>
+    <a href="feed.xml">News feed</a>
+  </p>
+  <p>Copyright &copy; 2026 Neptune Productions. GNULTE is free software released under the
+     <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL version 3 or later</a>.</p>
+  <p>Source: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">github.com/notmicrosoft2000-cmd/gnulte-go</a>
+     &middot; Issues: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a>
+     &middot; Authorised network testing only.</p>
+  <p>This page last updated: 2026-10-15.</p>
+</div>
+
+</div><!-- .wrap -->
+<script src="js/search.js?v=16.13-r4"></script>
+</body>
+</html>

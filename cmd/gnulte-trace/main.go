@@ -59,6 +59,7 @@ func main() {
 		showVer  = flag.Bool("v", false, "print version and exit")
 	)
 	flag.Usage = usage
+	flag.BoolVar(showVer, "version", false, "print version and exit")
 	flag.Parse()
 
 	if *showVer {
@@ -121,20 +122,43 @@ func main() {
 		fatal(privilegeHint(err))
 	}
 
-	if *asJSON {
-		emitJSON(os.Stdout, res, opts, started)
-		return
+	if err := emitOutput(res, opts, started, live, *asJSON, *report, os.Stdout, ux.Out, os.Stderr); err != nil {
+		fatal(err)
+	}
+}
+
+// emitOutput writes the finished trace in the requested shape. JSON goes to
+// stdout, the human table/summary to human, and progress notices to notice. It
+// always writes the HTML report when reportPath is set — including together
+// with --json — so one run can capture both a machine-readable document and a
+// shareable report. Extracted from main so the JSON+HTML combination can be
+// regression-tested.
+func emitOutput(res trace.Result, opts trace.Options, started time.Time, live, asJSON bool, reportPath string, stdout, human, notice io.Writer) error {
+	if asJSON {
+		if err := emitJSON(stdout, res, opts, started); err != nil {
+			return err
+		}
+		if reportPath != "" {
+			if err := writeHTML(reportPath, res, opts, started); err != nil {
+				return err
+			}
+			// stdout must stay a single JSON document, so the notice goes to
+			// stderr.
+			fmt.Fprintf(notice, "gnulte-trace: report written to %s\n", reportPath)
+		}
+		return nil
 	}
 	if live {
-		printTable(ux.Out, res)
+		printTable(human, res)
 	}
-	printSummary(ux.Out, res, started)
-	if *report != "" {
-		if err := writeHTML(*report, res, opts, started); err != nil {
-			fatal(err)
+	printSummary(human, res, started)
+	if reportPath != "" {
+		if err := writeHTML(reportPath, res, opts, started); err != nil {
+			return err
 		}
-		fmt.Fprintf(ux.Out, "\n  report: %s\n", *report)
+		fmt.Fprintf(human, "\n  report: %s\n", reportPath)
 	}
+	return nil
 }
 
 // elevate re-runs the tool through sudo when a plain user asked for it, so the
@@ -370,7 +394,7 @@ type jsonResult struct {
 }
 
 // emitJSON writes the machine-readable result.
-func emitJSON(w io.Writer, res trace.Result, opts trace.Options, started time.Time) {
+func emitJSON(w io.Writer, res trace.Result, opts trace.Options, started time.Time) error {
 	out := jsonResult{
 		Target:      res.Target,
 		Reached:     res.Reached,
@@ -396,8 +420,9 @@ func emitJSON(w io.Writer, res trace.Result, opts trace.Options, started time.Ti
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(out); err != nil {
-		fatal(err)
+		return err
 	}
+	return nil
 }
 
 // writeHTML renders a single self-contained report next to the run.

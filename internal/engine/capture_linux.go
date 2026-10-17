@@ -22,6 +22,7 @@ package engine
 import (
 	"errors"
 	"net"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -35,7 +36,10 @@ const ethPAll = 0x0003
 const readWake = 200 * time.Millisecond
 
 // packetSource is an AF_PACKET raw socket bound to one interface.
-type packetSource struct{ fd int }
+type packetSource struct {
+	fd        int
+	closeOnce sync.Once
+}
 
 // newFrameSource opens a raw capture socket on iface. Opening it needs root and
 // fails immediately otherwise (EPERM), so Start reports the problem instead of
@@ -71,7 +75,14 @@ func (p *packetSource) readFrame(buf []byte) (int, error) {
 	return n, nil
 }
 
-func (p *packetSource) close() error { return syscall.Close(p.fd) }
+// close releases the socket. It runs at most once, so a stop-timeout cleanup
+// and the capture loop's own deferred close cannot close the descriptor twice
+// (which could otherwise close an unrelated fd if the number were reused).
+func (p *packetSource) close() error {
+	var err error
+	p.closeOnce.Do(func() { err = syscall.Close(p.fd) })
+	return err
+}
 
 // htons converts a host-order 16-bit value to network order; the socket protocol
 // and the link-layer sockaddr both want the big-endian form.

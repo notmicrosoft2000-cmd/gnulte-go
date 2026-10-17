@@ -150,7 +150,7 @@ required: raw ARP probing/injection and capture are implemented in-process.
 ```sh
 git clone https://github.com/notmicrosoft2000-cmd/gnulte-go.git
 cd gnulte-go
-./build.sh          # builds all five binaries, runs go vet + go test ./...
+./build.sh          # builds all eight binaries, runs go vet + go test ./...
 sudo ./install.sh   # installs to /usr/local/bin + safety docs
 ```
 
@@ -165,7 +165,7 @@ sudo gnulte                                            # guided menu: target →
 sudo gnulte -t 192.168.1.50 -l 300 -j 30 --duration 90 # 300ms latency + 30ms jitter, 90s auto-stop
 sudo gnulte -r 192.168.1.0/24 -w 192.168.1.100 --profile throttle --duration 600
 
-gnulte-lan                                            # five-screen live watch (auto-discovers subnet)
+gnulte-lan                                            # six-screen live watch (auto-discovers subnet)
 gnulte-lan -t 192.168.1.20 --duration 60              # one host, up close
 gnulte-scan --deep                                    # sweep + in-Go port scan + OS fingerprint
 gnulte-scan --watch 5                                 # live re-scan: ▲ new · ▼ gone · ~ changed
@@ -176,7 +176,7 @@ gnulte-devices -s                                     # instant ARP inventory + 
 ### gnulte-lan keys
 
 `↑↓` browse · `⏎`/`g` hand off to `gnulte -t <ip>` · `Tab`/`d` detail ·
-`1–5` (or `t`/`f`/`n`/`m`) screens · `x` save the watch to the shared store ·
+`1–6` (or `t`/`f`/`n`/`m`/`y`) screens · `x` save the watch to the shared store ·
 `s` sort · `a` alarm-only · `o` settings · `Esc` peel · `q` quit.
 
 ## Safety

@@ -41,6 +41,33 @@ func TestParseKey(t *testing.T) {
 	}
 }
 
+// TestParseKeyDecodesMultibyteRune: a UTF-8 character must arrive as one
+// KeyRune with the whole rune, not as one bogus key press per byte. The old
+// decoder took rune(p[0]) and consumed a single byte, so "é" (C3 A9) came
+// through as two unrelated keys.
+func TestParseKeyDecodesMultibyteRune(t *testing.T) {
+	p := []byte("é")
+	k, r, n, more := parseKey(p)
+	if k != KeyRune || r != 'é' || n != 2 || more {
+		t.Fatalf("parseKey(%q) = key=%d rune=%q n=%d more=%v, want KeyRune 'é' 2 false",
+			p, k, r, n, more)
+	}
+}
+
+// TestParseKeyCSIWithParameters: a modified arrow (e.g. Ctrl+Right, "ESC [ 1 ; 5 C")
+// ends with a final byte far past index 2. The decoder must scan to the final
+// byte (0x40–0x7e) instead of only looking at p[2].
+func TestParseKeyDecodesParameterisedCSI(t *testing.T) {
+	k, _, n, more := parseKey([]byte("\x1b[1;5C"))
+	if k != KeyRight || n != 6 || more {
+		t.Fatalf("parseKey(CSI 1;5C) = key=%d n=%d more=%v, want KeyRight 6 false", k, n, more)
+	}
+	// A CSI that has begun but has no final byte yet is incomplete.
+	if _, _, _, more := parseKey([]byte("\x1b[1;")); !more {
+		t.Fatal("a partial CSI should report more=true")
+	}
+}
+
 func TestFramePadsAndHomes(t *testing.T) {
 	f := Frame(20, []string{"alpha", "beta"})
 	if !strings.HasPrefix(f, "\033[H") {

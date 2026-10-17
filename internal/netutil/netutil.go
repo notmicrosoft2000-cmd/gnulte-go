@@ -97,6 +97,45 @@ func ifaceAddr(iface *net.Interface) (string, string, error) {
 	return "", "", fmt.Errorf("no IPv4 address on %s", iface.Name)
 }
 
+// ForInterface derives the network configuration for a named interface from its
+// own IPv4 address and netmask. The gateway is filled only when the interface is
+// also the system's default-route device, because a route-table gateway belongs
+// to whatever interface carries the default route — not necessarily this one.
+// Callers that let the operator override the interface need this so the derived
+// subnet comes from the interface they asked for.
+func ForInterface(name string) (Config, error) {
+	iface, err := net.InterfaceByName(name)
+	if err != nil {
+		return Config{}, err
+	}
+	self, netmask, err := ifaceAddr(iface)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg := Config{Interface: name, SelfIP: self, Netmask: netmask}
+	if def, err := DefaultRoute(); err == nil && def.Interface == name {
+		cfg.Gateway = def.Gateway
+	}
+	return cfg, nil
+}
+
+// WithInterface returns cfg adjusted for a named interface override. When the
+// name matches the detected interface (or is empty) cfg is returned unchanged;
+// otherwise the self IP, netmask and gateway are re-derived so the subnet
+// belongs to the interface the operator actually asked for. An unknown
+// interface leaves the original values in place (the caller reports the
+// missing-address error when it tries to derive targets).
+func WithInterface(cfg Config, name string) Config {
+	if name == "" || name == cfg.Interface {
+		return cfg
+	}
+	if oc, err := ForInterface(name); err == nil {
+		cfg.SelfIP, cfg.Netmask, cfg.Gateway = oc.SelfIP, oc.Netmask, oc.Gateway
+	}
+	cfg.Interface = name
+	return cfg
+}
+
 // hexToIP converts a little-endian hex route field to an IPv4 address.
 func hexToIP(h string) net.IP {
 	if len(h) != 8 {
@@ -153,9 +192,20 @@ func HostsInCIDR(cidr string) ([]string, error) {
 	if ip.To4() == nil {
 		return nil, fmt.Errorf("only IPv4 scanning is supported (got %q)", cidr)
 	}
-	var list []string
-	for cur := ip.Mask(ipnet.Mask); ipnet.Contains(cur); inc(cur) {
+	ones, bits := ipnet.Mask.Size()
+	if bits != 32 {
+		return nil, fmt.Errorf("invalid IPv4 mask in %q", cidr)
+	}
+	hostBits := bits - ones
+	if hostBits > 16 {
+		return nil, fmt.Errorf("CIDR %q is too large to expand (%d addresses; max %d)", cidr, 1<<uint(hostBits), 1<<16)
+	}
+	count := 1 << uint(hostBits)
+	list := make([]string, 0, count)
+	cur := ip.Mask(ipnet.Mask)
+	for i := 0; i < count; i++ {
 		list = append(list, cur.String())
+		inc(cur)
 	}
 	return list, nil
 }

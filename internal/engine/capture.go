@@ -42,10 +42,13 @@ type frameSource interface {
 }
 
 // captureHandle is a running capture. cancel it and wait on done for the loop to
-// close the source and the output.
+// close the source and the output. src and dst are kept so a loop that fails to
+// stop can be cleaned up by the caller; both closes are idempotent.
 type captureHandle struct {
 	cancel context.CancelFunc
 	done   chan struct{}
+	src    frameSource
+	dst    io.WriteCloser
 }
 
 // captureLoop streams matching frames to dst as a libpcap capture until ctx is

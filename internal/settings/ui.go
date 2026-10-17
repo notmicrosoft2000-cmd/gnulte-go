@@ -233,10 +233,10 @@ func (e *editor) run() {
 				if err != nil {
 					return fmt.Errorf("a whole number, 1-512")
 				}
-				c.WifiCount = clamp(n, 1, 512)
+				c.WifiCount = clamp(n, 1, 256)
 				return nil
 			},
-			"deauth frames sent in each gnulte-wifi burst (1-512)", "64"),
+			"deauth frames sent in each gnulte-wifi burst (1-256)", "64"),
 		row("wifi delay between bursts (s)", itemInt,
 			func(c Config) string { return fmt.Sprintf("%ds", c.WifiDelaySec) },
 			func(c *Config, v string) error {

@@ -59,10 +59,18 @@ func Table(w io.Writer, rows []discover.Row) {
 			headers = append(headers, name)
 		}
 	}
-	if len(rows) > 0 && rows[0].Ports != "" {
+	// A column is shown when *any* row carries it, not just the first: with
+	// IP-sorted rows the first host may be a bare ARP neighbour while a later
+	// one has ports or an OS guess.
+	hasPorts, hasOS := false, false
+	for _, r := range rows {
+		hasPorts = hasPorts || r.Ports != ""
+		hasOS = hasOS || r.OS != ""
+	}
+	if hasPorts {
 		headers = append(headers, "PORTS")
 	}
-	if len(rows) > 0 && rows[0].OS != "" {
+	if hasOS {
 		headers = append(headers, "OS")
 	}
 	widths := make([]int, len(headers))
@@ -88,10 +96,10 @@ func Table(w io.Writer, rows []discover.Row) {
 				v = append(v, orDash(s))
 			}
 		}
-		if len(headers) > len(v) {
+		if hasPorts {
 			v = append(v, orDash(r.Ports))
 		}
-		if len(headers) > len(v) {
+		if hasOS {
 			v = append(v, orDash(r.OS))
 		}
 		for i, s := range v {
@@ -101,10 +109,11 @@ func Table(w io.Writer, rows []discover.Row) {
 		}
 		values = append(values, v)
 	}
-	sep := ""
-	for _, wd := range widths {
-		sep += strings.Repeat("─", wd+2)
+	seps := make([]string, len(widths))
+	for i, wd := range widths {
+		seps[i] = strings.Repeat("─", wd)
 	}
+	sep := " " + strings.Join(seps, "  ")
 	fmt.Fprintln(w, sep)
 	cells := make([]string, len(headers))
 	for i, h := range headers {
@@ -187,8 +196,11 @@ func YAML(w io.Writer, rows []discover.Row) error {
 				fmt.Fprintf(w, "      - %q\n", s)
 			}
 		}
-		for _, b := range r.Banners {
-			fmt.Fprintf(w, "    - banner: %q\n", b)
+		if len(r.Banners) > 0 {
+			fmt.Fprintln(w, "    banners:")
+			for _, b := range r.Banners {
+				fmt.Fprintf(w, "      - %q\n", b)
+			}
 		}
 		if r.ScanNote != "" {
 			fmt.Fprintf(w, "    scan_note: %q\n", r.ScanNote)

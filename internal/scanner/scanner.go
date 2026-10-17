@@ -494,7 +494,7 @@ func FingerprintOSConf(ttl int, ports []Port, vendor, typ string) (string, int) 
 	if strings.Contains(bannerAll, "ssh-2.0-rou") || strings.Contains(bannerAll, "dropbear") {
 		return "Router firmware", 90
 	}
-	if strings.Contains(bannerAll, "openwrt") || strings.Contains(bannerAll, "openwrt") {
+	if strings.Contains(bannerAll, "openwrt") {
 		return "Linux (OpenWrt)", 95
 	}
 	if strings.Contains(bannerAll, "microsoft ftp service") || strings.Contains(bannerAll, "microsoft windows") {

@@ -43,6 +43,57 @@ func TestHostsInCIDR(t *testing.T) {
 	}
 }
 
+// TestHostsInCIDRRejectsTooLarge: an unbounded expansion used to size a slice
+// for and iterate 2^hostBits addresses, so a /0 could hang or exhaust memory.
+// Anything wider than /16 must be refused outright.
+func TestHostsInCIDRRejectsTooLarge(t *testing.T) {
+	// /15 is over the cap but expands to only 128k addresses without the
+	// guard, so checking it first fails a reverted cap promptly rather than
+	// hanging on /0.
+	for _, cidr := range []string{"10.0.0.0/15", "0.0.0.0/0"} {
+		if _, err := HostsInCIDR(cidr); err == nil {
+			t.Errorf("HostsInCIDR(%q) should be rejected as too large", cidr)
+		}
+	}
+	got, err := HostsInCIDR("10.0.0.0/16")
+	if err != nil {
+		t.Fatalf("/16 is the largest allowed and must expand: %v", err)
+	}
+	if len(got) != 65536 {
+		t.Errorf("len = %d, want 65536", len(got))
+	}
+}
+
+// TestWithInterfaceRecomputes: overriding -i must re-derive self IP/netmask/
+// gateway from the chosen interface, not keep the default-route device's values
+// (which made the scan derive the wrong subnet).
+func TestWithInterfaceRecomputes(t *testing.T) {
+	if _, err := ForInterface("lo"); err != nil {
+		t.Skipf("loopback IPv4 not available: %v", err)
+	}
+	base := Config{Interface: "not-lo", SelfIP: "10.9.9.5", Netmask: "255.255.255.0", Gateway: "10.0.0.1"}
+	got := WithInterface(base, "lo")
+	if got.Interface != "lo" {
+		t.Fatalf("interface = %q, want lo", got.Interface)
+	}
+	if got.SelfIP != "127.0.0.1" {
+		t.Errorf("self ip = %q, want 127.0.0.1 (re-derived from lo)", got.SelfIP)
+	}
+	if got.Gateway == "10.0.0.1" {
+		t.Errorf("gateway = %q, want it re-derived or cleared for a different interface", got.Gateway)
+	}
+}
+
+func TestWithInterfaceNoop(t *testing.T) {
+	base := Config{Interface: "eth9", SelfIP: "1.2.3.4", Netmask: "255.255.255.0"}
+	if got := WithInterface(base, ""); got != base {
+		t.Errorf("an empty override changed the config: %+v", got)
+	}
+	if got := WithInterface(base, "eth9"); got != base {
+		t.Errorf("a same-interface override changed the config: %+v", got)
+	}
+}
+
 func TestDefaultRouteParses(t *testing.T) {
 	cfg, err := DefaultRoute()
 	if err != nil {

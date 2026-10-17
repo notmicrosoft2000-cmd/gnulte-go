@@ -103,37 +103,52 @@ func (r Result) Latency() int {
 	return best
 }
 
+// conclusive returns the first TCP probe that confirmed the host was alive
+// (Open or Refused). Earlier entries can only be Timeout/Unreachable: ProbeTCP
+// stops at the first conclusive reply, but a port that merely times out is
+// recorded before the loop moves on, so index 0 is not necessarily the verdict.
+func (r Result) conclusive() (PortResult, bool) {
+	for _, p := range r.TCP {
+		if p.State == Open || p.State == Refused {
+			return p, true
+		}
+	}
+	return PortResult{}, false
+}
+
 // Method names the mechanism that confirmed the host was alive.
 func (r Result) Method() string {
-	switch {
-	case r.ICMP:
+	if r.ICMP {
 		return "icmp"
-	case len(r.TCP) > 0 && r.TCP[0].State == Open:
-		return "tcp"
-	case len(r.TCP) > 0 && r.TCP[0].State == Refused:
-		return "tcp-refused"
-	case len(r.TCP) > 0 && r.TCP[0].State == Unreachable:
-		return "unreachable"
-	default:
-		return "silent"
 	}
+	if p, ok := r.conclusive(); ok {
+		if p.State == Open {
+			return "tcp"
+		}
+		return "tcp-refused"
+	}
+	if len(r.TCP) > 0 && r.TCP[0].State == Unreachable {
+		return "unreachable"
+	}
+	return "silent"
 }
 
 // Note is a compact human-readable verdict for the live console, e.g.
 // "icmp 12ms", "tcp:443 4ms", "tcp:80/refused 1ms".
 func (r Result) Note() string {
-	switch {
-	case r.ICMP:
+	if r.ICMP {
 		return fmt.Sprintf("icmp %dms", r.ICMPMs)
-	case len(r.TCP) == 0:
-		return "no answer"
-	case r.TCP[0].State == Open:
-		return fmt.Sprintf("tcp:%d %dms", r.TCP[0].Port, r.TCP[0].RTTMs)
-	case r.TCP[0].State == Refused:
-		return fmt.Sprintf("tcp:%d/refused %dms", r.TCP[0].Port, r.TCP[0].RTTMs)
-	default:
-		return string(r.TCP[0].State)
 	}
+	if len(r.TCP) == 0 {
+		return "no answer"
+	}
+	if p, ok := r.conclusive(); ok {
+		if p.State == Open {
+			return fmt.Sprintf("tcp:%d %dms", p.Port, p.RTTMs)
+		}
+		return fmt.Sprintf("tcp:%d/refused %dms", p.Port, p.RTTMs)
+	}
+	return string(r.TCP[0].State)
 }
 
 // rawPing is the in-Go raw-ICMP probe. It is a package seam so the tests can
@@ -215,11 +230,9 @@ func ProbeTCP(ctx context.Context, ip string, ports []int) Result {
 	if len(ports) == 0 {
 		ports = DefaultPorts
 	}
-	dialCtx, cancel := context.WithTimeout(ctx, tcpDialTimeout)
-	defer cancel()
 	var res Result
 	for _, port := range ports {
-		state, ms, done := dialPort(dialCtx, ip, port)
+		state, ms, done := dialPort(ctx, ip, port)
 		res.TCP = append(res.TCP, PortResult{Port: port, State: state, RTTMs: ms})
 		if done {
 			return res
@@ -238,7 +251,9 @@ func tryPing(ctx context.Context, ip string) (int, int) {
 
 func dialPort(ctx context.Context, ip string, port int) (PortState, int, bool) {
 	start := time.Now()
-	conn, err := (&net.Dialer{Timeout: tcpDialTimeout}).DialContext(ctx, "tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
+	dctx, cancel := context.WithTimeout(ctx, tcpDialTimeout)
+	conn, err := (&net.Dialer{Timeout: tcpDialTimeout}).DialContext(dctx, "tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
+	cancel()
 	ms := int(time.Since(start) / time.Millisecond)
 	if err == nil {
 		conn.Close()

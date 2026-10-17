@@ -35,15 +35,32 @@ func rawUptime(ip string, port int) int {
 	defer syscall.Close(fd)
 	_ = syscall.SetsockoptInt(fd, syscall.IPPROTO_IP, syscall.IP_HDRINCL, 1)
 
-	raddr := syscall.SockaddrInet4{Port: port}
-	copy(raddr.Addr[:], net.ParseIP(ip).To4()[:4])
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return 0
+	}
+	dst4 := parsed.To4()
+	if dst4 == nil {
+		return 0
+	}
+	// The raw socket's IP header is ours (IP_HDRINCL), so we must put a real
+	// local source address in it: the kernel only fills a zero source, and the
+	// TCP checksum is computed over the header we build. A 0.0.0.0 pseudo-header
+	// would fail the peer's checksum and no SYN-ACK would ever come back.
+	src := localSourceIP(dst4)
+	if src == ([4]byte{}) {
+		return 0
+	}
 
-	samp1, wall1, ok := tcpTimestampSample(fd, raddr, uint16(port))
+	raddr := syscall.SockaddrInet4{Port: port}
+	copy(raddr.Addr[:], dst4)
+
+	samp1, wall1, ok := tcpTimestampSample(fd, src, raddr, uint16(port))
 	if !ok {
 		return 0
 	}
 	time.Sleep(1200 * time.Millisecond)
-	samp2, wall2, ok := tcpTimestampSample(fd, raddr, uint16(port))
+	samp2, wall2, ok := tcpTimestampSample(fd, src, raddr, uint16(port))
 	if !ok {
 		return 0
 	}
@@ -67,12 +84,29 @@ func rawUptime(ip string, port int) int {
 	return int(sec)
 }
 
-// tcpTimestampSample sends one TCP SYN with a localStorage timestamp option and
+// localSourceIP returns the IPv4 address the kernel would use to reach dst. A
+// connected UDP socket performs the route lookup without sending a packet.
+func localSourceIP(dst net.IP) [4]byte {
+	var src [4]byte
+	conn, err := net.Dial("udp4", net.JoinHostPort(dst.String(), "9"))
+	if err != nil {
+		return src
+	}
+	defer func() { _ = conn.Close() }()
+	if ua, ok := conn.LocalAddr().(*net.UDPAddr); ok {
+		if v4 := ua.IP.To4(); v4 != nil {
+			copy(src[:], v4)
+		}
+	}
+	return src
+}
+
+// tcpTimestampSample sends one TCP SYN with a TCP timestamp option and
 // waits for the matching SYN-ACK, returning the peer's TSval and the wall-clock
 // time the sample was taken. Fails on any platform error, a filtered port, or a
 // peer that strips TCP timestamps.
-func tcpTimestampSample(fd int, raddr syscall.SockaddrInet4, port uint16) (tsval uint32, wall time.Time, ok bool) {
-	buf := buildSyncPacket(raddr.Addr, port)
+func tcpTimestampSample(fd int, src [4]byte, raddr syscall.SockaddrInet4, port uint16) (tsval uint32, wall time.Time, ok bool) {
+	buf := buildSyncPacket(src, raddr.Addr, port)
 	if len(buf) == 0 {
 		return 0, time.Time{}, false
 	}
@@ -89,7 +123,7 @@ func tcpTimestampSample(fd int, raddr syscall.SockaddrInet4, port uint16) (tsval
 			// kernels; 2.5s deadline covers the wait.
 			n, from, herr := syscall.Recvfrom(fd, rx, 0)
 			if herr == nil && n > 0 {
-				if sa, ok := from.(*syscall.SockaddrInet4); ok && sa.Port == int(port) {
+				if sa, ok := from.(*syscall.SockaddrInet4); ok && sa.Addr == raddr.Addr && sa.Port == int(port) {
 					if ts, good := parseSynAckTimestamp(rx[:n]); good {
 						return ts, wall, true
 					}
@@ -102,9 +136,11 @@ func tcpTimestampSample(fd int, raddr syscall.SockaddrInet4, port uint16) (tsval
 }
 
 // buildSyncPacket crafts a minimal IPv4+TCP SYN with a timestamp option,
-// targeting the given destination port. The source neither binds a listener
-// nor matters to the estimator (we only read the reply).
-func buildSyncPacket(dstIP [4]byte, dstPort uint16) []byte {
+// targeting the given destination port. srcIP must be the real local address for
+// the route: with IP_HDRINCL the kernel only fills a zero source, and the TCP
+// checksum is computed here over the header we build, so a placeholder would
+// fail the peer's checksum check.
+func buildSyncPacket(srcIP, dstIP [4]byte, dstPort uint16) []byte {
 	// IP header (20) + TCP header: 20 bytes + a 10-byte timestamp option
 	// padded with one NOP to a 12-byte boundary.
 	const ipLen, tcpLen = 20, 32
@@ -115,7 +151,9 @@ func buildSyncPacket(dstIP [4]byte, dstPort uint16) []byte {
 	binary.BigEndian.PutUint16(pkt[2:], uint16(len(pkt)))
 	pkt[8] = 64 // TTL
 	pkt[9] = syscall.IPPROTO_TCP
-	copy(pkt[12:16], dstIP[:])
+	// source and destination
+	copy(pkt[12:16], srcIP[:])
+	copy(pkt[16:20], dstIP[:])
 
 	// --- TCP header ---
 	binary.BigEndian.PutUint16(pkt[20:22], 41234)      // src port
@@ -135,7 +173,8 @@ func buildSyncPacket(dstIP [4]byte, dstPort uint16) []byte {
 
 	// TCP checksum (pseudo-header + segment).
 	pseudo := make([]byte, 12+len(pkt[20:]))
-	copy(pseudo[0:4], dstIP[:])
+	copy(pseudo[0:4], pkt[12:16]) // src
+	copy(pseudo[4:8], dstIP[:])   // dst
 	pseudo[9] = syscall.IPPROTO_TCP
 	binary.BigEndian.PutUint16(pseudo[10:12], uint16(len(pkt[20:])))
 	copy(pseudo[12:], pkt[20:])
@@ -143,7 +182,7 @@ func buildSyncPacket(dstIP [4]byte, dstPort uint16) []byte {
 	binary.BigEndian.PutUint16(pkt[36:38], uint16(cksum))
 
 	// IP checksum.
-	cksum = ^onesComplement(pkt)
+	cksum = ^onesComplement(pkt[:20])
 	binary.BigEndian.PutUint16(pkt[10:12], uint16(cksum))
 	return pkt
 }

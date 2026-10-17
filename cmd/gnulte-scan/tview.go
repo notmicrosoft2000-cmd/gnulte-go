@@ -97,16 +97,25 @@ func interactiveTable(rows []discover.Row, log []string, watchEvery int, rescan 
 		// Not a live terminal: fall back to the classic table.
 		return rows, false
 	}
-	defer scr.Close()
+	defer func() {
+		if scr != nil {
+			scr.Close()
+		}
+	}()
 
 	t := &tvTable{rows: rows, sortBy: sortIP, detail: -1, log: log, watchEvery: watchEvery, rescanable: rescan != nil}
 	if watchEvery > 0 && rescan != nil {
+		// The watch goroutine must stop when the table closes: derive a
+		// context the user quitting the view can cancel, instead of leaving
+		// the sweep running against the caller's whole-process context.
+		tctx, tcancel := context.WithCancel(wctx)
+		defer tcancel()
 		watchCh := make(chan []discover.Row, 2)
 		go func() {
 			// Same sweep-then-wait cadence as the console watch (watch.go):
 			// a ticker swallowed the interval, so `--watch 1` re-scanned
 			// every ~11s (the sweep cost) on a /24.
-			watchLoop(wctx, time.Duration(watchEvery)*time.Second, func() {
+			watchLoop(tctx, time.Duration(watchEvery)*time.Second, func() {
 				next := rescan()
 				if len(next) == 0 {
 					return
@@ -211,6 +220,10 @@ func interactiveTable(rows []discover.Row, log []string, watchEvery int, rescan 
 				t.detail = -1
 			} else {
 				t.detail = t.cursor
+				// Start the new detail at the top: a stale scroll offset from
+				// a previous (longer) detail would otherwise slice past the end
+				// of the new one.
+				t.detailOff = 0
 			}
 			continue
 		}
@@ -224,6 +237,7 @@ func interactiveTable(rows []discover.Row, log []string, watchEvery int, rescan 
 				t.detailOff++
 			case tui.KeyEsc:
 				t.detail = -1
+				t.detailOff = 0
 			case tui.KeyRune:
 				if r == 'q' {
 					return t.finalRows(), true
@@ -578,7 +592,13 @@ func (t *tvTable) summaryLines() []string {
 		if r.OS != "" {
 			osSeen[r.OS]++
 		}
-		if r.Ports != "" {
+		// OpenPorts is the numeric source of truth from a deep scan; the
+		// human "Ports" string is only a fallback for rows built without it.
+		// Counting the human string alone treats the "(no open ports …)"
+		// sentinel as one port, inflating the total.
+		if n := len(r.OpenPorts); n > 0 {
+			portTotal += n
+		} else if r.Ports != "" && !strings.HasPrefix(r.Ports, "(") {
 			portTotal += len(strings.Split(r.Ports, ","))
 		}
 		svcTotal += len(r.Services)
@@ -819,11 +839,20 @@ func (t *tvTable) detailLines(r discover.Row) []string {
 		add(ux.TruncPad(ux.C(ux.Dim, "mDNS services (DNS-SD)"), width))
 		add(ux.TruncPad("  "+ux.C(ux.Cyan, strings.Join(r.Services, ", ")), width))
 	}
-	// Scroll if the content runs past the screen.
+	// Scroll if the content runs past the screen. Clamp the offset first: a
+	// detail shorter than the remembered offset must not slice out of range.
 	n := len(lines)
-	if n > height && t.detailOff > 0 {
+	if n > height {
+		if t.detailOff > n-height {
+			t.detailOff = n - height
+		}
+		if t.detailOff < 0 {
+			t.detailOff = 0
+		}
 		lines = lines[t.detailOff:]
 		n = len(lines)
+	} else {
+		t.detailOff = 0
 	}
 	if n > height {
 		lines = lines[:height]

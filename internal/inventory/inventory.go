@@ -321,9 +321,15 @@ func UpdateTo(recs []Record, sighting Record, path, devices string) ([]Record, s
 			if recs[i].FirstSeen == "" {
 				recs[i].FirstSeen = fresh.FirstSeen
 			}
-			recs[i].MAC = fresh.MAC
-			recs[i].Vendor = fresh.Vendor
-			recs[i].Host = fresh.Host
+			if fresh.MAC != "" {
+				recs[i].MAC = fresh.MAC
+			}
+			if fresh.Vendor != "" {
+				recs[i].Vendor = fresh.Vendor
+			}
+			if fresh.Host != "" {
+				recs[i].Host = fresh.Host
+			}
 			if fresh.Kind != "" {
 				recs[i].Kind = fresh.Kind
 			}
@@ -369,9 +375,15 @@ func MergeListTo(recs []Record, path string, sightings []Record) ([]Record, int,
 				if recs[i].FirstSeen == "" {
 					recs[i].FirstSeen = f.FirstSeen
 				}
-				recs[i].MAC = f.MAC
-				recs[i].Vendor = f.Vendor
-				recs[i].Host = f.Host
+				if f.MAC != "" {
+					recs[i].MAC = f.MAC
+				}
+				if f.Vendor != "" {
+					recs[i].Vendor = f.Vendor
+				}
+				if f.Host != "" {
+					recs[i].Host = f.Host
+				}
 				if f.Kind != "" {
 					recs[i].Kind = f.Kind
 				}

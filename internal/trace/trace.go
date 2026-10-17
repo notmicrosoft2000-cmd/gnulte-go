@@ -176,7 +176,11 @@ func Walk(ctx context.Context, target string, opts Options, probe ProbeFunc, onH
 			if hop.Addr == "" && reply.Addr != "" {
 				hop.Addr = reply.Addr
 			}
-			if reply.Kind != icmp.NoReply {
+			// Keep the most informative reply seen at this TTL: a terminal
+			// reply (the destination answered, or the path is unreachable)
+			// must not be overwritten by a later non-terminal router reply on
+			// an ECMP path, which would hide the end of the trace.
+			if reply.Kind != icmp.NoReply && (!hop.Terminal() || reply.Terminal()) {
 				hop.Kind = reply.Kind
 			}
 			if i < opts.Probes-1 && opts.Interval > 0 && !sleepCtx(ctx, opts.Interval) {

@@ -113,6 +113,10 @@ func Parse(raw []byte) ([]Device, error) {
 		return nil, err
 	}
 	switch {
+	case len(wrapper.Hosts) > 0:
+		return wrapper.Hosts, nil
+	case len(wrapper.Devices) > 0:
+		return wrapper.Devices, nil
 	case wrapper.Hosts != nil:
 		return wrapper.Hosts, nil
 	case wrapper.Devices != nil:

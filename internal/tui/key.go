@@ -17,6 +17,8 @@
 
 package tui
 
+import "unicode/utf8"
+
 // Key is a decoded single key press from the raw terminal stream.
 type Key int
 
@@ -51,22 +53,27 @@ func parseKey(p []byte) (key Key, r rune, n int, more bool) {
 			if len(p) < 3 {
 				return KeyNone, 0, 0, true
 			}
-			switch p[2] {
-			case 'A':
-				return KeyUp, 0, 3, false
-			case 'B':
-				return KeyDown, 0, 3, false
-			case 'C':
-				return KeyRight, 0, 3, false
-			case 'D':
-				return KeyLeft, 0, 3, false
-			case 'H':
-				return KeyUp, 0, 3, false // Home => top
-			case 'F':
-				return KeyDown, 0, 3, false // End => bottom
-			default:
-				return KeyNone, 0, 2, false // unhandled CSI; drop the ESC+[
+			for i := 2; i < len(p); i++ {
+				if p[i] >= 0x40 && p[i] <= 0x7e {
+					switch p[i] {
+					case 'A':
+						return KeyUp, 0, i + 1, false
+					case 'B':
+						return KeyDown, 0, i + 1, false
+					case 'C':
+						return KeyRight, 0, i + 1, false
+					case 'D':
+						return KeyLeft, 0, i + 1, false
+					case 'H':
+						return KeyUp, 0, i + 1, false // Home => top
+					case 'F':
+						return KeyDown, 0, i + 1, false // End => bottom
+					default:
+						return KeyNone, 0, i + 1, false // unhandled CSI
+					}
+				}
 			}
+			return KeyNone, 0, 0, true
 		default:
 			return KeyEsc, 0, 1, false // lone ESC followed by something else
 		}
@@ -81,6 +88,13 @@ func parseKey(p []byte) (key Key, r rune, n int, more bool) {
 	default:
 		if p[0] < 0x20 {
 			return KeyNone, 0, 1, false // unshadowed control bytes are ignored
+		}
+		rn, size := utf8.DecodeRune(p)
+		if rn == utf8.RuneError && size == 1 {
+			return KeyRune, rune(p[0]), 1, false
+		}
+		if size <= len(p) {
+			return KeyRune, rn, size, false
 		}
 		return KeyRune, rune(p[0]), 1, false
 	}

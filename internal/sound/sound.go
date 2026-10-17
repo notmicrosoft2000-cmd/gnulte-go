@@ -26,6 +26,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -79,7 +80,7 @@ func Beep(freq float64, dur time.Duration) {
 }
 
 func isAplay(p string) bool {
-	return len(p) >= 5 && p[len(p)-5:] == "aplay"
+	return filepath.Base(p) == "aplay"
 }
 
 // PingResult picks a tone from the round-trip time: higher pitch for faster

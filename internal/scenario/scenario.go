@@ -175,6 +175,9 @@ func (s *Scenario) At(elapsed time.Duration) (engine.Impairment, string, bool) {
 		}
 	}
 
+	if len(s.Phases) == 0 {
+		return engine.Impairment{}, "", true
+	}
 	acc := 0.0
 	idx := len(s.Phases) - 1
 	for i := range s.Phases {

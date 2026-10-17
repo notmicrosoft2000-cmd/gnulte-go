@@ -21,7 +21,22 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gnulte-go/internal/engine"
 )
+
+// TestAtEmptyPhasesIsDone: Parse rejects an empty scenario, but At must not
+// panic if one is built directly — without the guard it indexes Phases[-1].
+func TestAtEmptyPhasesIsDone(t *testing.T) {
+	s := &Scenario{}
+	p, name, done := s.At(5 * time.Second)
+	if !done || name != "" {
+		t.Fatalf("At on an empty scenario = %q done=%v, want \"\" done=true", name, done)
+	}
+	if p != (engine.Impairment{}) {
+		t.Fatalf("params = %+v, want the zero impairment", p)
+	}
+}
 
 const sample = `{
   "name": "loss ladder",

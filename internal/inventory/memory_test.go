@@ -140,3 +140,43 @@ func TestFormatAwake(t *testing.T) {
 		}
 	}
 }
+
+// TestUpdateToKeepsDetailOnEmptySighting: a bare sighting (IP only) must not
+// wipe the MAC/vendor/hostname learned earlier. UpdateTo used to assign them
+// unconditionally while RememberTo guarded each one.
+func TestUpdateToKeepsDetailOnEmptySighting(t *testing.T) {
+	path := saveToTmp(t)
+	seed := []Record{{IP: "192.168.99.30", MAC: "aa:bb:cc:dd:ee:30", Vendor: "Acme", Host: "printer"}}
+	recs, _, err := UpdateTo(seed, Record{IP: "192.168.99.30"}, path, "devices")
+	if err != nil {
+		t.Fatalf("UpdateTo: %v", err)
+	}
+	if recs[0].MAC != "aa:bb:cc:dd:ee:30" || recs[0].Vendor != "Acme" || recs[0].Host != "printer" {
+		t.Fatalf("empty sighting wiped detail: %+v", recs[0])
+	}
+	// A non-empty sighting still refreshes the fields it carries.
+	recs, _, err = UpdateTo(recs, Record{IP: "192.168.99.30", Host: "nas"}, path, "devices")
+	if err != nil {
+		t.Fatalf("UpdateTo: %v", err)
+	}
+	if recs[0].Host != "nas" || recs[0].MAC != "aa:bb:cc:dd:ee:30" {
+		t.Fatalf("refresh wrong: %+v", recs[0])
+	}
+}
+
+// TestMergeListToKeepsDetailOnEmptySighting is the bulk counterpart: a sighting
+// with no MAC/vendor/host must not erase what the store already knew.
+func TestMergeListToKeepsDetailOnEmptySighting(t *testing.T) {
+	path := saveToTmp(t)
+	seed := []Record{{IP: "192.168.99.40", MAC: "aa:bb:cc:dd:ee:40", Vendor: "Acme", Host: "cam"}}
+	recs, added, err := MergeListTo(seed, path, []Record{{IP: "192.168.99.40"}})
+	if err != nil {
+		t.Fatalf("MergeListTo: %v", err)
+	}
+	if added != 0 {
+		t.Fatalf("added = %d, want 0", added)
+	}
+	if recs[0].MAC != "aa:bb:cc:dd:ee:40" || recs[0].Vendor != "Acme" || recs[0].Host != "cam" {
+		t.Fatalf("empty sighting wiped detail: %+v", recs[0])
+	}
+}

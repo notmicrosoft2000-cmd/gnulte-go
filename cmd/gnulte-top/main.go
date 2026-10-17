@@ -61,6 +61,7 @@ func main() {
 		showVer  = flag.Bool("v", false, "print version and exit")
 	)
 	flag.Usage = usage
+	flag.BoolVar(showVer, "version", false, "print version and exit")
 	flag.Parse()
 
 	if *showVer {
@@ -403,7 +404,6 @@ func writeJSON(w io.Writer, doc jsonDoc) error {
 // per-second byte rates so the output is interval-independent.
 func writeCSV(w io.Writer, s sample, flowsMode bool) error {
 	cw := csv.NewWriter(w)
-	defer cw.Flush()
 	if flowsMode {
 		if err := cw.Write([]string{"a", "b", "a_to_b_bps", "b_to_a_bps", "total_bps"}); err != nil {
 			return err
@@ -415,6 +415,7 @@ func writeCSV(w io.Writer, s sample, flowsMode bool) error {
 				return err
 			}
 		}
+		cw.Flush()
 		return cw.Error()
 	}
 	if err := cw.Write([]string{"host", "down_bps", "up_bps", "down_pkts", "up_pkts", "peers", "total_bps"}); err != nil {
@@ -430,6 +431,7 @@ func writeCSV(w io.Writer, s sample, flowsMode bool) error {
 			return err
 		}
 	}
+	cw.Flush()
 	return cw.Error()
 }
 

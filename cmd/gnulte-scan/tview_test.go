@@ -236,3 +236,20 @@ func TestSummaryLinesCountsByTypeAndPorts(t *testing.T) {
 		}
 	}
 }
+
+// TestTVDetailOffsetClamped: a scroll offset left over from a longer detail
+// must not slice past the end of a shorter one — that panicked with "slice
+// bounds out of range". A long port list forces the detail past the screen
+// height so the scroll path is actually taken.
+func TestTVDetailOffsetClamped(t *testing.T) {
+	tab := newTable()
+	row := discover.Row{IP: "10.9.9.9", Ports: strings.Repeat("65535 ", 500)}
+	tab.detailOff = 1 << 20
+	lines := tab.detailLines(row) // must not panic
+	if len(lines) == 0 {
+		t.Fatal("detailLines returned no lines")
+	}
+	if tab.detailOff < 0 {
+		t.Fatalf("detailOff = %d, want non-negative after clamp", tab.detailOff)
+	}
+}

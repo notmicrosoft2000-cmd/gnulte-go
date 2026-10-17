@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"html"
+	"io"
 	"os"
 	"os/signal"
 	"sort"
@@ -77,7 +78,7 @@ func main() {
 		fatal(fmt.Errorf("network detection failed: %w", err))
 	}
 	if *iface != "" {
-		cfg.Interface = *iface
+		cfg = netutil.WithInterface(cfg, *iface)
 	}
 	if cfg.Interface == "" {
 		fatal(fmt.Errorf("could not determine a network interface; pass -i"))
@@ -134,16 +135,7 @@ func main() {
 
 	switch {
 	case exported:
-		var err error
-		switch {
-		case *asJSON:
-			err = out.JSON(os.Stdout, rows)
-		case *asYAML:
-			err = out.YAML(os.Stdout, rows)
-		case *asCSV:
-			err = out.CSV(os.Stdout, rows)
-		}
-		if err != nil {
+		if err := emitExport(table, rows, *asJSON, *asYAML, *asCSV); err != nil {
 			fatal(err)
 		}
 	default:
@@ -165,6 +157,23 @@ func main() {
 			fmt.Fprintf(ux.Out, "HTML report written to %s\n", *htmlReport)
 		}
 	}
+}
+
+// emitExport writes the requested machine-readable export to w. w is the -o
+// file when one was given and the console otherwise, so -o is honoured for
+// --json/--yaml/--csv as well as the plain table. It is a named function (not an
+// inline switch) so a test can pin the "writes to the writer it is handed"
+// contract that keeps -o from silently creating an empty file.
+func emitExport(w io.Writer, rows []discover.Row, asJSON, asYAML, asCSV bool) error {
+	switch {
+	case asJSON:
+		return out.JSON(w, rows)
+	case asYAML:
+		return out.YAML(w, rows)
+	case asCSV:
+		return out.CSV(w, rows)
+	}
+	return nil
 }
 
 func buildRows(ctx context.Context, live []string, neighbors map[string]string, cfg netutil.Config, noHosts bool) []discover.Row {
@@ -231,9 +240,16 @@ func buildRows(ctx context.Context, live []string, neighbors map[string]string, 
 		}(ip)
 	}
 	wg.Wait()
-	discover.EnrichHostnames(ctx, rows)
+	if !noHosts {
+		enrichHostnames(ctx, rows)
+	}
 	return rows
 }
+
+// enrichHostnames is the last-hurdle identification pass. It is a package seam
+// so a test can prove buildRows skips it under --no-hostnames instead of
+// relying on a name actually resolving.
+var enrichHostnames = discover.EnrichHostnames
 
 // subnetString derives the /CIDR to sweep from the interface address. Only 24,
 // 16, and 8 boundaries are guessed at; finer masks fall back to /24.

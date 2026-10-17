@@ -407,28 +407,29 @@ func BrowseMDNS(ctx context.Context, ips []string) map[string]string {
 		return names
 	}
 	group := net.IPv4(224, 0, 0, 251)
-	conn, err := net.ListenMulticastUDP("udp4", nil, &net.UDPAddr{IP: group, Port: 5353})
+	mconn, err := net.ListenMulticastUDP("udp4", nil, &net.UDPAddr{IP: group, Port: 5353})
 	if err != nil {
 		// No group membership (no root / no interface): fall back to unicast
 		// responses by sending from an ephemeral socket, like reverseMDNS.
-		conn, err = net.DialUDP("udp4", nil, &net.UDPAddr{IP: group, Port: 5353})
+		mconn, err = net.DialUDP("udp4", nil, &net.UDPAddr{IP: group, Port: 5353})
 		if err != nil {
 			return names
 		}
 	}
-	defer conn.Close()
+	defer mconn.Close()
 
 	limit, ok := boundUntil(ctx, 700*time.Millisecond)
 	if !ok {
 		return names
 	}
-	_ = conn.SetWriteDeadline(limit)
+	_ = mconn.SetWriteDeadline(limit)
 
+	groupAddr := &net.UDPAddr{IP: group, Port: 5353}
 	for _, ip := range ips {
 		if names[ip] != "" {
 			continue
 		}
-		_, _ = conn.Write(reversePTRQuery(ip))
+		_, _ = mconn.WriteToUDP(reversePTRQuery(ip), groupAddr)
 	}
 
 	buf := make([]byte, 4096)
@@ -439,8 +440,8 @@ func BrowseMDNS(ctx context.Context, ips []string) map[string]string {
 		if time.Now().After(limit) {
 			break
 		}
-		_ = conn.SetReadDeadline(time.Now().Add(shortRead))
-		n, _, err := conn.ReadFromUDP(buf)
+		_ = mconn.SetReadDeadline(time.Now().Add(shortRead))
+		n, _, err := mconn.ReadFromUDP(buf)
 		if err != nil {
 			if ne, isNet := err.(net.Error); isNet && ne.Timeout() {
 				if ctx.Err() != nil {
@@ -570,6 +571,7 @@ func ServiceLabels(ctx context.Context, ips []string) map[string][]string {
 	defer conn.Close()
 
 	var rrs []mdnsRR
+	groupAddr := &net.UDPAddr{IP: net.IPv4(224, 0, 0, 251), Port: 5353}
 	collect := func(q []byte) {
 		budget := serviceBudget(ctx)
 		if budget <= 0 {
@@ -577,7 +579,7 @@ func ServiceLabels(ctx context.Context, ips []string) map[string][]string {
 		}
 		limit := time.Now().Add(budget)
 		_ = conn.SetWriteDeadline(limit)
-		if _, err := conn.Write(q); err != nil {
+		if _, err := conn.WriteToUDP(q, groupAddr); err != nil {
 			return
 		}
 		buf := make([]byte, 8192)
@@ -882,7 +884,7 @@ func NetBIOSName(ctx context.Context, ip string) string {
 			return ""
 		}
 		_ = conn.SetReadDeadline(time.Now().Add(shortRead))
-		n, _, err := conn.ReadFromUDP(buf)
+		n, from, err := conn.ReadFromUDP(buf)
 		if err != nil {
 			if ne, isNet := err.(net.Error); isNet && ne.Timeout() {
 				if ctx.Err() != nil {
@@ -892,8 +894,10 @@ func NetBIOSName(ctx context.Context, ip string) string {
 			}
 			return ""
 		}
-		if name, ok := nbstatReply(buf[:n]); ok {
-			return name
+		if from != nil && from.IP.Equal(raddr.IP) {
+			if name, ok := nbstatReply(buf[:n]); ok {
+				return name
+			}
 		}
 	}
 }

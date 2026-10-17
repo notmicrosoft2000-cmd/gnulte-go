@@ -63,6 +63,22 @@ func TestSanitizeClampsOutOfRange(t *testing.T) {
 	}
 }
 
+// TestSanitizeClampsWifiCount: the settings UI and config comment advertise
+// 1-256 frames per burst, so a crafted config must clamp to the same range.
+func TestSanitizeClampsWifiCount(t *testing.T) {
+	c := Default()
+	c.WifiCount = 0
+	c.Sanitize()
+	if c.WifiCount != 1 {
+		t.Fatalf("WifiCount = %d, want clamped up to 1", c.WifiCount)
+	}
+	c.WifiCount = 100000
+	c.Sanitize()
+	if c.WifiCount != 256 {
+		t.Fatalf("WifiCount = %d, want clamped down to 256", c.WifiCount)
+	}
+}
+
 func TestV13UXDefaults(t *testing.T) {
 	// New UX toggles should not silently ship disabled.
 	d := Default()

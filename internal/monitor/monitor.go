@@ -23,7 +23,6 @@ package monitor
 import (
 	"context"
 	"fmt"
-	"math"
 	"os"
 	"strings"
 	"sync"
@@ -89,22 +88,26 @@ func (st *Stats) jitter() int64 {
 	return sum / int64(len(st.Samples))
 }
 
-func (st *Stats) stdev() float64 {
-	n := len(st.Samples)
-	if n < 2 {
-		return 0
-	}
-	av := st.avg()
-	var ss float64
-	for _, s := range st.Samples {
-		d := float64(int64(s) - av)
-		ss += d * d
-	}
-	return math.Sqrt(ss / float64(n-1))
-}
-
 // attempts is the total number of ping tries (successes + drops).
 func (st *Stats) attempts() int { return st.Count + st.Drops }
+
+// observe records one successful reply: it bumps the count, adds to the running
+// total, updates min/max, and appends to the sample and loss histories. The
+// minimum is seeded from the first reply (Count == 1) rather than by testing
+// Min != 0, so a genuine 0ms first sample is kept instead of being discarded
+// and the next (larger) sample shown as the minimum.
+func (st *Stats) observe(rtt RTT) {
+	st.Count++
+	st.Total += int64(rtt)
+	if st.Count == 1 || int64(rtt) < st.Min {
+		st.Min = int64(rtt)
+	}
+	if int64(rtt) > st.Max {
+		st.Max = int64(rtt)
+	}
+	st.Samples = append(st.Samples, rtt)
+	st.LossSeries = append(st.LossSeries, 0)
+}
 
 // Result pairs one target with its final statistics (safe to read after Run).
 type Result struct {
@@ -180,10 +183,18 @@ func trendOf(prev, cur RTT) string {
 	}
 }
 
-func badText(s string) string { return paint(cRed, s) }
-
-// cBold is used by badText callers and unreachable rows.
+// cBold emphasizes the red "unreachable" status on loss rows.
 const cBold = "\033[1m"
+
+// trafficCounter is the monitor's view of the live per-host traffic counter.
+// It is an interface rather than *traffic.Counter so tests can supply a
+// stand-in and count Snapshot calls: Snapshot advances the counter's
+// previous-totals baseline, so the dashboard must take exactly one snapshot per
+// frame and format every host from it. (The real *traffic.Counter satisfies it.)
+type trafficCounter interface {
+	Snapshot() map[string]traffic.Rate
+	Close()
+}
 
 // Monitor pings Targets on Interval and reports results.
 type Monitor struct {
@@ -237,8 +248,9 @@ type Monitor struct {
 	// Traffic counts live per-host bytes/packets on Iface when the interface
 	// name is known and the raw socket can be opened (root). It upgrades the
 	// console with a down/up rate per target; without it, the console simply
-	// omits the traffic column.
-	Traffic *traffic.Counter
+	// omits the traffic column. It is an interface so tests can inject a
+	// stand-in (see trafficCounter).
+	Traffic trafficCounter
 
 	// sel is the arrow-key-selected target index (atomic) for multi-target
 	// monitoring: the host whose beeps are audible.
@@ -260,6 +272,12 @@ type Monitor struct {
 
 	// Results is filled once Run returns.
 	Results []Result
+
+	// lastRate is the wall time of the previous single-target rate read. The
+	// traffic counter reports a delta per Snapshot call, so the console log
+	// rescales it to a true per-second rate using the real elapsed time (see
+	// rateText). Single-target only, so it needs no lock.
+	lastRate time.Time
 
 	expMu sync.Mutex
 	exp   *os.File
@@ -515,6 +533,12 @@ func (m *Monitor) runSingle(ctx context.Context, ip string) error {
 	st := &Stats{Samples: []int{}}
 	seq := 0
 	prev := RTT(-1)
+	// Establish the traffic baseline (as the dashboard does) so the first
+	// line does not dump the socket's whole pre-session count as one rate.
+	if m.Traffic != nil {
+		m.Traffic.Snapshot()
+		m.lastRate = time.Now()
+	}
 	for {
 		// honour an interrupt without bouncing through another ping
 		if ctx.Err() != nil {
@@ -545,23 +569,11 @@ func (m *Monitor) runSingle(ctx context.Context, ip string) error {
 				sound.PingResult(0, false)
 			}
 		} else {
-			st.Count++
-			st.Total += int64(rtt)
-			if st.Min == 0 || int64(rtt) < st.Min {
-				st.Min = int64(rtt)
-			}
-			if int64(rtt) > st.Max {
-				st.Max = int64(rtt)
-			}
-			st.Samples = append(st.Samples, rtt)
-			st.LossSeries = append(st.LossSeries, 0)
+			st.observe(rtt)
 			m.trimHistory(st)
 			if !m.Quiet {
 				if note == "" {
 					note = "—"
-				}
-				if strings.HasPrefix(note, "tcp:") {
-					note += dim("  (icmp silent)")
 				}
 				line, plainLine := m.singleLine(seq, now, ip, rtt, note, prev)
 				if tr := m.rateText(ip); tr != "" {
@@ -600,12 +612,20 @@ func (m *Monitor) singleLine(seq int, now, ip string, rtt RTT, note string, prev
 	if prev >= 0 {
 		trPlain = trendPlain(prev, rtt)
 	}
+	// The "ICMP silent" suffix is decoration: it belongs on the coloured
+	// console line only. Appending the ANSI-dimmed form to the shared note
+	// leaked escape codes into the plain history log and the HTML report.
+	colNote, plainNote := note, note
+	if strings.HasPrefix(note, "tcp:") {
+		colNote += dim("  (icmp silent)")
+		plainNote += "  (icmp silent)"
+	}
 	colored := fmt.Sprintf("  %s [%s] %s %-16s %10s  %s",
-		segColor(seq), now, tickMark(true), ip, rttColor(rtt), note)
+		segColor(seq), now, tickMark(true), ip, rttColor(rtt), colNote)
 	if trCol != "" {
 		colored += " " + trCol
 	}
-	plain := fmt.Sprintf("  #%03d [%s] ✓ %-16s %10s  %s", seq, now, ip, fmt.Sprintf("%dms", rtt), note)
+	plain := fmt.Sprintf("  #%03d [%s] ✓ %-16s %10s  %s", seq, now, ip, fmt.Sprintf("%dms", rtt), plainNote)
 	if trPlain != "" {
 		plain += " " + trPlain
 	}
@@ -669,7 +689,11 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 	// Arrow-key selection. The reader forces the selection to the first host
 	// when the terminal cannot be switched raw, so beeps always have a target.
 	keyboard := len(m.Targets) > 1 && !m.Quiet && stdinIsTTY()
-	restore, keyboardActive := enableKeyboard(len(m.Targets), &m.sel)
+	restore := func() {}
+	keyboardActive := false
+	if keyboard {
+		restore, keyboardActive = enableKeyboard(len(m.Targets), &m.sel)
+	}
 	defer restore()
 	if keyboardActive {
 		// Raw input is invisible in the terminal's eyes: a process killed
@@ -711,16 +735,7 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 				lastNote[i] = note
 				stats[i].Last = rtt
 				if ok {
-					stats[i].Count++
-					stats[i].Total += int64(rtt)
-					if stats[i].Min == 0 || int64(rtt) < stats[i].Min {
-						stats[i].Min = int64(rtt)
-					}
-					if int64(rtt) > stats[i].Max {
-						stats[i].Max = int64(rtt)
-					}
-					stats[i].Samples = append(stats[i].Samples, rtt)
-					stats[i].LossSeries = append(stats[i].LossSeries, 0)
+					stats[i].observe(rtt)
 				} else {
 					stats[i].Drops++
 					stats[i].LossSeries = append(stats[i].LossSeries, 100)
@@ -776,7 +791,9 @@ func (m *Monitor) runMulti(ctx context.Context) error {
 			}
 			return nil
 		case <-tick.C:
-			m.renderDashboard(stats, lastNote, keyboard, view)
+			if !m.Quiet {
+				m.renderDashboard(stats, lastNote, keyboard, view)
+			}
 			if m.OnTick != nil {
 				m.OnTick()
 			}
@@ -806,6 +823,14 @@ func (m *Monitor) renderDashboard(stats []*Stats, lastNote []string, keyboard, v
 	lines := make([]string, 0, 2+2*len(m.Targets))
 	lines = append(lines, "")
 
+	// One traffic snapshot per frame: Snapshot advances the counter's
+	// baseline, so taking it once per host would leave every host after the
+	// first with a zero delta.
+	var trafficRates map[string]traffic.Rate
+	if m.Traffic != nil {
+		trafficRates = m.Traffic.Snapshot()
+	}
+
 	for i, ip := range m.Targets {
 		st := stats[i]
 		mark := "   "
@@ -820,9 +845,16 @@ func (m *Monitor) renderDashboard(stats []*Stats, lastNote []string, keyboard, v
 		}
 
 		// Line 1: status, address, current latency, average, loss, traffic.
+		// Before the first probe lands, Last is still its zero value: show a
+		// neutral placeholder rather than a green "✓ last 0ms", which would
+		// report a healthy host that has not been measured yet.
 		last := paint(cDim, "--")
-		if st.Last >= 0 {
-			last = rttColor(int(st.Last))
+		status := paint(cDim, "•")
+		if st.attempts() > 0 {
+			if st.Last >= 0 {
+				last = rttColor(int(st.Last))
+			}
+			status = statusIcon(st.Last)
 		}
 		tcpNote := ""
 		if n := lastNote[i]; strings.HasPrefix(n, "tcp:") {
@@ -840,13 +872,16 @@ func (m *Monitor) renderDashboard(stats []*Stats, lastNote []string, keyboard, v
 		if st.lossPct() > 0 {
 			loss = paint(cRed, fmt.Sprintf("%.0f%%", st.lossPct()))
 		}
-		tr := m.rateText(ip)
+		tr := ""
+		if trafficRates != nil {
+			tr = rateTextRate(trafficRates[ip])
+		}
 		trS := dim("↓ - ↑ -")
 		if tr != "" {
 			trS = paint(cCyan, tr)
 		}
 		lines = append(lines, fmt.Sprintf("  %s%s %s  %s  last %s  avg %s  loss %s  %s",
-			mark, idx, statusIcon(st.Last), paint(cYellow, ip), last, avg, loss, trS))
+			mark, idx, status, paint(cYellow, ip), last, avg, loss, trS))
 
 		// Line 2: span metrics and the tiny latency sparkline, dim.
 		mn, mx := "--", "--"
@@ -904,11 +939,48 @@ func (m *Monitor) renderDashboard(stats []*Stats, lastNote []string, keyboard, v
 
 // rateText renders one host's live down/up rates from the traffic counter, or
 // an empty string when counters are off, e.g. "↓1.2KB/s ↑3.4KB/s".
+//
+// Snapshot returns the bytes since the previous call, so the value is only a
+// per-second rate when calls are one second apart. The dashboard ticks at 1 Hz,
+// but the single-target log calls at the sampling interval, which the operator
+// can set to anything; rescale by the real elapsed time so "KB/s" stays honest.
+// Sub-second windows are too noisy to extrapolate, so they are shown as-is.
 func (m *Monitor) rateText(ip string) string {
 	if m.Traffic == nil {
 		return ""
 	}
 	r := m.Traffic.Snapshot()[ip]
+	now := time.Now()
+	if !m.lastRate.IsZero() {
+		if elapsed := now.Sub(m.lastRate).Seconds(); elapsed >= 0.5 {
+			r = scaleRate(r, elapsed)
+		}
+	}
+	m.lastRate = now
+	return rateTextRate(r)
+}
+
+// scaleRate rescales a byte/packet delta measured over secs to a one-second
+// rate, rounding to the nearest unit. Non-positive or exactly-unit secs are a
+// no-op.
+func scaleRate(r traffic.Rate, secs float64) traffic.Rate {
+	if secs <= 0 || secs == 1 {
+		return r
+	}
+	ms := int64(secs*1000 + 0.5)
+	if ms <= 0 || ms == 1000 {
+		return r
+	}
+	f := func(v int64) int64 { return (v*1000 + ms/2) / ms }
+	return traffic.Rate{
+		RXBytes: f(r.RXBytes), TXBytes: f(r.TXBytes),
+		RXPkts: f(r.RXPkts), TXPkts: f(r.TXPkts),
+	}
+}
+
+// rateTextRate formats a single host's rate. It is pure so the dashboard can
+// take one Snapshot per frame and reuse the result for every host.
+func rateTextRate(r traffic.Rate) string {
 	if r.RXBytes == 0 && r.TXBytes == 0 && r.RXPkts == 0 && r.TXPkts == 0 {
 		return "↓0 ↑0"
 	}

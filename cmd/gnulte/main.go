@@ -167,6 +167,7 @@ func main() {
 	flag.BoolVar(stealthArg, "stealth", false, "stealth ARP spoofing: answer only when asked (alias: -S)")
 	flag.BoolVar(noBanner, "minimal", false, "skip the banner (alias: --no-banner)")
 	flag.BoolVar(quiet, "quiet", false, "quiet: results only")
+	flag.BoolVar(showVer, "v", false, "print version and exit")
 	flag.Usage = usage
 	flag.Parse()
 
@@ -326,9 +327,9 @@ func main() {
 		fatal(fmt.Errorf("network detection failed: %w", err))
 	}
 	if *ifaceArg != "" {
-		cfg.Interface = *ifaceArg
+		cfg = netutil.WithInterface(cfg, *ifaceArg)
 	} else if prefs.Interface != "" {
-		cfg.Interface = prefs.Interface
+		cfg = netutil.WithInterface(cfg, prefs.Interface)
 	}
 
 	if *dupcheckArg {
@@ -1141,11 +1142,15 @@ Advanced:
       --probe-ports PORTS TCP fallback probe ports when ICMP is filtered (default 443,80,53)
       --force             skip interactive confirmations
       --no-banner         skip the banner (alias: --minimal)
+      --scenario FILE     JSON scenario script of timed phases, applied on a clock
+      --per-target FILE   JSON mapping target IP -> impairment override
+      --compare A B       diff two -j report JSON snapshots (A, then B) and exit
+      --compare-html FILE with --compare, also write the diff as an HTML report
       --dupcheck          scan LAN for duplicate IPs / ARP conflicts and exit
       --settings          open the settings editor (saved defaults) and exit
       --docs              print the safety documents and exit
       --reset-safety      remove the acceptance record and exit
-      --version           print version and exit
+  -v, --version           print version and exit
   -h, --help              show this help
 `, version)
 }

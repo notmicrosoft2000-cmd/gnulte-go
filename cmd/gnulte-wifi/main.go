@@ -53,7 +53,7 @@ func main() {
 		bssidArg = flag.String("a", "", "access point BSSID (router MAC), e.g. 00:0c:41:63:45:6a")
 		staArg   = flag.String("s", "", "station MAC to disconnect (ff:ff:ff:ff:ff:ff = every client on the BSSID)")
 		reason   = flag.Int("reason", 7, "802.11 deauth reason code (7 = STA leaving BSS)")
-		count    = flag.Int("count", 64, "frames sent per burst")
+		count    = flag.Int("count", 64, "frames sent per burst (1-256)")
 		delay    = flag.Int("delay", 5, "seconds between bursts (repeat kicks a client that reconnects)")
 		once     = flag.Bool("once", false, "send a single burst and exit")
 		duration = flag.Int("duration", 0, "auto-stop after N seconds (0 = until interrupt)")
@@ -78,6 +78,7 @@ func main() {
 	flag.IntVar(jitter, "jitter-ms", 2, "random 0-N ms delay before each frame")
 	flag.BoolVar(mix, "mix", true, "rotate the deauth reason code each burst")
 	flag.BoolVar(hop, "hop-channels", false, "hop the adapter between channels after each burst")
+	flag.BoolVar(showVer, "v", false, "print version and exit")
 	flag.Usage = usage
 	flag.Parse()
 
@@ -217,6 +218,9 @@ func main() {
 	if *count < 1 {
 		*count = 1
 	}
+	if *count > 256 {
+		*count = 256
+	}
 	if *delay < 1 {
 		*delay = 1
 	}
@@ -338,7 +342,7 @@ loop:
 		if !*quiet {
 			hopTxt := ""
 			if *hop {
-				hopTxt = fmt.Sprintf("  · ch %d", hopChannels[chIdx])
+				hopTxt = hopLabel(hopChannels, chIdx)
 			}
 			fmt.Printf("  %s burst #%-3d  %5d frames → %-17s %s%s\n",
 				ux.C(ux.Cyan, ">>"), bursts, *count, station, ux.C(ux.Dim, stationLabelExtra(station)+sentFlag), hopTxt)
@@ -389,6 +393,16 @@ func stationLabelExtra(s airframes.MAC) string {
 		return "(all clients)"
 	}
 	return ""
+}
+
+// hopLabel renders the "  · ch N" suffix shown on each burst while channel
+// hopping is on. The index wraps, so a long run cannot run off the end of the
+// channel list.
+func hopLabel(chans []uint8, idx int) string {
+	if len(chans) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("  · ch %d", chans[idx%len(chans)])
 }
 
 // summary prints the pre-test confirmation box (mirrors gnulte's CONFIRM TEST).
@@ -515,7 +529,7 @@ Options:
   -a, --ap MAC            access point BSSID (the router's MAC)
   -s, --station MAC       station to disconnect; ff:ff:ff:ff:ff:ff = all clients
       --reason CODE       deauth reason code (default 7 = STA leaving BSS)
-      --count N           frames per burst (default 64)
+      --count N           frames per burst, 1-256 (default 64)
       --delay SECONDS     seconds between bursts (default 5)
       --jitter-ms N       random 0-N ms delay before each frame (defeats
                           reconnect timers; 0 = no jitter)
@@ -532,7 +546,7 @@ Options:
       --settings          open the settings editor (saved defaults) and exit
       --docs              print the safety documents and exit
       --reset-safety      remove the acceptance record and exit
-      --version           print version and exit
+  -v, --version           print version and exit
   -h, --help              show this help
 
 The interface must already be in monitor mode (airmon-ng start / iw dev set

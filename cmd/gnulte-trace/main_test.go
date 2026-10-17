@@ -164,3 +164,53 @@ func TestPrivilegeHintNamesRoot(t *testing.T) {
 		t.Fatalf("privilegeHint must pass unrelated errors through unchanged")
 	}
 }
+
+// TestEmitOutputJSONAlsoWritesHTML: --json must not suppress --html. main used
+// to return right after emitJSON, so the report was never written when both
+// flags were passed.
+func TestEmitOutputJSONAlsoWritesHTML(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "both.html")
+	var stdout, human, notice bytes.Buffer
+	if err := emitOutput(sample(), trace.Options{Probes: 3, MaxHops: 30}, time.Now(), false, true, path, &stdout, &human, &notice); err != nil {
+		t.Fatalf("emitOutput: %v", err)
+	}
+	// stdout stays exactly one JSON document...
+	var got jsonResult
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("stdout is not clean JSON: %v\n%s", err, stdout.String())
+	}
+	// ...the HTML report is still written...
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("report not written alongside --json: %v", err)
+	}
+	// ...the human table/summary is not printed...
+	if human.Len() != 0 {
+		t.Errorf("human output should be empty in JSON mode, got %q", human.String())
+	}
+	// ...and the report notice goes to the notice stream, not stdout.
+	if !strings.Contains(notice.String(), "report written") {
+		t.Errorf("notice = %q, want the report path", notice.String())
+	}
+}
+
+// TestEmitOutputHumanPath: without --json the human table/summary is written to
+// the human stream and the report path is echoed there.
+func TestEmitOutputHumanPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "human.html")
+	var stdout, human, notice bytes.Buffer
+	if err := emitOutput(sample(), trace.Options{Probes: 3, MaxHops: 30}, time.Now(), false, false, path, &stdout, &human, &notice); err != nil {
+		t.Fatalf("emitOutput: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout should be empty without --json, got %q", stdout.String())
+	}
+	if !strings.Contains(human.String(), "REACHED") {
+		t.Errorf("summary missing from human output: %q", human.String())
+	}
+	if !strings.Contains(human.String(), "report:") {
+		t.Errorf("report notice missing from human output: %q", human.String())
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("report not written: %v", err)
+	}
+}

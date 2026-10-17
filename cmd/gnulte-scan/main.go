@@ -112,6 +112,7 @@ func main() {
 	flag.BoolVar(asYAML, "yaml", false, "output YAML")
 	flag.BoolVar(asCSV, "csv", false, "output CSV")
 	flag.BoolVar(quiet, "quiet", false, "quiet: results only")
+	flag.BoolVar(showVer, "v", false, "print version and exit")
 	flag.Usage = usage
 	flag.Parse()
 
@@ -226,7 +227,7 @@ func main() {
 		fatal(fmt.Errorf("network detection failed: %w", err))
 	}
 	if *iface != "" {
-		cfg.Interface = *iface
+		cfg = netutil.WithInterface(cfg, *iface)
 	}
 	if cfg.Interface == "" {
 		fatal(fmt.Errorf("could not determine a network interface; pass -i"))
@@ -882,12 +883,17 @@ Options:
       --watch N           re-scan every N seconds, marking NEW/GONE/CHANGED hosts
                           live (Live Interconnection); with --json it streams a
                           JSON-lines delta feed (baseline + per-sweep changes)
+      --arp               also sweep by ARP (auto when root; catches hosts that
+                          block ping)
+      --no-arp            disable the automatic ARP sweep
+      --oui-file FILE     merge an operator CSV vendor table (prefix,vendor) over
+                          the built-in OUI data
       --report FILE       write the post-test HTML report (full log history)
       --no-report         skip writing the HTML report (written by default)
       --settings          open the settings editor (saved defaults) and exit
       --docs              print the safety documents and exit
       --reset-safety      remove the acceptance record and exit
-      --version           print version and exit
+  -v, --version           print version and exit
   -h, --help              show this help
 `, version)
 }

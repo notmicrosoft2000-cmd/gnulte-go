@@ -3,8 +3,12 @@ package engine
 import (
 	"encoding/binary"
 	"net"
+	"os"
+	"os/exec"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func testCfg() Config {
@@ -320,5 +324,64 @@ func TestValidateRejectsBad(t *testing.T) {
 	c = Config{Interface: "eth0", Gateway: "1.1.1.1", Targets: []string{"nope"}, LossPct: 0}
 	if err := c.Validate(); err == nil {
 		t.Error("expected validation error for invalid target")
+	}
+}
+
+// TestSpoofProcChild is the helper process behind the arpspoof tests below: the
+// parent starts this same test binary with GO_WANT_SPOOF_HELPER=1. Without it
+// the function is a no-op, so it is harmless in a normal test run.
+func TestSpoofProcChild(t *testing.T) {
+	if os.Getenv("GO_WANT_SPOOF_HELPER") != "1" {
+		return
+	}
+	if os.Getenv("SPOOF_HELPER_SLEEP") != "" {
+		time.Sleep(30 * time.Second)
+	}
+	os.Exit(0)
+}
+
+func spoofHelperCmd(t *testing.T, sleep bool) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=TestSpoofProcChild")
+	cmd.Env = append(os.Environ(), "GO_WANT_SPOOF_HELPER=1")
+	if sleep {
+		cmd.Env = append(cmd.Env, "SPOOF_HELPER_SLEEP=1")
+	}
+	// Mirror how startSpoofs builds arpspoof: its own process group, so
+	// killSpoof's negative-pid signal reaches it.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	return cmd
+}
+
+// TestSpoofProcDetectsImmediateExit: a child that exits at once must be seen as
+// gone. The old code slept a second then probed Signal(0), but an unreaped
+// child is a zombie and kill(pid, 0) succeeds on a zombie — so a failed
+// arpspoof looked healthy and the session poisoned nothing.
+func TestSpoofProcDetectsImmediateExit(t *testing.T) {
+	sp, err := startSpoofProc(spoofHelperCmd(t, false))
+	if err != nil {
+		t.Fatalf("startSpoofProc: %v", err)
+	}
+	if !sp.exitedWithin(5 * time.Second) {
+		t.Fatal("a process that exited immediately was not detected")
+	}
+}
+
+// TestSpoofProcStaysAliveAndKillReaps: a running child is not reported exited,
+// and killSpoof terminates and reaps it rather than leaking the process.
+func TestSpoofProcStaysAliveAndKillReaps(t *testing.T) {
+	sp, err := startSpoofProc(spoofHelperCmd(t, true))
+	if err != nil {
+		t.Fatalf("startSpoofProc: %v", err)
+	}
+	if sp.exitedWithin(200 * time.Millisecond) {
+		t.Fatal("a sleeping process was reported as exited")
+	}
+	s := &Session{}
+	s.killSpoof(sp)
+	select {
+	case <-sp.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("killSpoof did not reap the child")
 	}
 }

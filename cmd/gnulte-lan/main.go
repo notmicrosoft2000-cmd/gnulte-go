@@ -261,6 +261,7 @@ func main() {
 		quiet       = flag.Bool("q", false, "quiet: no banner, plain transcript")
 		showVer     = flag.Bool("version", false, "print version and exit")
 	)
+	flag.BoolVar(showVer, "v", false, "print version and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "%s\n\nUsage: gnulte-lan [flags]\n\n", purpose())
 		flag.PrintDefaults()

@@ -45,12 +45,6 @@ import (
 
 var roll = rand.New(rand.NewSource(time.Now().UnixNano()))
 
-// verboseHook is the active transcript callback for the current session. It is
-// installed by Start and cleared when Start returns (the session config keeps
-// its own copy). Run under the session lock by callers that need ordering, but
-// in practice every call happens on the single main flow.
-var verboseHook func(line string)
-
 // Mode selects shape (impairment) or full block.
 type Mode int
 
@@ -339,8 +333,8 @@ func readForward() (string, error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
-func writeForward(v string) error {
-	traceCommand("echo", v, ">", "/proc/sys/net/ipv4/ip_forward")
+func (s *Session) writeForward(v string) error {
+	s.traceCommand("echo", v, ">", "/proc/sys/net/ipv4/ip_forward")
 	return os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte(v+"\n"), 0o644)
 }
 
@@ -352,7 +346,7 @@ type Session struct {
 	origForward    string
 	forwardTouched bool
 	drops          []string
-	spoofs         []*exec.Cmd
+	spoofs         []*spoofProc
 	qdiscBefore    string
 	qdiscBeforeErr string // why the original qdisc could not be recorded
 	qdiscApplied   bool
@@ -381,10 +375,6 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 	}
 
 	s := &Session{cfg: cfg}
-	if cfg.Verbose != nil {
-		verboseHook = cfg.Verbose
-		defer func() { verboseHook = nil }()
-	}
 	orig, err := readForward()
 	if err != nil {
 		return nil, err
@@ -395,7 +385,7 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 	switch cfg.Mode {
 	case ModeBlock:
 		if orig != "0" {
-			if err := writeForward("0"); err != nil {
+			if err := s.writeForward("0"); err != nil {
 				return nil, err
 			}
 			s.forwardTouched = true
@@ -404,7 +394,7 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 		for _, r := range drops {
 			args := []string{"-I", "FORWARD"}
 			args = append(args, r...)
-			if err := runRoot("iptables", args...); err != nil {
+			if err := s.runRoot("iptables", args...); err != nil {
 				s.Stop()
 				return nil, fmt.Errorf("iptables %s: %w", strings.Join(args, " "), err)
 			}
@@ -412,7 +402,7 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 		}
 	case ModeShape:
 		if orig != "1" {
-			if err := writeForward("1"); err != nil {
+			if err := s.writeForward("1"); err != nil {
 				return nil, err
 			}
 			s.forwardTouched = true
@@ -451,18 +441,20 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 // runRoot runs a privilege-requiring command detached from the terminal's
 // process group, so a Ctrl+C on the session does not kill the restore. The
 // command line is reported to the transcript hook, if any.
-func runRoot(name string, args ...string) error {
-	traceCommand(append([]string{name}, args...)...)
+func (s *Session) runRoot(name string, args ...string) error {
+	s.traceCommand(append([]string{name}, args...)...)
 	cmd := exec.Command(name, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	return cmd.Run()
 }
 
-// traceCommand feeds a privilege-requiring command line to the transcript
-// hook installed by Start. Safe to call with no hook present.
-func traceCommand(pieces ...string) {
-	if verboseHook != nil {
-		verboseHook(strings.Join(pieces, " "))
+// traceCommand feeds a privilege-requiring command line to the session's
+// transcript hook. The hook lives on the session (not a package global), so it
+// stays installed for teardown and cannot race a concurrent session. Safe to
+// call with no hook configured.
+func (s *Session) traceCommand(pieces ...string) {
+	if s != nil && s.cfg.Verbose != nil {
+		s.cfg.Verbose(strings.Join(pieces, " "))
 	}
 }
 
@@ -499,13 +491,13 @@ func (s *Session) startCapture(ctx context.Context) error {
 	}
 
 	cctx, cancel := context.WithCancel(ctx)
-	h := &captureHandle{cancel: cancel, done: make(chan struct{})}
+	h := &captureHandle{cancel: cancel, done: make(chan struct{}), src: src, dst: dst}
 	s.capture = h
 	go func() {
 		defer close(h.done)
 		captureLoop(cctx, src, dst, hostSet(s.cfg.Targets))
 	}()
-	traceCommand("in-process capture", s.cfg.Interface, "->", s.cfg.CaptureFile)
+	s.traceCommand("in-process capture", s.cfg.Interface, "->", s.cfg.CaptureFile)
 	return nil
 }
 
@@ -516,57 +508,88 @@ func (s *Session) startSpoofs(ctx context.Context) error {
 	for _, t := range s.cfg.Targets {
 		// target -> we are the gateway
 		c1 := exec.CommandContext(ctx, "arpspoof", "-i", s.cfg.Interface, "-t", t, s.cfg.Gateway)
-		traceCommand("arpspoof", "-i", s.cfg.Interface, "-t", t, s.cfg.Gateway)
+		s.traceCommand("arpspoof", "-i", s.cfg.Interface, "-t", t, s.cfg.Gateway)
 		c1.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		c1.Stdout, c1.Stderr = nil, nil
-		if err := c1.Start(); err != nil {
+		sp1, err := startSpoofProc(c1)
+		if err != nil {
 			return fmt.Errorf("arpspoof %s: %w", t, err)
 		}
-		time.Sleep(time.Second)
-		if c1.Process.Signal(syscall.Signal(0)) != nil {
-			s.killSpoof(c1)
+		// A dead child stays a zombie until it is reaped, and Signal(0)
+		// succeeds on a zombie — so the old liveness probe could never see an
+		// arpspoof that exited immediately. Watch for the real exit instead.
+		if sp1.exitedWithin(time.Second) {
 			return fmt.Errorf("arpspoof exited immediately for %s (check interface/route)", t)
 		}
-		s.spoofs = append(s.spoofs, c1)
+		s.spoofs = append(s.spoofs, sp1)
 
 		// gateway -> we are the target
 		c2 := exec.CommandContext(ctx, "arpspoof", "-i", s.cfg.Interface, "-t", s.cfg.Gateway, t)
-		traceCommand("arpspoof", "-i", s.cfg.Interface, "-t", s.cfg.Gateway, t)
+		s.traceCommand("arpspoof", "-i", s.cfg.Interface, "-t", s.cfg.Gateway, t)
 		c2.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		c2.Stdout, c2.Stderr = nil, nil
-		if err := c2.Start(); err != nil {
-			s.killSpoof(c1)
+		sp2, err := startSpoofProc(c2)
+		if err != nil {
+			// sp1 is already tracked; Start's error path calls Stop, which
+			// reaps it. Killing it here as well double-signalled the same
+			// process group.
 			return fmt.Errorf("arpspoof gateway-side: %w", err)
 		}
-		time.Sleep(time.Second)
-		if c2.Process.Signal(syscall.Signal(0)) != nil {
-			s.killSpoof(c2)
+		if sp2.exitedWithin(time.Second) {
+			s.killSpoof(sp2)
 			return fmt.Errorf("arpspoof exited immediately for gateway side (check interface/route)")
 		}
-		s.spoofs = append(s.spoofs, c2)
+		s.spoofs = append(s.spoofs, sp2)
 	}
 	return nil
 }
 
-func (s *Session) killSpoof(c *exec.Cmd) {
-	if c.Process == nil {
+// spoofProc is one arpspoof child whose exit is reaped exactly once, so both
+// the liveness check and teardown can wait on it instead of guessing with
+// Signal(0).
+type spoofProc struct {
+	cmd  *exec.Cmd
+	done chan struct{}
+}
+
+// startSpoofProc starts a child in its own process group and reaps it in the
+// background. done is closed once the child has been waited for.
+func startSpoofProc(c *exec.Cmd) (*spoofProc, error) {
+	c.Stdout, c.Stderr = nil, nil
+	if err := c.Start(); err != nil {
+		return nil, err
+	}
+	sp := &spoofProc{cmd: c, done: make(chan struct{})}
+	go func() {
+		_ = c.Wait()
+		close(sp.done)
+	}()
+	return sp, nil
+}
+
+// exitedWithin reports whether the child exited within d. It returns as soon as
+// the exit is observed, so a fast failure is not hidden behind a full sleep.
+func (sp *spoofProc) exitedWithin(d time.Duration) bool {
+	select {
+	case <-sp.done:
+		return true
+	case <-time.After(d):
+		return false
+	}
+}
+
+func (s *Session) killSpoof(sp *spoofProc) {
+	if sp == nil || sp.cmd.Process == nil {
 		return
 	}
-	_ = syscall.Kill(-c.Process.Pid, syscall.SIGTERM)
-	// Wait with an escalation, like stopCapture: a spoof child that wedges
-	// must not hang Stop — Stop holds the session lock for the entire
-	// teardown, so one blocked Wait silently skips the qdisc/iptables/
-	// forwarding restore behind it.
-	done := make(chan struct{})
-	go func() {
-		_, _ = c.Process.Wait()
-		close(done)
-	}()
+	// Kill the whole group (Setpgid), then reap with an escalation, like
+	// stopCapture: a spoof child that wedges must not hang Stop, which holds
+	// the session lock for the entire teardown.
+	pid := sp.cmd.Process.Pid
+	_ = syscall.Kill(-pid, syscall.SIGTERM)
 	select {
-	case <-done:
+	case <-sp.done:
 	case <-time.After(3 * time.Second):
-		_ = syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
-		<-done
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		<-sp.done
 	}
 }
 
@@ -649,7 +672,7 @@ func (s *Session) stealthPump(ctx context.Context, sp *arpspoof.Spoofer, gw net.
 				if err == syscall.EINTR || err == syscall.ENOBUFS || err == syscall.EAGAIN {
 					break
 				}
-				traceCommand(fmt.Sprintf("arp spoof pump stopped: %v", err))
+				s.traceCommand(fmt.Sprintf("arp spoof pump stopped: %v", err))
 				return
 			}
 			if !ok {
@@ -740,7 +763,7 @@ func (s *Session) applyTC(ctx context.Context) error {
 		s.qdiscBeforeErr = fmt.Sprintf("tc qdisc show: %v", err)
 	}
 	// Deleting the current root qdisc is best-effort (none may exist yet).
-	_ = runRoot("tc", "qdisc", "del", "dev", s.cfg.Interface, "root")
+	_ = s.runRoot("tc", "qdisc", "del", "dev", s.cfg.Interface, "root")
 	// Mark the qdisc as applied *before* the tree is built: from this moment
 	// on a failure (or a Ctrl+C mid-build) must make Stop take the qdisc down
 	// again and restore what we recorded. Setting the flag after the build
@@ -772,7 +795,7 @@ func (s *Session) UpdateParams(c Config) error {
 	cur.ReorderPct = c.ReorderPct
 	cur.BandwidthKbps = c.BandwidthKbps
 	for _, args := range tcChangeCommands(&cur, s.cfg.Interface) {
-		if err := runRoot("tc", args...); err != nil {
+		if err := s.runRoot("tc", args...); err != nil {
 			return fmt.Errorf("tc change %s: %w", strings.Join(args, " "), err)
 		}
 	}
@@ -818,12 +841,12 @@ func (s *Session) announceRealGateway() {
 	}
 	gmac, err := arpLookupMAC(s.cfg.Interface, s.cfg.Gateway)
 	if err != nil {
-		traceCommand(fmt.Sprintf("gateway MAC unknown at teardown (%v); neighbors re-learn on ARP cache expiry", err))
+		s.traceCommand(fmt.Sprintf("gateway MAC unknown at teardown (%v); neighbors re-learn on ARP cache expiry", err))
 		return
 	}
 	sp, err := arpspoof.Open(s.cfg.Interface)
 	if err != nil {
-		traceCommand(fmt.Sprintf("gateway re-announce skipped: %v", err))
+		s.traceCommand(fmt.Sprintf("gateway re-announce skipped: %v", err))
 		return
 	}
 	defer sp.Close()
@@ -831,7 +854,7 @@ func (s *Session) announceRealGateway() {
 	frame := arpspoof.BuildARPReply(gmac, gw, gw, bcast)
 	for i := 0; i < 3; i++ {
 		if err := sp.SendRaw(frame); err != nil {
-			traceCommand(fmt.Sprintf("gateway re-announce failed: %v", err))
+			s.traceCommand(fmt.Sprintf("gateway re-announce failed: %v", err))
 			return
 		}
 		time.Sleep(200 * time.Millisecond)
@@ -842,14 +865,21 @@ func (s *Session) stopCapture() {
 	if s.capture == nil {
 		return
 	}
+	h := s.capture
+	s.capture = nil
 	// Cancel the loop; it closes the socket and finishes the pcap file. The
 	// read timeout bounds how long the wait can take.
-	s.capture.cancel()
+	h.cancel()
 	select {
-	case <-s.capture.done:
+	case <-h.done:
 	case <-time.After(3 * time.Second):
+		// The loop did not stop: a stuck write can outlive the read
+		// timeout. Release the socket and output here so neither leaks;
+		// both closes are idempotent, so the loop's deferred closes stay
+		// safe.
+		_ = h.src.close()
+		_ = h.dst.Close()
 	}
-	s.capture = nil
 	if s.cfg.CaptureFile != "" && s.cfg.CaptureFile != "-" {
 		chownToCaller(s.cfg.CaptureFile)
 	}
@@ -919,10 +949,10 @@ func (s *Session) Stop() {
 	s.stopSpoofs()
 
 	if s.qdiscApplied {
-		if err := runRoot("tc", "qdisc", "del", "dev", s.cfg.Interface, "root"); err != nil {
+		if err := s.runRoot("tc", "qdisc", "del", "dev", s.cfg.Interface, "root"); err != nil {
 			s.restoreErr = append(s.restoreErr, "tc qdisc del: "+err.Error())
 		} else if args := restoreQdiscArgs(s.cfg.Interface, s.qdiscBefore); len(args) > 0 {
-			if err := runRoot("tc", args...); err != nil {
+			if err := s.runRoot("tc", args...); err != nil {
 				s.restoreErr = append(s.restoreErr, "tc qdisc restore: "+err.Error())
 			}
 		} else if s.qdiscBeforeErr != "" {
@@ -934,7 +964,7 @@ func (s *Session) Stop() {
 	}
 
 	if s.forwardTouched {
-		if err := writeForward(s.origForward); err != nil {
+		if err := s.writeForward(s.origForward); err != nil {
 			s.restoreErr = append(s.restoreErr, "ip_forward restore: "+err.Error())
 		}
 	}
@@ -942,7 +972,7 @@ func (s *Session) Stop() {
 	for _, d := range s.drops {
 		args := []string{"-D", "FORWARD"}
 		args = append(args, strings.Fields(d)...)
-		if err := runRoot("iptables", args...); err != nil {
+		if err := s.runRoot("iptables", args...); err != nil {
 			s.restoreErr = append(s.restoreErr, "iptables -D FORWARD: "+err.Error())
 		}
 	}

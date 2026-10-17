@@ -244,7 +244,7 @@ func HumanRate(b int64) string {
 	}
 }
 
-// SplitHostPorts parses "443,80,53" into a port list, skipping garbage.
+// SplitPorts parses "443,80,53" into a port list, skipping garbage.
 func SplitPorts(s string) []int {
 	var out []int
 	seen := map[int]bool{}

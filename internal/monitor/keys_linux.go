@@ -88,40 +88,50 @@ func keyReader(ctx context.Context, fd int, sel *int32, n int, done chan<- struc
 			return
 		}
 		pending = append(pending, buf[:nr]...)
-		for len(pending) > 0 {
-			b := pending[0]
-			switch {
-			case b == 0x1b:
-				if len(pending) < 2 {
-					break
+		pending = processKeys(pending, sel, n)
+	}
+}
+
+// processKeys consumes every complete key sequence in pending, moving the
+// selection for the arrow and vim keys, and returns the unconsumed tail. A
+// trailing partial escape sequence is left in the tail so the next read can
+// complete it — critically, it is *returned* rather than re-examined, so a lone
+// ESC cannot spin the reader on the same byte forever.
+func processKeys(pending []byte, sel *int32, n int) []byte {
+	for len(pending) > 0 {
+		b := pending[0]
+		switch {
+		case b == 0x1b:
+			if len(pending) < 2 {
+				return pending
+			}
+			if pending[1] == '[' {
+				if len(pending) < 3 {
+					return pending
 				}
-				if pending[1] == '[' {
-					if len(pending) < 3 {
-						break
-					}
-					switch pending[2] {
-					case 'A':
-						moveSel(sel, n, -1)
-					case 'B':
-						moveSel(sel, n, +1)
-					}
-					pending = pending[3:]
-				} else if len(pending) == 1 {
-					break
-				} else {
-					pending = pending[1:]
+				switch pending[2] {
+				case 'A':
+					moveSel(sel, n, -1)
+				case 'B':
+					moveSel(sel, n, +1)
 				}
-			case b == 'k':
-				moveSel(sel, n, -1)
-				pending = pending[1:]
-			case b == 'j':
-				moveSel(sel, n, +1)
-				pending = pending[1:]
-			default:
+				pending = pending[3:]
+			} else {
+				// ESC followed by a non-sequence byte: discard the ESC and
+				// reprocess the byte.
 				pending = pending[1:]
 			}
+		case b == 'k':
+			moveSel(sel, n, -1)
+			pending = pending[1:]
+		case b == 'j':
+			moveSel(sel, n, +1)
+			pending = pending[1:]
+		default:
+			pending = pending[1:]
 		}
 	}
+	return pending
 }
 
 // setFD sets bit fd in a poll set, portable across FdSet implementations.

@@ -11,6 +11,7 @@ package traffic
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -90,7 +91,16 @@ func (c *Counter) loop() {
 		if err != nil {
 			select {
 			case <-c.closed:
+				return
 			default:
+			}
+			// A single transient shortfall (a signal interrupting recvfrom,
+			// or a buffer squeeze under load) must not stop counting for the
+			// rest of the session: retry instead of ending the loop. Only a
+			// persistent error — e.g. EBADF once the socket is closed — ends
+			// it.
+			if errors.Is(err, syscall.EINTR) || errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.ENOBUFS) {
+				continue
 			}
 			return
 		}

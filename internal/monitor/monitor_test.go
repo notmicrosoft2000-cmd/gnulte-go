@@ -33,6 +33,33 @@ func TestStatsLossAndAvg(t *testing.T) {
 	}
 }
 
+// TestObserveSeedsMinFromFirstReply: the first successful reply must set Min,
+// even at 0ms. The old inline code tested Min != 0, so a first reply of, say,
+// 40ms left Min at 0 (reported as "min 0ms"), and a genuine 0ms first sample was
+// discarded the moment a slower one arrived.
+func TestObserveSeedsMinFromFirstReply(t *testing.T) {
+	st := &Stats{}
+	st.observe(40)
+	if st.Min != 40 {
+		t.Fatalf("Min after a first 40ms reply = %d, want 40 (seeded from Count==1)", st.Min)
+	}
+	st.observe(70)
+	st.observe(10)
+	if st.Min != 10 || st.Max != 70 || st.Count != 3 || st.Total != 120 {
+		t.Fatalf("stats = %+v, want min 10 max 70 count 3 total 120", st)
+	}
+	if len(st.Samples) != 3 || len(st.LossSeries) != 3 {
+		t.Fatalf("sample/loss lengths = %d/%d, want 3/3", len(st.Samples), len(st.LossSeries))
+	}
+
+	zero := &Stats{}
+	zero.observe(0)
+	zero.observe(30)
+	if zero.Min != 0 {
+		t.Fatalf("Min after a genuine 0ms first reply = %d, want 0", zero.Min)
+	}
+}
+
 func TestSparkAndStatusIcon(t *testing.T) {
 	if statusIcon(-1) == "" {
 		t.Error("statusIcon should never return an empty glyph")

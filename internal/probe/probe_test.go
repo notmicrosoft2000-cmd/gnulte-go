@@ -147,3 +147,39 @@ func TestNoteKinds(t *testing.T) {
 		t.Errorf("refused note wrong: %q", n)
 	}
 }
+
+// TestNoteAndMethodUseFirstConclusivePort: ProbeTCP records a port that merely
+// timed out before it reaches an open/refused one, so the verdict must scan for
+// the first conclusive entry rather than assume TCP[0].
+func TestNoteAndMethodUseFirstConclusivePort(t *testing.T) {
+	res := Result{TCP: []PortResult{
+		{Port: 443, State: Timeout, RTTMs: 1200},
+		{Port: 80, State: Open, RTTMs: 4},
+	}}
+	if m := res.Method(); m != "tcp" {
+		t.Errorf("Method = %q, want tcp", m)
+	}
+	if n := res.Note(); n != "tcp:80 4ms" {
+		t.Errorf("Note = %q, want tcp:80 4ms", n)
+	}
+
+	res = Result{TCP: []PortResult{
+		{Port: 443, State: Timeout, RTTMs: 1200},
+		{Port: 80, State: Refused, RTTMs: 2},
+	}}
+	if m := res.Method(); m != "tcp-refused" {
+		t.Errorf("Method = %q, want tcp-refused", m)
+	}
+	if n := res.Note(); n != "tcp:80/refused 2ms" {
+		t.Errorf("Note = %q, want tcp:80/refused 2ms", n)
+	}
+
+	// Nothing conclusive: still silent, and the note falls back to the state.
+	silent := Result{TCP: []PortResult{{Port: 443, State: Timeout, RTTMs: 1200}}}
+	if m := silent.Method(); m != "silent" {
+		t.Errorf("Method = %q, want silent", m)
+	}
+	if n := silent.Note(); n != "timeout" {
+		t.Errorf("Note = %q, want timeout", n)
+	}
+}

@@ -1,0 +1,17 @@
+{
+  "mcp": {
+    "servers": {
+      "website-design-systems": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "website-design-systems-mcp"
+        ],
+        "timeout": {
+          "startup": 120000
+        }
+      }
+    }
+  }
+}

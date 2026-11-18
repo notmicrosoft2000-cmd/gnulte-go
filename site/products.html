@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Suite architecture · GNULTE</title>
+<meta name="description" content="Suite architecture: the tools, where the shaping happens, and the problems the suite is built for.">
+<link rel="icon" href="img/favicon.ico">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+<link rel="stylesheet" href="css/gnulte.css?v=field-1">
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<div class="regbar"><div class="wrap regbar-inner"><span class="reg-id"><svg class="glyph-mini" viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3"><rect x="2" y="2" width="36" height="36"/><path d="M20 20 L9 9 M20 20 L31 9 M20 20 L9 31 M20 20 L31 31"/></svg>GNULTE <span class="reg-sub">GNU LAN Network Testing Environment</span></span><span class="reg-meta">v16.13 &middot; GPL-3.0-or-later &middot; Linux &middot; <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">source</a></span></div></div>
+<header class="masthead"><div class="wrap masthead-inner"><a class="wordmark" href="index.html"><svg class="glyph" viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6">
+<rect x="1" y="1" width="38" height="38"/>
+<path d="M20 20 L9 9 M20 20 L31 9 M20 20 L9 31 M20 20 L31 31"/>
+<circle cx="20" cy="20" r="3.2" fill="currentColor" stroke="none"/>
+<circle cx="9" cy="9" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="31" cy="9" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="9" cy="31" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="31" cy="31" r="2.2" fill="currentColor" stroke="none"/>
+</svg><span><span class="wordmark-name">GNULTE</span><span class="wordmark-sub">field manual &middot; Linux network testing</span></span></a><form class="site-search" action="search.html" method="get" role="search"><label class="sr-only" for="site-q">Search the site</label><input id="site-q" type="search" name="q" placeholder="search the manual"><button type="submit" aria-label="Search">&#9166;</button></form></div></header>
+<nav class="mainnav" aria-label="Primary"><div class="wrap mainnav-inner"><button class="navtoggle" type="button" aria-expanded="false">menu</button><ul class="navlist"><li><a href="index.html">Overview</a></li><li><a href="tools.html">Tools</a></li><li><a href="docs.html">Manual</a></li><li><a href="downloads.html">Downloads</a></li><li><a href="changelog.html">Changelog</a></li><li><a href="about.html">About</a></li><li><a href="support.html">Help</a></li></ul></div></nav>
+<main id="content" class="wrap">
+<div class="crumbs"><a href="index.html">GNULTE</a><span class="sep">/</span>Suite</div>
+<header class="page-head"><div class="page-kicker">SUITE ARCHITECTURE</div><h1>Where it sits</h1><p class="lede">Eight single-purpose binaries sharing one device store, working at the Linux network queue layer rather than terminating application traffic.</p></header><section class="sheet"><div class="sheet-head"><span class="sheet-no">01 /</span><h2>Problems the suite is built for</h2></div><div class="sheet-body"><div class="split"><div><h3>Automated resilience testing</h3><p>Simulate mobile jitter, satellite latency and packet loss in CI matrices. <code>--scenario</code> plays timed phases with delay wobble and burst loss; the session summary reports min/avg/p95/max and an E-model MOS.</p></div><div><h3>Link verification</h3><p>Observe hop-by-hop latency with <code>gnulte-trace</code> and rank talkers down to individual flows with <code>gnulte-top</code>, without external <code>traceroute</code> or <code>tcpdump</code>.</p></div><div><h3>Embedded device behaviour</h3><p>Put controllers and gateways behind a shaped link, then watch DNS timeouts, dropped keepalives and delayed firmware payloads in <code>gnulte-lan</code>’s map and 7-day trend.</p></div><div><h3>Authorised LAN auditing</h3><p>Passive inventory with <code>gnulte-devices</code>, layer-2 isolation checks, and Wi-Fi client reconnect testing with <code>gnulte-wifi</code>. <code>-S</code> keeps spoofing discreet.</p></div></div></div></section><section class="sheet"><div class="sheet-head"><span class="sheet-no">02 /</span><h2>The shaping layer</h2></div><div class="sheet-body"><div class="table-wrap"><table class="data"><thead><tr><th></th><th>Kernel qdisc shaping (GNULTE)</th><th>Userland proxy</th><th>Hardware emulator</th></tr></thead><tbody><tr><td>Where it acts</td><td>Kernel queue layer via <code>tc netem</code></td><td>Application layer, dual-socket handshake</td><td>Physical ASIC / FPGA</td></tr><tr><td>Protocol support</td><td>Layer 3/4 traffic</td><td>TCP / HTTP only</td><td>Layer 2/3/4</td></tr><tr><td>Socket realism</td><td>Kernel TCP windows and retransmit timers</td><td>Distorted by the proxy handshake</td><td>Wire-speed behaviour</td></tr><tr><td>Runtime</td><td>Go stdlib; <code>tc</code> and <code>iptables</code> are the kernel interface</td><td>Needs Node, Python or JVM</td><td>Appliance OS</td></tr><tr><td>Cost</td><td>Free software, GPL-3.0-or-later</td><td>Varies</td><td>Appliance pricing</td></tr></tbody></table></div><aside class="note"><b>Dependency note</b><span>GNULTE is stdlib-only in Go, but shaping still needs <code>iproute2</code> and <code>iptables</code>. Those are the interface to the kernel, not helper binaries the toolkit could replace.</span></aside></div></section><section class="sheet"><div class="sheet-head"><span class="sheet-no">03 /</span><h2>Module breakdown</h2></div><div class="sheet-body"><div class="tool-grid"><article class="tool-card"><div class="tool-card-head"><span class="tool-card-mark">01</span><h3 class="tool-card-title">gnulte</h3></div><div class="tool-card-body">Traffic shaping: latency, jitter, loss, duplication, reordering and bandwidth caps through <code>tc netem</code>, with ARP-redirected routing, a live dashboard and an HTML report.</div><div class="tool-card-foot"><a href="docs/gnulte.html">reference &rarr;</a></div></article><article class="tool-card"><div class="tool-card-head"><span class="tool-card-mark">02</span><h3 class="tool-card-title">gnulte-lan</h3></div><div class="tool-card-body">Live LAN watch: six screens of hosts, talkers, flows, ARP neighbours, interconnection map and session history. Passive counting; nothing is shaped.</div><div class="tool-card-foot"><a href="docs/gnulte-lan.html">reference &rarr;</a></div></article><article class="tool-card"><div class="tool-card-head"><span class="tool-card-mark">03</span><h3 class="tool-card-title">gnulte-scan</h3></div><div class="tool-card-body">Parallel ARP/ICMP sweep plus an in-Go TCP port scanner, OUI vendors, mDNS/NetBIOS names, OS fingerprinting, <code>--watch</code> and a tabbed browser.</div><div class="tool-card-foot"><a href="docs/gnulte-scan.html">reference &rarr;</a></div></article><article class="tool-card"><div class="tool-card-head"><span class="tool-card-mark">04</span><h3 class="tool-card-title">gnulte-devices</h3></div><div class="tool-card-body">Instant inventory from the kernel ARP/neighbour table: vendors, mDNS hostnames and type guesses. CSV, JSON, YAML or HTML. No root.</div><div class="tool-card-foot"><a href="docs/gnulte-devices.html">reference &rarr;</a></div></article><article class="tool-card"><div class="tool-card-head"><span class="tool-card-mark">05</span><h3 class="tool-card-title">gnulte-wifi</h3></div><div class="tool-card-body">Targeted 802.11 deauthentication from monitor mode for authorised disassociation testing: per-frame jitter, rotating reason codes, channel hopping.</div><div class="tool-card-foot"><a href="docs/gnulte-wifi.html">reference &rarr;</a></div></article><article class="tool-card"><div class="tool-card-head"><span class="tool-card-mark">06</span><h3 class="tool-card-title">gnulte-doctor</h3></div><div class="tool-card-body">Pre-flight check: privileges, <code>tc</code>/<code>iptables</code>, <code>ip_forward</code>, netem/netfilter modules, route, duplicate IPs and the safety record. PASS/WARN/FAIL, <code>--json</code>, exit code.</div><div class="tool-card-foot"><a href="docs/gnulte-doctor.html">reference &rarr;</a></div></article><article class="tool-card"><div class="tool-card-head"><span class="tool-card-mark">07</span><h3 class="tool-card-title">gnulte-trace</h3></div><div class="tool-card-body">mtr-style hop-by-hop probe: in-process ICMP echo at every TTL with per-hop last/avg/best/worst and loss. No <code>traceroute(8)</code>.</div><div class="tool-card-foot"><a href="docs/gnulte-trace.html">reference &rarr;</a></div></article><article class="tool-card"><div class="tool-card-head"><span class="tool-card-mark">08</span><h3 class="tool-card-title">gnulte-top</h3></div><div class="tool-card-body">Live per-host and per-conversation bandwidth from an in-process <code>AF_PACKET</code> counter, ranked with rates, peers and bars. CSV/JSON snapshots.</div><div class="tool-card-foot"><a href="docs/gnulte-top.html">reference &rarr;</a></div></article></div></div></section><section class="sheet"><div class="sheet-head"><span class="sheet-no">04 /</span><h2>Get the suite</h2></div><div class="sheet-body"><div class="terminal"><div class="terminal-head"><span><span class="dots"><i></i><i></i><i></i></span>command</span><button class="copy" type="button">copy</button></div><div class="terminal-body"><pre><code>git clone https://github.com/notmicrosoft2000-cmd/gnulte-go.git
+cd gnulte-go &amp;&amp; ./build.sh &amp;&amp; sudo ./install.sh</code></pre></div></div><div class="actions"><a class="button" href="downloads.html">Downloads</a><a class="button ghost" href="tools.html">Tool directory</a></div></div></section>
+</main>
+<footer class="colophon"><div class="wrap">
+<div class="colophon-grid">
+  <div>
+    <svg class="mark" viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6">
+<rect x="1" y="1" width="38" height="38"/>
+<path d="M20 20 L9 9 M20 20 L31 9 M20 20 L9 31 M20 20 L31 31"/>
+<circle cx="20" cy="20" r="3.2" fill="currentColor" stroke="none"/>
+<circle cx="9" cy="9" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="31" cy="9" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="9" cy="31" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="31" cy="31" r="2.2" fill="currentColor" stroke="none"/>
+</svg>
+    <h3>GNULTE</h3>
+    <p>GNU LAN Network Testing Environment. Eight single-purpose Linux tools, standard library only, GPL-3.0-or-later.</p>
+    <p>Maintained by Neptune Productions. Built on <code>tc</code>/netem, netfilter, AF_PACKET and mac80211.</p>
+  </div>
+  <div><h3>The suite</h3><ul><li><a href="docs/gnulte.html">gnulte</a></li><li><a href="docs/gnulte-lan.html">gnulte-lan</a></li><li><a href="docs/gnulte-scan.html">gnulte-scan</a></li><li><a href="docs/gnulte-devices.html">gnulte-devices</a></li><li><a href="docs/gnulte-wifi.html">gnulte-wifi</a></li><li><a href="docs/gnulte-doctor.html">gnulte-doctor</a></li><li><a href="docs/gnulte-trace.html">gnulte-trace</a></li><li><a href="docs/gnulte-top.html">gnulte-top</a></li></ul></div>
+  <div><h3>Manual</h3><ul><li><a href="docs/install.html">Installation</a></li><li><a href="docs/configuration.html">Configuration</a></li><li><a href="docs/usage.html">Usage</a></li><li><a href="docs/troubleshooting.html">Troubleshooting</a></li><li><a href="docs/faq.html">FAQ</a></li></ul></div>
+  <div><h3>Project</h3><ul>
+    <li><a href="about.html">About &amp; safety</a></li>
+    <li><a href="changelog.html">Changelog</a></li>
+    <li><a href="news.html">Field notes</a></li>
+    <li><a href="downloads.html">Downloads</a></li>
+    <li><a href="support.html">Getting help</a></li>
+    <li><a href="contact.html">Contact</a></li>
+    <li><a href="feed.xml">Atom feed</a></li>
+  </ul></div>
+</div>
+<div class="colophon-bottom"><span>v16.13 &middot; 2026-10-03 &middot; source: github.com/notmicrosoft2000-cmd/gnulte-go</span>
+<span><a href="index.html">home</a><a href="search.html">search</a><a href="about.html#safety">authorised use</a></span></div>
+</div></footer>
+<script src="js/site.js?v=field-1"></script>
+<script src="js/search.js?v=field-1"></script>
+</body>
+</html>

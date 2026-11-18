@@ -2,193 +2,62 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width">
-<title>Changelog — GNULTE</title>
-<meta name="description" content="Release history of the GNULTE Go edition, newest first, including the v17 Unplugged development programme.">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Changelog · GNULTE</title>
+<meta name="description" content="Every release of the Go edition, newest first, plus the Unplugged programme.">
 <link rel="icon" href="img/favicon.ico">
 <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
-<link rel="stylesheet" href="css/gnulte.css?v=16.13-r4">
+<link rel="stylesheet" href="css/gnulte.css?v=field-1">
 </head>
 <body>
-<div class="wrap">
-
-<div class="head">
-  <a class="brand" href="index.html">
-    <img src="img/logo-48.png" alt="GNULTE icon" width="48" height="48">
-    <b>GNULTE</b>
-    <span class="tag">GNU LAN Network Testing Environment &middot; v16.13</span>
-  </a>
-  <form class="head-search" action="search.html" method="get">
-    <label for="hq">Search</label>
-    <input id="hq" type="text" name="q" size="18">
-    <input type="submit" value="Go">
-  </form>
-</div>
-
-<ul class="nav">
-  <li><a href="index.html">Home</a></li>
-  <li><a href="tools.html">Tools</a></li>
-  <li><a href="docs.html">Documentation</a></li>
-  <li><a href="downloads.html">Downloads</a></li>
-  <li><a class="active" href="changelog.html">Changelog</a></li>
-  <li><a href="about.html">About</a></li>
-</ul>
-
-<div class="cols2">
-
-  <div class="col-main" role="main">
-    <p class="crumbs"><a href="index.html">Home</a> &rsaquo; Changelog</p>
-    <h1>Changelog</h1>
-    <p class="meta">All releases of the Go edition, newest first &middot; last updated 2026-10-15</p>
-
-    <h2>Unreleased</h2>
-    <table class="data">
-      <tr><th style="width:12%">Version</th><th style="width:14%">Date</th><th>Changes</th></tr>
-      <tr>
-        <td><b>16.14</b></td>
-        <td>in development</td>
-        <td>Sweepers with memory and <code>gnulte --compare</code> (diff two
-            <code>-j</code> report JSON snapshots, optionally as an HTML comparison
-            report). Work in progress on <code>main</code>; not yet released.</td>
-      </tr>
-    </table>
-
-    <h2>Release history</h2>
-    <table class="data">
-      <tr><th style="width:12%">Version</th><th style="width:14%">Date</th><th>Changes</th></tr>
-      <tr><td><b>16.13</b></td><td>2026-10-03</td>
-          <td>LAN-watch history &amp; a machine feed: JSONL up/down timeline, <code>--json</code>
-              JSON-lines event feed, <code>-alert-debounce</code> hysteresis, screen 6 history,
-              7-day latency trend and a 0&ndash;100 health score per host in the HTML report.</td></tr>
-      <tr><td><b>16.12</b></td><td>2026-10-03</td>
-          <td>Scenarios, per-target shaping, profiles &amp; a session summary:
-              <code>--scenario</code> timed phases, <code>--per-target</code> overrides,
-              <code>--profile save:NAME</code>, <code>--list-profiles</code>, and a run summary
-              with min/avg/p95/max, jitter, loss distribution and an E-model MOS.</td></tr>
-      <tr><td><b>16.11</b></td><td>2026-10-02</td>
-          <td><code>gnulte-top</code> — live per-host and per-conversation bandwidth from the
-              in-process AF_PACKET counter; <code>--flows</code>, <code>--csv</code>, <code>--json</code>.</td></tr>
-      <tr><td><b>16.10</b></td><td>2026-10-01</td>
-          <td><code>gnulte-trace</code> — mtr-style hop-by-hop path probe, in-process ICMP echo
-              per TTL, live table, <code>--json</code>, self-contained HTML report. No
-              <code>traceroute(8)</code>.</td></tr>
-      <tr><td><b>16.9</b></td><td>2026-10-01</td>
-          <td><code>gnulte-doctor</code> — zero-dependency pre-flight check: privileges,
-              <code>tc</code>/<code>iptables</code>, <code>ip_forward</code>, netem/netfilter
-              modules, default route, duplicate IPs, safety record. PASS/WARN/FAIL with hints,
-              <code>--json</code>, non-zero exit on failure.</td></tr>
-      <tr><td><b>16.8</b></td><td>2026-10-01</td>
-          <td>In-Go capture — <code>--capture FILE</code> writes pcap from a raw AF_PACKET
-              socket through a standard-library libpcap writer; <code>tcpdump</code> is no longer
-              required.</td></tr>
-      <tr><td><b>16.7</b></td><td>2026-10-01</td>
-          <td>In-Go ICMP echo — raw <code>IPPROTO_ICMP</code> echo in-process; the shaping
-              engine no longer needs <code>ping</code>. Non-root tools keep the system
-              <code>ping</code> as fallback.</td></tr>
-      <tr><td><b>16.6</b></td><td>2026-10-01</td>
-          <td>In-Go ARP sweep — who-has frames crafted over AF_PACKET in-process;
-              <code>arping</code> and <code>arp-scan</code> are no longer required anywhere.</td></tr>
-      <tr><td><b>16.5</b></td><td>2026-09-30</td>
-          <td>Toolkit version string aligned across all binaries.</td></tr>
-      <tr><td><b>16.1</b></td><td>2026-09-30</td>
-          <td>Bug batch: 18 audit fixes, each with a discriminating regression test.</td></tr>
-      <tr><td><b>16.0</b></td><td>2026-09-29</td>
-          <td>&ldquo;Steady Hands&rdquo; — a stability release: clean Ctrl+C teardown (no more
-              poisoned ARP caches), interruptible name-identification waits (10.9s &rarr; 0.00s),
-              honest sampling cadence, fixed phantom-repeat arrow keys in gnulte-lan,
-              <code>gnulte --note TEXT</code>, <code>gnulte-scan --watch N --json</code> and the
-              quick re-scan <code>r</code> key.</td></tr>
-      <tr><td><b>15.0</b></td><td>2026-09-29</td>
-          <td>&ldquo;Live Interconnection&rdquo; — one shared device store
-              (<code>~/.config/gnulte-go/devices.json</code>) wiring the tools together: the watch
-              feeds the engine's target picker and the scanner's cross-reference.</td></tr>
-      <tr><td>13.5</td><td>2026-09-28</td><td>GNULTE-LAN four-screen console.</td></tr>
-      <tr><td>13.4</td><td>2026-09-28</td><td>gnulte-lan watch polish — stable rows, health grades, async pings, hold-to-scroll.</td></tr>
-      <tr><td>13.3</td><td>2026-09-28</td><td>Interactive watch — banner, arrow-key navigation, host detail pane, sort/filter/talkers panes, live settings editor.</td></tr>
-      <tr><td>13.2</td><td>2026-09-28</td><td>gnulte-traffic renamed to <code>gnulte-lan</code> with LAN-watch mode, identity layer, top talkers, alarms, CSV export, HTML report.</td></tr>
-      <tr><td>13.1</td><td>2026-09-28</td><td>Guided target prompt before subnet sweep, router-safe ranges, 12 profiles, manual picker, polished SVG session report.</td></tr>
-      <tr><td>13.0</td><td>2026-09-28</td><td>Settings scaling + categories, typing animation, mDNS/DNS-SD scan services, per-host ping history.</td></tr>
-      <tr><td>12</td><td>2026-09-17</td><td>SCANLTE accuracy: confidence-scored OS fingerprinting, uptime from TCP timestamps, rogue flags; technology settings.</td></tr>
-      <tr><td>11.2</td><td>2026-09-16</td><td>Multi-signal OS fingerprinting and the interactive <code>-T</code> device table in gnulte-scan.</td></tr>
-      <tr><td>11.1</td><td>2026-09-15</td><td>Name/attribute targeting, top-tier device identification, type-coloured scan tables.</td></tr>
-      <tr><td>11.0</td><td>2026-09-14</td><td><code>gnulte-devices</code> added; device identification plumbing (embedded OUI registry, mDNS reverse queries, type heuristics).</td></tr>
-    </table>
-    <p>Releases before v11 are recorded in the
-    <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/commits/main">commit log</a>.
-    Every release above corresponds to a commit on <code>main</code>.</p>
-
-    <h2 id="unplugged">The Unplugged programme (v17)</h2>
-    <p>v17 is being delivered as a series of small, independently shippable increments
-    under one banner: replace every helper-binary shell-out with in-Go code so the
-    toolkit runs on a bare box. <code>tc</code> and <code>iptables</code> remain — they
-    <i>are</i> the kernel interface.</p>
-    <table class="data">
-      <tr><th style="width:22%">Increment</th><th style="width:14%">Status</th><th>Effect</th></tr>
-      <tr><td>16.6 ARP sweep</td><td class="c"><span class="status">shipped</span></td><td><code>arping</code>/<code>arp-scan</code> gone</td></tr>
-      <tr><td>16.7 ICMP echo</td><td class="c"><span class="status">shipped</span></td><td><code>ping</code> gone from the engine</td></tr>
-      <tr><td>16.8 capture</td><td class="c"><span class="status">shipped</span></td><td><code>tcpdump</code> gone</td></tr>
-      <tr><td>16.9 doctor</td><td class="c"><span class="status">shipped</span></td><td>new pre-flight tool</td></tr>
-      <tr><td>16.10 trace</td><td class="c"><span class="status">shipped</span></td><td><code>traceroute(8)</code> gone</td></tr>
-      <tr><td>16.11 top</td><td class="c"><span class="status">shipped</span></td><td>new bandwidth tool</td></tr>
-      <tr><td>16.12 scenarios</td><td class="c"><span class="status">shipped</span></td><td>scripted runs, profiles, summary</td></tr>
-      <tr><td>16.13 history</td><td class="c"><span class="status">shipped</span></td><td>watch history, JSON feed, 7-day trend</td></tr>
-      <tr><td>16.14 compare</td><td class="c"><span class="status-dev">in development</span></td><td>sweepers with memory, <code>--compare</code></td></tr>
-    </table>
-    <p>The full development plan lives in the repository as
-    <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/blob/main/docs/V17-PLAN.md"><code>docs/V17-PLAN.md</code></a>.</p>
-
-    <h2>Subscription</h2>
-    <p>Release announcements are published in the
-    <a href="feed.xml">Atom feed</a> and on the
-    <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/commits/main">GitHub commit log</a>;
-    watch the repository on GitHub to be notified of new releases.</p>
+<a class="skip" href="#content">Skip to content</a>
+<div class="regbar"><div class="wrap regbar-inner"><span class="reg-id"><svg class="glyph-mini" viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3"><rect x="2" y="2" width="36" height="36"/><path d="M20 20 L9 9 M20 20 L31 9 M20 20 L9 31 M20 20 L31 31"/></svg>GNULTE <span class="reg-sub">GNU LAN Network Testing Environment</span></span><span class="reg-meta">v16.13 &middot; GPL-3.0-or-later &middot; Linux &middot; <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">source</a></span></div></div>
+<header class="masthead"><div class="wrap masthead-inner"><a class="wordmark" href="index.html"><svg class="glyph" viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6">
+<rect x="1" y="1" width="38" height="38"/>
+<path d="M20 20 L9 9 M20 20 L31 9 M20 20 L9 31 M20 20 L31 31"/>
+<circle cx="20" cy="20" r="3.2" fill="currentColor" stroke="none"/>
+<circle cx="9" cy="9" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="31" cy="9" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="9" cy="31" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="31" cy="31" r="2.2" fill="currentColor" stroke="none"/>
+</svg><span><span class="wordmark-name">GNULTE</span><span class="wordmark-sub">field manual &middot; Linux network testing</span></span></a><form class="site-search" action="search.html" method="get" role="search"><label class="sr-only" for="site-q">Search the site</label><input id="site-q" type="search" name="q" placeholder="search the manual"><button type="submit" aria-label="Search">&#9166;</button></form></div></header>
+<nav class="mainnav" aria-label="Primary"><div class="wrap mainnav-inner"><button class="navtoggle" type="button" aria-expanded="false">menu</button><ul class="navlist"><li><a href="index.html">Overview</a></li><li><a href="tools.html">Tools</a></li><li><a href="docs.html">Manual</a></li><li><a href="downloads.html">Downloads</a></li><li><a href="changelog.html" class="active">Changelog</a></li><li><a href="about.html">About</a></li><li><a href="support.html">Help</a></li></ul></div></nav>
+<main id="content" class="wrap">
+<div class="crumbs"><a href="index.html">GNULTE</a><span class="sep">/</span>Changelog</div>
+<header class="page-head"><div class="page-kicker">RELEASE HISTORY</div><h1>Changelog</h1><p class="lede">The Go edition, newest first. Every release corresponds to a commit on main; earlier history below v11 is in the commit log.</p></header><section class="sheet"><div class="sheet-head"><span class="sheet-no">01 /</span><h2>Unreleased</h2></div><div class="sheet-body"><div class="table-wrap"><table class="data"><thead><tr><th>Version</th><th>Status</th><th>Changes</th></tr></thead><tbody><tr><td>16.14</td><td><span class="state-dev">in development</span></td><td>Sweepers with memory and <code>gnulte --compare</code> — diff two <code>-j</code> report JSON snapshots, optionally as an HTML comparison report. Work in progress on main.</td></tr></tbody></table></div></div></section><section class="sheet" id="v1613"><div class="sheet-head"><span class="sheet-no">02 /</span><h2>Release history</h2></div><div class="sheet-body"><div class="table-wrap"><table class="data"><thead><tr><th>Version</th><th>Date</th><th>Changes</th></tr></thead><tbody><tr><td><a id="v16.13">16.13</a></td><td>2026-10-03</td><td>LAN-watch history and a machine feed: JSONL up/down timeline, <code>--json</code> event stream, <code>-alert-debounce</code> hysteresis, screen 6 history, 7-day trend and a 0–100 health score per host.</td></tr><tr><td><a id="v16.12">16.12</a></td><td>2026-10-03</td><td>Scripted phases with <code>--scenario</code>, per-target overrides, <code>--profile save:NAME</code>, <code>--list-profiles</code>, and a run summary with min/avg/p95/max, jitter, loss distribution and an E-model MOS.</td></tr><tr><td><a id="v16.11">16.11</a></td><td>2026-10-02</td><td><code>gnulte-top</code>: live per-host and per-conversation bandwidth from the in-process AF_PACKET counter; <code>--flows</code>, <code>--csv</code>, <code>--json</code>.</td></tr><tr><td><a id="v16.10">16.10</a></td><td>2026-10-01</td><td><code>gnulte-trace</code>: mtr-style path probe, in-process ICMP echo per TTL, live table, <code>--json</code>, self-contained HTML report. No <code>traceroute(8)</code>.</td></tr><tr><td><a id="v16.9">16.9</a></td><td>2026-10-01</td><td><code>gnulte-doctor</code>: pre-flight check of privileges, tc/iptables, ip_forward, modules, route, duplicate IPs and the safety record. PASS/WARN/FAIL with hints, <code>--json</code>, non-zero exit on failure.</td></tr><tr><td><a id="v16.8">16.8</a></td><td>2026-10-01</td><td>In-Go capture: <code>--capture FILE</code> writes pcap from a raw AF_PACKET socket through a standard-library libpcap writer. <code>tcpdump</code> no longer required.</td></tr><tr><td><a id="v16.7">16.7</a></td><td>2026-10-01</td><td>In-Go ICMP echo: raw IPPROTO_ICMP echo in-process; the engine no longer needs <code>ping</code>. Non-root tools keep it as fallback.</td></tr><tr><td><a id="v16.6">16.6</a></td><td>2026-10-01</td><td>In-Go ARP sweep: who-has frames crafted over AF_PACKET. <code>arping</code> and <code>arp-scan</code> no longer required.</td></tr><tr><td><a id="v16.5">16.5</a></td><td>2026-09-30</td><td>Toolkit version string aligned across all binaries.</td></tr><tr><td><a id="v16.1">16.1</a></td><td>2026-09-30</td><td>Bug batch: 18 audit fixes, each with a discriminating regression test.</td></tr><tr><td><a id="v16.0">16.0</a></td><td>2026-09-29</td><td>Steady Hands: clean Ctrl+C teardown, interruptible name lookups (10.9s → 0.00s), honest sampling cadence, fixed arrow-key repeat, <code>--note</code>, <code>--watch N --json</code>, quick re-scan.</td></tr><tr><td><a id="v15.0">15.0</a></td><td>2026-09-29</td><td>Live Interconnection: one shared device store wiring the watch, engine and scanner together.</td></tr></tbody></table></div></div></section><section class="sheet"><div class="sheet-head"><span class="sheet-no">03 /</span><h2>Earlier</h2></div><div class="sheet-body"><div class="table-wrap"><table class="data"><thead><tr><th>Version</th><th>Changes</th></tr></thead><tbody><tr><td>13.5</td><td>GNULTE-LAN four-screen console.</td></tr><tr><td>13.4</td><td>Watch polish: stable rows, health grades, async pings, hold-to-scroll.</td></tr><tr><td>13.3</td><td>Interactive watch: banner, arrow-key navigation, detail, sort/filter/talkers, settings editor.</td></tr><tr><td>13.2</td><td>Renamed to gnulte-lan with LAN-watch mode, identity layer, top talkers, alarms, CSV export, HTML report.</td></tr><tr><td>13.1</td><td>Guided target prompt, router-safe ranges, 12 profiles, manual picker, SVG session report.</td></tr><tr><td>13.0</td><td>Settings scaling and categories, mDNS/DNS-SD services, per-host ping history.</td></tr><tr><td>12.0</td><td>SCANLTE accuracy: confidence-scored OS fingerprinting, uptime from TCP timestamps, rogue flags.</td></tr><tr><td>11.2</td><td>Multi-signal OS fingerprinting and the <code>-T</code> device table.</td></tr><tr><td>11.1</td><td>Name/attribute targeting and top-tier device identification.</td></tr><tr><td>11.0</td><td><code>gnulte-devices</code> added: embedded OUI registry, mDNS queries, type heuristics.</td></tr></tbody></table></div></div></section><section class="sheet" id="unplugged"><div class="sheet-head"><span class="sheet-no">04 /</span><h2>The Unplugged programme</h2></div><div class="sheet-body"><p>A series of small, independently shippable increments: replace every helper-binary shell-out with in-Go code so the toolkit runs on a bare box. <code>tc</code> and <code>iptables</code> stay. They are the kernel interface.</p><div class="table-wrap"><table class="data"><thead><tr><th>Increment</th><th>Status</th><th>Effect</th></tr></thead><tbody><tr><td>16.6 ARP sweep</td><td><span class="state">shipped</span></td><td><code>arping</code>/<code>arp-scan</code> gone</td></tr><tr><td>16.7 ICMP echo</td><td><span class="state">shipped</span></td><td><code>ping</code> gone from the engine</td></tr><tr><td>16.8 capture</td><td><span class="state">shipped</span></td><td><code>tcpdump</code> gone</td></tr><tr><td>16.9 doctor</td><td><span class="state">shipped</span></td><td>new pre-flight tool</td></tr><tr><td>16.10 trace</td><td><span class="state">shipped</span></td><td><code>traceroute(8)</code> gone</td></tr><tr><td>16.11 top</td><td><span class="state">shipped</span></td><td>new bandwidth tool</td></tr><tr><td>16.12 scenarios</td><td><span class="state">shipped</span></td><td>scripted runs, profiles, summary</td></tr><tr><td>16.13 history</td><td><span class="state">shipped</span></td><td>watch history, JSON feed, 7-day trend</td></tr><tr><td>16.14 compare</td><td><span class="state-dev">in development</span></td><td>sweepers with memory, <code>--compare</code></td></tr></tbody></table></div></div></section><section class="sheet"><div class="sheet-head"><span class="sheet-no">05 /</span><h2>Release announcements</h2></div><div class="sheet-body"><ul class="link-list"><li><span class="arrow">&rarr;</span><a href="feed.xml">Atom feed</a></li><li><span class="arrow">&rarr;</span><a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/commits/main">Commit log on GitHub</a></li><li><span class="arrow">&rarr;</span><a href="downloads.html">Download the source</a></li></ul></div></section>
+</main>
+<footer class="colophon"><div class="wrap">
+<div class="colophon-grid">
+  <div>
+    <svg class="mark" viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6">
+<rect x="1" y="1" width="38" height="38"/>
+<path d="M20 20 L9 9 M20 20 L31 9 M20 20 L9 31 M20 20 L31 31"/>
+<circle cx="20" cy="20" r="3.2" fill="currentColor" stroke="none"/>
+<circle cx="9" cy="9" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="31" cy="9" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="9" cy="31" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="31" cy="31" r="2.2" fill="currentColor" stroke="none"/>
+</svg>
+    <h3>GNULTE</h3>
+    <p>GNU LAN Network Testing Environment. Eight single-purpose Linux tools, standard library only, GPL-3.0-or-later.</p>
+    <p>Maintained by Neptune Productions. Built on <code>tc</code>/netem, netfilter, AF_PACKET and mac80211.</p>
   </div>
-
-  <div class="col-right">
-    <div class="box">
-      <h3>Current release</h3>
-      <div class="b">
-        <dl>
-          <dt>Version</dt><dd>16.13</dd>
-          <dt>Released</dt><dd>2026-10-03</dd>
-        </dl>
-        <p><a href="downloads.html">Download &raquo;</a></p>
-      </div>
-    </div>
-
-    <div class="box">
-      <h3>Feeds</h3>
-      <div class="b">
-        <ul>
-          <li><a href="feed.xml">News feed (Atom)</a></li>
-          <li><a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/commits/main">Commit log</a></li>
-        </ul>
-      </div>
-    </div>
-  </div>
-
-</div><!-- .cols2 -->
-
-<div class="foot">
-  <p class="foot-nav">
-    <a href="index.html">Home</a>
-    <a href="tools.html">Tools</a>
-    <a href="docs.html">Documentation</a>
-    <a href="downloads.html">Downloads</a>
-    <a href="changelog.html">Changelog</a>
-    <a href="about.html">About</a>
-    <a href="search.html">Search</a>
-    <a href="feed.xml">News feed</a>
-  </p>
-  <p>Copyright &copy; 2026 Neptune Productions. GNULTE is free software released under the
-     <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL version 3 or later</a>.</p>
-  <p>Source: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">github.com/notmicrosoft2000-cmd/gnulte-go</a>
-     &middot; Issues: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a>
-     &middot; Authorised network testing only.</p>
-  <p>This page last updated: 2026-10-15.</p>
+  <div><h3>The suite</h3><ul><li><a href="docs/gnulte.html">gnulte</a></li><li><a href="docs/gnulte-lan.html">gnulte-lan</a></li><li><a href="docs/gnulte-scan.html">gnulte-scan</a></li><li><a href="docs/gnulte-devices.html">gnulte-devices</a></li><li><a href="docs/gnulte-wifi.html">gnulte-wifi</a></li><li><a href="docs/gnulte-doctor.html">gnulte-doctor</a></li><li><a href="docs/gnulte-trace.html">gnulte-trace</a></li><li><a href="docs/gnulte-top.html">gnulte-top</a></li></ul></div>
+  <div><h3>Manual</h3><ul><li><a href="docs/install.html">Installation</a></li><li><a href="docs/configuration.html">Configuration</a></li><li><a href="docs/usage.html">Usage</a></li><li><a href="docs/troubleshooting.html">Troubleshooting</a></li><li><a href="docs/faq.html">FAQ</a></li></ul></div>
+  <div><h3>Project</h3><ul>
+    <li><a href="about.html">About &amp; safety</a></li>
+    <li><a href="changelog.html">Changelog</a></li>
+    <li><a href="news.html">Field notes</a></li>
+    <li><a href="downloads.html">Downloads</a></li>
+    <li><a href="support.html">Getting help</a></li>
+    <li><a href="contact.html">Contact</a></li>
+    <li><a href="feed.xml">Atom feed</a></li>
+  </ul></div>
 </div>
-
-</div><!-- .wrap -->
-<script src="js/search.js?v=16.13-r4"></script>
+<div class="colophon-bottom"><span>v16.13 &middot; 2026-10-03 &middot; source: github.com/notmicrosoft2000-cmd/gnulte-go</span>
+<span><a href="index.html">home</a><a href="search.html">search</a><a href="about.html#safety">authorised use</a></span></div>
+</div></footer>
+<script src="js/site.js?v=field-1"></script>
+<script src="js/search.js?v=field-1"></script>
 </body>
 </html>

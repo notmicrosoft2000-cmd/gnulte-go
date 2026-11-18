@@ -1,7 +1,7 @@
 # GNULTE website
 
 Static website for the GNULTE toolkit. No build step, no framework, no third-party
-scripts — plain semantic HTML, one stylesheet, one small search script.
+scripts — plain semantic HTML, one stylesheet, small dependency-free scripts.
 
 ## Layout
 
@@ -9,12 +9,16 @@ scripts — plain semantic HTML, one stylesheet, one small search script.
 site/
   index.html            homepage
   tools.html            tool directory
+  products.html         suite architecture
   docs.html             documentation index
   downloads.html        source downloads and install
   changelog.html        release history
-  about.html            project, philosophy, safety, license, contact
+  news.html             field notes
+  about.html            project, safety, license
+  support.html          getting help
+  contact.html          contact and reporting
   search.html           client-side documentation search
-  feed.xml              Atom news feed
+  feed.xml              Atom field-notes feed
   docs/                 manual: install, configuration, usage, troubleshooting, faq
     gnulte.html         command reference, one page per binary
     gnulte-lan.html
@@ -24,8 +28,10 @@ site/
     gnulte-doctor.html
     gnulte-trace.html
     gnulte-top.html
-  css/gnulte.css        the stylesheet
-  js/search.js          search index + filtering (no dependencies)
+  css/gnulte.css        the field-manual stylesheet
+  js/site.js            mobile nav toggle and terminal copy buttons
+  js/search.js          search index + filtering
+  fonts/                self-hosted PT Sans / PT Serif (SIL OFL)
   img/                  logo and favicon set (generated PNGs)
 ```
 
@@ -45,8 +51,8 @@ The site is plain files; pick whichever fits the pages setup in use:
 - The **version** appears in the header, the release boxes and the footer of every
   page. When the toolkit version changes, update it everywhere (search for the old
   version string across `site/`).
-- The **changelog** and the homepage news list are hand-maintained from the release
-  commits. Keep them newest-first and dated.
+- The **changelog** and the field notes are hand-maintained from the release commits.
+  Keep them newest-first and dated.
 - The **search index** is the `SEARCH_INDEX` array at the top of `js/search.js`; add
   an entry for any new page.
 - **Command reference pages** must match the binaries' real flags. Extract them with
@@ -61,9 +67,13 @@ any vector/bitmap tool if the mark changes, keeping `logo.png` (48 px),
 
 ## Design notes
 
-The visual language is deliberately the one a Linux networking project used around
-2010: a fixed 960 px centred layout, a dark header band with a compact wordmark,
-a horizontal navigation bar, an information-dense three-column body (documentation
-navigation, content, sidebar), 1 px borders, alternating table rows, underlined links,
-system fonts, and small status/version details. Below 984 px the columns stack into a
-single readable column instead of overflowing.
+The visual system is a technical field manual: warm paper stock, black ink, hairline
+rules, one oxide-red signal colour, a serif reading face and a monospace face for
+labels, tables and commands. Layouts are information-dense but fluid — a three-column
+manual grid on wide screens, two columns on tablets, and a single column on phones.
+Terminal excerpts are dark, flat blocks. There are no gradients, shadows, rounded
+corners, stock photography or marketing-language sections.
+
+At 1050 px the manual's right rail drops away and the homepage hero stacks. At 780 px
+the primary navigation collapses behind a small `menu` toggle and all grids become a
+single column. Print styles hide the site chrome and keep the manual readable on paper.

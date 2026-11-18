@@ -2,178 +2,62 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width">
-<title>About GNULTE</title>
-<meta name="description" content="About GNULTE: purpose, development philosophy, licensing, authorised-use policy and contact.">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>About · GNULTE</title>
+<meta name="description" content="What GNULTE is, how it is developed, licensing, authorised use and where to send a patch.">
 <link rel="icon" href="img/favicon.ico">
 <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
-<link rel="stylesheet" href="css/gnulte.css?v=16.13-r4">
+<link rel="stylesheet" href="css/gnulte.css?v=field-1">
 </head>
 <body>
-<div class="wrap">
-
-<div class="head">
-  <a class="brand" href="index.html">
-    <img src="img/logo-48.png" alt="GNULTE icon" width="48" height="48">
-    <b>GNULTE</b>
-    <span class="tag">GNU LAN Network Testing Environment &middot; v16.13</span>
-  </a>
-  <form class="head-search" action="search.html" method="get">
-    <label for="hq">Search</label>
-    <input id="hq" type="text" name="q" size="18">
-    <input type="submit" value="Go">
-  </form>
-</div>
-
-<ul class="nav">
-  <li><a href="index.html">Home</a></li>
-  <li><a href="tools.html">Tools</a></li>
-  <li><a href="docs.html">Documentation</a></li>
-  <li><a href="downloads.html">Downloads</a></li>
-  <li><a href="changelog.html">Changelog</a></li>
-  <li><a class="active" href="about.html">About</a></li>
-</ul>
-
-<div class="cols2">
-
-  <div class="col-main" role="main">
-    <p class="crumbs"><a href="index.html">Home</a> &rsaquo; About</p>
-    <h1>About GNULTE</h1>
-    <p class="meta">Last updated 2026-10-15</p>
-
-    <h2>What GNULTE is</h2>
-    <p>GNULTE — the <b>GNU LAN Network Testing Environment</b> — is a suite of eight
-    Linux tools for measuring how devices behave when their network misbehaves. It does
-    one narrow job well: it lets an authorised operator put a real, kernel-shaped bad
-    network in front of a real device and watch what the device does about it — then
-    clean up completely afterwards.</p>
-
-    <p>The suite covers discovery (<code>gnulte-scan</code>, <code>gnulte-devices</code>),
-    live observation (<code>gnulte-lan</code>, <code>gnulte-top</code>), impairment
-    (<code>gnulte</code>), path analysis (<code>gnulte-trace</code>), Wi-Fi
-    disassociation testing (<code>gnulte-wifi</code>) and pre-flight verification
-    (<code>gnulte-doctor</code>). The tools share one device store, so a watch becomes a
-    target list and a scan becomes a baseline.</p>
-
-    <h2>Development philosophy</h2>
-    <ul>
-      <li><b>Zero third-party dependencies.</b> The whole toolkit is Go standard
-          library against the Linux kernel. Since the v17 Unplugged programme it runs on
-          a bare box: no <code>arping</code>, <code>arp-scan</code>, <code>tcpdump</code>,
-          <code>ping</code> or <code>traceroute(8)</code>. <code>tc</code> and
-          <code>iptables</code> remain — they are the kernel interface, not wrappers.</li>
-      <li><b>Verification is plain <code>go test</code>.</b> Every fix ships with a
-          discriminating regression test; <code>go vet</code> and
-          <code>go test ./...</code> must pass before a version bump.
-          <code>GOOS=darwin go vet</code> stays clean so the portable code never rots.</li>
-      <li><b>Small, shippable increments.</b> The changelog is a list of steps, each one
-          independently useful, each one dated and committed.</li>
-      <li><b>Cleanup is part of the feature.</b> Every run restores the previous qdisc
-          and the previous <code>ip_forward</code> value; a second Ctrl+C is needed to
-          force an exit mid-teardown.</li>
-      <li><b>Documentation-first.</b> Every tool has a <code>-h</code> that explains
-          itself, a machine-readable output mode (<code>--json</code> at minimum) and a
-          report you can file after the engagement.</li>
-    </ul>
-
-    <h2 id="safety">Authorised use</h2>
-    <div class="warn">
-      <p><b>GNULTE performs ARP-based man-in-the-middle routing, kernel-level traffic
-      impairment, packet capture, LAN discovery and 802.11 injection.</b></p>
-      <p>Only use these tools on networks, systems and devices you own or are explicitly
-      authorised to test. The authors grant no permission to test any particular
-      third-party network; users are responsible for complying with all applicable laws,
-      contracts and policies.</p>
-    </div>
-    <p>The toolkit takes this seriously in code: <code>gnulte-doctor</code> reports the
-    state of the safety record, the engine refuses to target the gateway or your own
-    machine, and every tool that needs consent requires an explicit acceptance record
-    (clear it with <code>--reset-safety</code>). The safety documents are printed by
-    <code>gnulte --docs</code> and <code>gnulte-scan --docs</code>.</p>
-
-    <h2>Licensing</h2>
-    <p>GNULTE is free software: you can redistribute it and/or modify it under the terms
-    of the <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU General Public License</a>
-    as published by the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version. The full text ships in the repository as
-    <code>LICENSE</code>.</p>
-
-    <h2>Source and contributions</h2>
-    <p>Development happens in the open at
-    <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">github.com/notmicrosoft2000-cmd/gnulte-go</a>.</p>
-    <dl class="defs">
-      <dt>Bug reports</dt>
-      <dd>Open an issue on the
-          <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a>.
-          Include the output of <code>gnulte-doctor --json</code> and the exact command
-          line — that is most of a diagnosis.</dd>
-      <dt>Patches</dt>
-      <dd>Pull requests are accepted against <code>main</code>. New code must be
-          standard library only, must not add <code>gofmt</code> drift, and must ship
-          with tests. The upstream plan for upcoming releases is
-          <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/blob/main/docs/V17-PLAN.md"><code>docs/V17-PLAN.md</code></a>.</dd>
-      <dt>Contact</dt>
-      <dd>There is no mailing list or forum; the issue tracker is the point of contact
-          for both bugs and patches.</dd>
-    </dl>
-
-    <h2>Credits</h2>
-    <p>GNULTE is maintained by <b>Neptune Productions</b>. It stands on the shoulders of
-    the Linux networking stack — <code>tc</code>/<code>netem</code>, netfilter, AF_PACKET
-    sockets and mac80211 — and on two decades of prior art in LAN measurement tools,
-    from <code>arpwatch</code> and <code>iperf</code> to <code>mtr</code> and
-    <code>nethogs</code>.</p>
+<a class="skip" href="#content">Skip to content</a>
+<div class="regbar"><div class="wrap regbar-inner"><span class="reg-id"><svg class="glyph-mini" viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3"><rect x="2" y="2" width="36" height="36"/><path d="M20 20 L9 9 M20 20 L31 9 M20 20 L9 31 M20 20 L31 31"/></svg>GNULTE <span class="reg-sub">GNU LAN Network Testing Environment</span></span><span class="reg-meta">v16.13 &middot; GPL-3.0-or-later &middot; Linux &middot; <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">source</a></span></div></div>
+<header class="masthead"><div class="wrap masthead-inner"><a class="wordmark" href="index.html"><svg class="glyph" viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6">
+<rect x="1" y="1" width="38" height="38"/>
+<path d="M20 20 L9 9 M20 20 L31 9 M20 20 L9 31 M20 20 L31 31"/>
+<circle cx="20" cy="20" r="3.2" fill="currentColor" stroke="none"/>
+<circle cx="9" cy="9" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="31" cy="9" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="9" cy="31" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="31" cy="31" r="2.2" fill="currentColor" stroke="none"/>
+</svg><span><span class="wordmark-name">GNULTE</span><span class="wordmark-sub">field manual &middot; Linux network testing</span></span></a><form class="site-search" action="search.html" method="get" role="search"><label class="sr-only" for="site-q">Search the site</label><input id="site-q" type="search" name="q" placeholder="search the manual"><button type="submit" aria-label="Search">&#9166;</button></form></div></header>
+<nav class="mainnav" aria-label="Primary"><div class="wrap mainnav-inner"><button class="navtoggle" type="button" aria-expanded="false">menu</button><ul class="navlist"><li><a href="index.html">Overview</a></li><li><a href="tools.html">Tools</a></li><li><a href="docs.html">Manual</a></li><li><a href="downloads.html">Downloads</a></li><li><a href="changelog.html">Changelog</a></li><li><a href="about.html" class="active">About</a></li><li><a href="support.html">Help</a></li></ul></div></nav>
+<main id="content" class="wrap">
+<div class="crumbs"><a href="index.html">GNULTE</a><span class="sep">/</span>About</div>
+<header class="page-head"><div class="page-kicker">PROJECT</div><h1>About GNULTE</h1><p class="lede">Eight Linux tools for testing how devices behave on a degraded network.</p></header><section class="sheet"><div class="sheet-head"><span class="sheet-no">01 /</span><h2>What it is</h2></div><div class="sheet-body"><p>GNULTE, the GNU LAN Network Testing Environment, shapes a bad link with the kernel's tc queues and watches how a device responds. It restores the link afterwards.</p><p>The suite covers discovery (<code>gnulte-scan</code>, <code>gnulte-devices</code>), live observation (<code>gnulte-lan</code>, <code>gnulte-top</code>), impairment (<code>gnulte</code>), path analysis (<code>gnulte-trace</code>), Wi-Fi disassociation testing (<code>gnulte-wifi</code>) and pre-flight verification (<code>gnulte-doctor</code>). The tools share one device store. A watch supplies the target list; a scan supplies the baseline.</p></div></section><section class="sheet"><div class="sheet-head"><span class="sheet-no">02 /</span><h2>Development philosophy</h2></div><div class="sheet-body"><dl class="facts"><dt>No third-party dependencies</dt><dd>The toolkit is Go standard library against the Linux kernel. Since the Unplugged programme it needs no <code>arping</code>, <code>arp-scan</code>, <code>tcpdump</code>, <code>ping</code> or <code>traceroute(8)</code>. <code>tc</code> and <code>iptables</code> remain. They are the kernel interface.</dd><dt>Plain verification</dt><dd>Every fix ships with a discriminating regression test. <code>go vet</code> and <code>go test ./...</code> must pass before a version bump; <code>GOOS=darwin go vet</code> keeps portable code from rotting.</dd><dt>Small, shippable increments</dt><dd>The changelog is a list of steps, each independently useful, each dated and committed.</dd><dt>Cleanup is part of the feature</dt><dd>Every run restores the previous qdisc and <code>ip_forward</code>. A second Ctrl+C is needed to force an exit mid-teardown, so a target is never left with a poisoned ARP cache.</dd><dt>Documentation-first</dt><dd>Every tool has a <code>-h</code> that explains itself, a machine-readable output mode (<code>--json</code> at minimum) and a report you can file after the run.</dd></dl></div></section><section class="sheet" id="safety"><div class="sheet-head"><span class="sheet-no">03 /</span><h2>Authorised use</h2></div><div class="sheet-body"><p>GNULTE performs ARP-based man-in-the-middle routing, kernel-level traffic impairment, packet capture, LAN discovery and 802.11 injection. <strong>Only use these tools on networks, systems and devices you own or are explicitly authorised to test.</strong> The authors grant no permission to test any particular third-party network; users are responsible for complying with applicable laws, contracts and policies.</p><p>This is enforced in code where possible: <code>gnulte-doctor</code> reports the safety record, the engine refuses to target the gateway or your own machine, and tools that need consent require an explicit acceptance record (<code>--reset-safety</code> clears it). The safety documents are printed by <code>gnulte --docs</code> and <code>gnulte-scan --docs</code>.</p></div></section><section class="sheet"><div class="sheet-head"><span class="sheet-no">04 /</span><h2>Licensing</h2></div><div class="sheet-body"><p>GNULTE is free software: redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. The full text ships in the repository as <code>LICENSE</code>.</p><div class="actions"><a class="button ghost" href="https://www.gnu.org/licenses/gpl-3.0.html">GPL v3.0</a><a class="button ghost" href="https://github.com/notmicrosoft2000-cmd/gnulte-go">Source</a></div></div></section><section class="sheet"><div class="sheet-head"><span class="sheet-no">05 /</span><h2>Source and contributions</h2></div><div class="sheet-body"><p>Development happens in the open at <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">github.com/notmicrosoft2000-cmd/gnulte-go</a>. There is no mailing list or forum; the <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a> is the point of contact for bugs and patches.</p><dl class="facts"><dt>Bug reports</dt><dd>Include the output of <code>gnulte-doctor --json</code> and the exact command line. That is most of a diagnosis.</dd><dt>Patches</dt><dd>Pull requests against main. Standard library only, no gofmt drift, tests required.</dd><dt>Plan</dt><dd>The upstream plan for upcoming releases is <code>docs/V17-PLAN.md</code>.</dd><dt>Credits</dt><dd>Maintained by Neptune Productions. Built on tc/netem, netfilter, AF_PACKET and mac80211, and on prior art from arpwatch and iperf to mtr and nethogs.</dd></dl></div></section><section class="sheet"><div class="sheet-head"><span class="sheet-no">06 /</span><h2>Project facts</h2></div><div class="sheet-body"><dl class="facts"><dt>Maintainer</dt><dd>Neptune Productions</dd><dt>Version</dt><dd>16.13 (2026-10-03)</dd><dt>License</dt><dd>GPL-3.0-or-later</dd><dt>Language</dt><dd>Go, standard library only</dd><dt>Platform</dt><dd>Linux</dd><dt>Repository</dt><dd><a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">github.com/notmicrosoft2000-cmd/gnulte-go</a></dd></dl></div></section>
+</main>
+<footer class="colophon"><div class="wrap">
+<div class="colophon-grid">
+  <div>
+    <svg class="mark" viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6">
+<rect x="1" y="1" width="38" height="38"/>
+<path d="M20 20 L9 9 M20 20 L31 9 M20 20 L9 31 M20 20 L31 31"/>
+<circle cx="20" cy="20" r="3.2" fill="currentColor" stroke="none"/>
+<circle cx="9" cy="9" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="31" cy="9" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="9" cy="31" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="31" cy="31" r="2.2" fill="currentColor" stroke="none"/>
+</svg>
+    <h3>GNULTE</h3>
+    <p>GNU LAN Network Testing Environment. Eight single-purpose Linux tools, standard library only, GPL-3.0-or-later.</p>
+    <p>Maintained by Neptune Productions. Built on <code>tc</code>/netem, netfilter, AF_PACKET and mac80211.</p>
   </div>
-
-  <div class="col-right">
-    <div class="box">
-      <h3>Project</h3>
-      <div class="b">
-        <dl>
-          <dt>Maintainer</dt><dd>Neptune Productions</dd>
-          <dt>Version</dt><dd>16.13</dd>
-          <dt>License</dt><dd>GPL-3.0-or-later</dd>
-          <dt>Language</dt><dd>Go (stdlib only)</dd>
-          <dt>Platform</dt><dd>Linux</dd>
-        </dl>
-      </div>
-    </div>
-
-    <div class="box">
-      <h3>Links</h3>
-      <div class="b">
-        <ul>
-          <li><a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">Repository</a></li>
-          <li><a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">Issue tracker</a></li>
-          <li><a href="https://www.gnu.org/licenses/gpl-3.0.html">GPL v3</a></li>
-          <li><a href="changelog.html">Changelog</a></li>
-        </ul>
-      </div>
-    </div>
-  </div>
-
-</div><!-- .cols2 -->
-
-<div class="foot">
-  <p class="foot-nav">
-    <a href="index.html">Home</a>
-    <a href="tools.html">Tools</a>
-    <a href="docs.html">Documentation</a>
-    <a href="downloads.html">Downloads</a>
-    <a href="changelog.html">Changelog</a>
-    <a href="about.html">About</a>
-    <a href="search.html">Search</a>
-    <a href="feed.xml">News feed</a>
-  </p>
-  <p>Copyright &copy; 2026 Neptune Productions. GNULTE is free software released under the
-     <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL version 3 or later</a>.</p>
-  <p>Source: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">github.com/notmicrosoft2000-cmd/gnulte-go</a>
-     &middot; Issues: <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a>
-     &middot; Authorised network testing only.</p>
-  <p>This page last updated: 2026-10-15.</p>
+  <div><h3>The suite</h3><ul><li><a href="docs/gnulte.html">gnulte</a></li><li><a href="docs/gnulte-lan.html">gnulte-lan</a></li><li><a href="docs/gnulte-scan.html">gnulte-scan</a></li><li><a href="docs/gnulte-devices.html">gnulte-devices</a></li><li><a href="docs/gnulte-wifi.html">gnulte-wifi</a></li><li><a href="docs/gnulte-doctor.html">gnulte-doctor</a></li><li><a href="docs/gnulte-trace.html">gnulte-trace</a></li><li><a href="docs/gnulte-top.html">gnulte-top</a></li></ul></div>
+  <div><h3>Manual</h3><ul><li><a href="docs/install.html">Installation</a></li><li><a href="docs/configuration.html">Configuration</a></li><li><a href="docs/usage.html">Usage</a></li><li><a href="docs/troubleshooting.html">Troubleshooting</a></li><li><a href="docs/faq.html">FAQ</a></li></ul></div>
+  <div><h3>Project</h3><ul>
+    <li><a href="about.html">About &amp; safety</a></li>
+    <li><a href="changelog.html">Changelog</a></li>
+    <li><a href="news.html">Field notes</a></li>
+    <li><a href="downloads.html">Downloads</a></li>
+    <li><a href="support.html">Getting help</a></li>
+    <li><a href="contact.html">Contact</a></li>
+    <li><a href="feed.xml">Atom feed</a></li>
+  </ul></div>
 </div>
-
-</div><!-- .wrap -->
-<script src="js/search.js?v=16.13-r4"></script>
+<div class="colophon-bottom"><span>v16.13 &middot; 2026-10-03 &middot; source: github.com/notmicrosoft2000-cmd/gnulte-go</span>
+<span><a href="index.html">home</a><a href="search.html">search</a><a href="about.html#safety">authorised use</a></span></div>
+</div></footer>
+<script src="js/site.js?v=field-1"></script>
+<script src="js/search.js?v=field-1"></script>
 </body>
 </html>

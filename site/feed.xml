@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
-  <title>GNULTE — news</title>
-  <subtitle>Release announcements and development updates for the GNU LAN Network Testing Environment.</subtitle>
+  <title>GNULTE: field notes</title>
+  <subtitle>Release announcements and development notes for the GNU LAN Network Testing Environment.</subtitle>
   <link href="https://notmicrosoft2000-cmd.github.io/gnulte/feed.xml" rel="self" type="application/atom+xml"/>
   <link href="https://notmicrosoft2000-cmd.github.io/gnulte/" rel="alternate" type="text/html"/>
   <id>https://notmicrosoft2000-cmd.github.io/gnulte/feed.xml</id>
@@ -18,7 +18,7 @@
   </entry>
 
   <entry>
-    <title>GNULTE v16.13 released — watch history and a machine feed</title>
+    <title>GNULTE v16.13 released: watch history and a machine feed</title>
     <link href="https://notmicrosoft2000-cmd.github.io/gnulte/changelog.html"/>
     <id>https://notmicrosoft2000-cmd.github.io/gnulte/news/16.13</id>
     <updated>2026-10-03T00:00:00Z</updated>
@@ -26,7 +26,7 @@
   </entry>
 
   <entry>
-    <title>GNULTE v16.12 released — scenarios, per-target shaping, profiles and a session summary</title>
+    <title>GNULTE v16.12 released: scenarios, per-target shaping, profiles and a session summary</title>
     <link href="https://notmicrosoft2000-cmd.github.io/gnulte/changelog.html"/>
     <id>https://notmicrosoft2000-cmd.github.io/gnulte/news/16.12</id>
     <updated>2026-10-03T00:00:00Z</updated>
@@ -34,7 +34,7 @@
   </entry>
 
   <entry>
-    <title>GNULTE v16.11 released — gnulte-top, the live bandwidth top</title>
+    <title>GNULTE v16.11 released: gnulte-top, the live bandwidth top</title>
     <link href="https://notmicrosoft2000-cmd.github.io/gnulte/changelog.html"/>
     <id>https://notmicrosoft2000-cmd.github.io/gnulte/news/16.11</id>
     <updated>2026-10-02T00:00:00Z</updated>
@@ -42,15 +42,15 @@
   </entry>
 
   <entry>
-    <title>GNULTE v16.9 and v16.10 released — gnulte-doctor and gnulte-trace</title>
+    <title>GNULTE v16.9 and v16.10 released: gnulte-doctor and gnulte-trace</title>
     <link href="https://notmicrosoft2000-cmd.github.io/gnulte/changelog.html"/>
     <id>https://notmicrosoft2000-cmd.github.io/gnulte/news/16.9-16.10</id>
     <updated>2026-10-01T00:00:00Z</updated>
-    <summary>gnulte-doctor is a zero-dependency pre-flight check (PASS/WARN/FAIL with fix-it hints, --json, non-zero exit on failure). gnulte-trace is an mtr-style hop-by-hop path probe with in-process ICMP echo at every TTL, per-hop last/avg/best/worst and loss, --json and an HTML report — no traceroute(8) behind it.</summary>
+    <summary>gnulte-doctor is a zero-dependency pre-flight check (PASS/WARN/FAIL with fix-it hints, --json, non-zero exit on failure). gnulte-trace is an mtr-style hop-by-hop path probe with in-process ICMP echo at every TTL, per-hop last/avg/best/worst and loss, --json and an HTML report. No traceroute(8) behind it.</summary>
   </entry>
 
   <entry>
-    <title>The Unplugged series, v16.6 to v16.8 — arping, arp-scan, ping, tcpdump and their friends are gone</title>
+    <title>The Unplugged series, v16.6 to v16.8: arping, arp-scan, ping, tcpdump and their friends are gone</title>
     <link href="https://notmicrosoft2000-cmd.github.io/gnulte/changelog.html#unplugged"/>
     <id>https://notmicrosoft2000-cmd.github.io/gnulte/news/16.6-16.8</id>
     <updated>2026-10-01T00:00:00Z</updated>

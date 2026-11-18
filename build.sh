@@ -24,8 +24,11 @@ go build -o gnulte-inventory ./cmd/gnulte-inventory
 echo "== building gnulte-quicksum (cmd/gnulte-quicksum) =="
 go build -o gnulte-quicksum ./cmd/gnulte-quicksum
 
+echo "== building gnulte-report (cmd/gnulte-report) =="
+go build -o gnulte-report ./cmd/gnulte-report
+
 echo "== running tests =="
 go test ./cmd/... ./internal/...
 go vet ./cmd/... ./internal/...
 
-echo "== done: ./gnulte-scan ./gnulte ./gnulte-wifi ./gnulte-watch ./gnulte-inventory ./gnulte-quicksum =="
+echo "== done: ./gnulte-scan ./gnulte ./gnulte-wifi ./gnulte-watch ./gnulte-inventory ./gnulte-quicksum ./gnulte-report =="

@@ -46,10 +46,11 @@ go build -trimpath -ldflags "-s -w" -o gnulte-wifi ./cmd/gnulte-wifi || exit 1
 go build -trimpath -ldflags "-s -w" -o gnulte-watch ./cmd/gnulte-watch || exit 1
 go build -trimpath -ldflags "-s -w" -o gnulte-inventory ./cmd/gnulte-inventory || exit 1
 go build -trimpath -ldflags "-s -w" -o gnulte-quicksum ./cmd/gnulte-quicksum || exit 1
+go build -trimpath -ldflags "-s -w" -o gnulte-report ./cmd/gnulte-report || exit 1
 
 # --- verify before installing ---
 
-for f in gnulte gnulte-scan gnulte-wifi gnulte-watch gnulte-inventory gnulte-quicksum; do
+for f in gnulte gnulte-scan gnulte-wifi gnulte-watch gnulte-inventory gnulte-quicksum gnulte-report; do
     if ! file "$f" | grep -q "ELF"; then
         echo "built $f does not look like an ELF binary; aborting." >&2
         exit 1
@@ -62,7 +63,7 @@ if [[ -z "$VERSION" ]]; then
     echo "gnulte does not report a version number; aborting." >&2
     exit 1
 fi
-for b in gnulte gnulte-scan gnulte-wifi gnulte-watch gnulte-inventory gnulte-quicksum; do
+for b in gnulte gnulte-scan gnulte-wifi gnulte-watch gnulte-inventory gnulte-quicksum gnulte-report; do
     if ! "./$b" --version 2>/dev/null | grep -q "$VERSION"; then
         echo "$b does not report $VERSION; aborting." >&2
         exit 1
@@ -77,6 +78,7 @@ install -m755 "$SRC_DIR/gnulte-wifi" "$BINDIR/gnulte-wifi"
 install -m755 "$SRC_DIR/gnulte-watch" "$BINDIR/gnulte-watch"
 install -m755 "$SRC_DIR/gnulte-inventory" "$BINDIR/gnulte-inventory"
 install -m755 "$SRC_DIR/gnulte-quicksum" "$BINDIR/gnulte-quicksum"
+install -m755 "$SRC_DIR/gnulte-report" "$BINDIR/gnulte-report"
 
 # --- install legal / safety documentation ---
 
@@ -95,7 +97,7 @@ done
 
 echo ""
 echo "GNULTE ${VERSION} installed successfully."
-echo "  Binaries: ${BINDIR}/gnulte, ${BINDIR}/gnulte-scan, ${BINDIR}/gnulte-wifi, ${BINDIR}/gnulte-watch, ${BINDIR}/gnulte-inventory, ${BINDIR}/gnulte-quicksum"
+echo "  Binaries: ${BINDIR}/gnulte, ${BINDIR}/gnulte-scan, ${BINDIR}/gnulte-wifi, ${BINDIR}/gnulte-watch, ${BINDIR}/gnulte-inventory, ${BINDIR}/gnulte-quicksum, ${BINDIR}/gnulte-report"
 echo "  Docs:     ${DOCDIR}/"
 echo ""
 echo "Run gnulte (it elevates via sudo as needed)."

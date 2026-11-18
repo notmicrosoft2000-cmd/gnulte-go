@@ -16,7 +16,7 @@ test. Scan the LAN, shape a target’s traffic with real kernel `tc netem`,
 watch every device live, and hand off from one tool to the next: the whole
 toolkit shares one live view of your network.
 
-## The six tools
+## The seven tools
 
 | Binary | Root | What it does |
 | --- | --- | --- |
@@ -26,6 +26,7 @@ toolkit shares one live view of your network.
 | `gnulte-inventory` | no | Instant ARP/neighbour inventory: vendors, mDNS hostnames, type guesses, HTML reports |
 | `gnulte-wifi` | **yes** | Targeted 802.11 deauthentication for authorised Wi-Fi disassociation testing — per-frame jitter, rotating reason codes, channel hopping |
 | `gnulte-quicksum` | no | Pre-flight health check: privileges, `tc`/`iptables`, `ip_forward`, the netem/netfilter modules, default route and interface, duplicate IPs, and the safety record. PASS/WARN/FAIL table with fix-it hints, `--json`, non-zero exit on any failure |
+| `gnulte-report` | no | Work with saved reports: list and index the report hub, merge JSON snapshots from different tools or days, diff two snapshots, and file reports into dated folders. Reads local files only, no root and no network |
 
 ## Unplugged (v16.6+)
 
@@ -146,7 +147,7 @@ required: raw ARP probing/injection and capture are implemented in-process.
 ```sh
 git clone https://github.com/notmicrosoft2000-cmd/gnulte-go.git
 cd gnulte-go
-./build.sh          # builds all six binaries, runs go vet + go test on the Go packages
+./build.sh          # builds all seven binaries, runs go vet + go test on the Go packages
 sudo ./install.sh   # installs to /usr/local/bin + safety docs
 ```
 
@@ -170,6 +171,11 @@ gnulte-scan --watch 5                                 # live re-scan: ▲ new ·
 gnulte-scan -T                                        # tabbed browser: Devices / Log / Summary
 gnulte-inventory -s                                   # instant ARP inventory + optional sweep
 gnulte-quicksum -j                                    # pre-flight check as JSON
+gnulte-report list                                    # list every report in the hub
+gnulte-report index -o ~/index.html                   # HTML index of all reports
+gnulte-report merge before.json after.json -o all.json
+gnulte-report compare before.json after.json          # what changed
+gnulte-report archive ./gnulte-scan-report-*.html     # file reports into YYYY/MM folders
 ```
 
 ### gnulte-watch keys

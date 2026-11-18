@@ -3,9 +3,9 @@
 
 var SEARCH_INDEX = [
   { u: "index.html", t: "GNULTE", k: "home overview introduction suite lan network testing environment",
-    d: "Six Linux tools for shaping, watching and inspecting traffic on a network you own or are authorised to test." },
-  { u: "tools.html", t: "Tool directory", k: "tools suite gnulte-watch gnulte-scan gnulte-inventory gnulte-wifi gnulte-quicksum gnulte-watch trace gnulte-watch top directory",
-    d: "The six GNULTE binaries: what each one does, what privileges it needs and how they fit together." },
+    d: "Seven Linux tools for shaping, watching and inspecting traffic on a network you own or are authorised to test." },
+  { u: "tools.html", t: "Tool directory", k: "tools suite gnulte-watch gnulte-scan gnulte-inventory gnulte-wifi gnulte-quicksum gnulte-report gnulte-watch trace gnulte-watch top directory",
+    d: "The seven GNULTE binaries: what each one does, what privileges it needs and how they fit together." },
   { u: "docs.html", t: "Documentation", k: "documentation manual index docs guide reference",
     d: "The GNULTE manual: installation, configuration, usage and one reference page per binary." },
   { u: "downloads.html", t: "Downloads", k: "download source tarball git clone install build release",
@@ -36,6 +36,8 @@ var SEARCH_INDEX = [
     d: "Platform support, root requirements, external tools, data locations and safety records." },
   { u: "docs/gnulte.html", t: "gnulte(8): command reference", k: "gnulte command reference latency jitter loss duplicate reorder bandwidth netem shaping spoof target",
     d: "The core shaping engine: ARP-redirected routing into tc netem with a live dashboard and HTML report." },
+  { u: "docs/gnulte-report.html", t: "gnulte-report(8): command reference", k: "gnulte-report reports archive merge compare index snapshot dated folders json",
+    d: "List and index saved reports, merge device exports, diff snapshots and file them into dated folders." },
   { u: "docs/gnulte-watch.html", t: "gnulte-watch(8): command reference", k: "gnulte-watch watch hosts talkers flows neighbours map history json export alarm",
     d: "The live LAN watch: six screens of hosts, talkers, flows, ARP neighbours, interconnection map and history." },
   { u: "docs/gnulte-scan.html", t: "gnulte-scan(8): command reference", k: "gnulte-scan sweep port scan deep os fingerprint oui vendor watch interactive json yaml csv",

@@ -223,6 +223,19 @@ the snapshot round-trip and the CSV override.
 - **Wifi**: `--reason <code|preset>` (named deauthentication reasons), `--streak`/client-steer, per-frame jitter counters, channel-dwell stats. No monitor mode.
 - Touch: repo-wide formatting, new cmd/gnulte-report, cmd/gnulte-wifi.
 
+**Report chunk built (16.15 is not yet complete):** new `cmd/gnulte-report` and
+pure `internal/report`. `Discover` finds reports by their established filenames
+(tool, `YYYYMMDD-HHMMSS` stamp, optional count, `.html`/`.json`) and sorts newest
+first; `Index` renders a self-contained HTML page grouped by tool with every
+field escaped. `Merge` folds several `-j` snapshots into one device list keyed
+by IP: later files win for fields they set, earlier files fill blanks, banners
+union without duplicates, and `WriteJSON` emits a bare array that
+`snapshot.Load` and `gnulte --compare` accept. `Archive` copies reports into
+`<root>/YYYY/MM/` using the filename stamp or the file mtime, adding a `-2`
+suffix instead of overwriting. The `compare` subcommand wraps `internal/snapshot`,
+so the same diff is now a standalone tool. Wired into build/install/uninstall
+and `.gitignore`. The version stays 16.14 until 16.15 ships as a whole.
+
 ### 17.0 — Cap
 Full docs pass, bare-box verification checklist executed, version → 17.0, README title/shield/alt + tool table (6 tools), `social-preview` refresh if time allows.
 

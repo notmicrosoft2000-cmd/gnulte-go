@@ -5,6 +5,7 @@
 /gnulte-watch
 /gnulte-inventory
 /gnulte-quicksum
+/gnulte-report
 # generated reports
 /gnulte-scan-report-*.html
 # original shell toolkit + sample reports (reference material, not built)

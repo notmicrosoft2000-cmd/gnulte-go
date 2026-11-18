@@ -1,7 +1,7 @@
 # GNULTE · Go edition
 
 
-![version](https://img.shields.io/badge/version-16.14-62a0ea)
+![version](https://img.shields.io/badge/version-17.0-62a0ea)
 ![language](https://img.shields.io/badge/Go-1.21-00ADD8)
 ![platform](https://img.shields.io/badge/platform-Linux-9cf)
 ![tests](https://img.shields.io/badge/tests-go%20vet%20%2B%20go%20test-2ea44f)
@@ -30,9 +30,9 @@ toolkit shares one live view of your network.
 
 ## Unplugged (v16.6+)
 
-v17's **Unplugged** programme, in progress. The goal is a toolkit that runs on a
+The **Unplugged** programme is complete. The goal was a toolkit that runs on a
 bare box with nothing but the kernel: the shell-outs to `arping`, `arp-scan` and
-`tcpdump` are being replaced by in-process raw-socket code, one per increment,
+`tcpdump` were replaced by in-process raw-socket code, one per increment,
 each independently shippable.
 
 - **v16.6 — in-Go ARP sweep.** The LAN sweep no longer shells out. `gnulte-scan
@@ -101,6 +101,19 @@ each independently shippable.
   the HTML report grows a 7-day latency bar chart per host with a blunt 0–100
   health score (loss first, then drift from the host's own baseline, spread and
   up/down churn). Still no `ping`, no external store, no new dependency.
+
+- **v16.14 — sweepers with memory and `--compare`.** The inventory keeps a
+  sighting history of ports, banners and awake time per host. The scan reports
+  new and closed ports between runs, TLS, SSH and SMB banners are read with the
+  standard library, `--oui-file` overlays a vendor CSV, and `gnulte --compare`
+  diffs two saved report snapshots on the console or as HTML.
+
+- **v17.0 — report desk and Wi-Fi control.** `gnulte-report` indexes saved
+  reports, merges snapshots, diffs two exports and files reports into dated
+  folders. `gnulte-wifi` takes named deauth reasons and comma-separated station
+  lists, steers between clients with `--streak`, and counts jitter and channel
+  dwell in its closing summary. The suite is seven tools on the Go standard
+  library alone.
 
 ## Steady Hands (v16)
 

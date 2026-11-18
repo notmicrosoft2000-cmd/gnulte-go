@@ -75,7 +75,7 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "16.14"
+const version = "17.0"
 
 // hostInfo is the identity enrichment for one watched host.
 type hostInfo struct {

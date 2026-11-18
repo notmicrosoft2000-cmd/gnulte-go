@@ -2,23 +2,23 @@
 
 Status: **locked**. Owner: this session. Branch/chain: incremental bumps `16.6 → 16.7 → … → 17.0` on `main`, each independently shippable and testable.
 
-Tool names below use the post-consolidation suite. The pre-flight check started as `gnulte-doctor`, the path probe as `gnulte-trace`, the bandwidth view as `gnulte-top`, the inventory as `gnulte-devices`, and the watch as `gnulte-lan`. All were renamed or folded into `gnulte-watch` in the six-tool consolidation.
+Tool names below use the post-consolidation suite. The pre-flight check started as `gnulte-doctor`, the path probe as `gnulte-trace`, the bandwidth view as `gnulte-top`, the inventory as `gnulte-devices`, and the watch as `gnulte-lan`. All were renamed or folded into `gnulte-watch` in the six-tool consolidation; `gnulte-report` joined at the 17.0 cap for a seven-tool suite.
 
 ## Locked decisions
 
 - **Spine: Program A — zero-dependency core.** Replace every helper-binary shell-out with in-Go implementations so the toolkit runs on a bare box. `tc` / `iptables` stay: they *are* the kernel interface.
-- **New tools:** the pre-flight check, the path probe and the bandwidth view, shipped as `gnulte-quicksum` and as `top`/`trace` subcommands of `gnulte-watch`. Tool count went 5 → 8, then the suite was consolidated to six binaries: `gnulte`, `gnulte-watch`, `gnulte-scan`, `gnulte-inventory`, `gnulte-wifi`, `gnulte-quicksum`.
+- **New tools:** the pre-flight check, the path probe and the bandwidth view, shipped as `gnulte-quicksum` and as `top`/`trace` subcommands of `gnulte-watch`. Tool count went 5 → 8, then the suite was consolidated to six binaries: `gnulte`, `gnulte-watch`, `gnulte-scan`, `gnulte-inventory`, `gnulte-wifi`, `gnulte-quicksum`. The 17.0 cap added `gnulte-report` as a seventh.
 - **Cadence:** incremental, each bump tested end-to-end before the next.
 - **Wifi:** reason-code presets + client-steer ship. **Monitor-mode channel scanning is OUT for v17** (no nl80211 spike, no verification-mode scope creep).
-- The agreed-but-never-started v17 backlog is folded in: `gnulte --compare`, gnulte-watch `--json`, `--watch` stderr alerts, soak runner, gofmt of the 7 drifted files.
+- The agreed-but-never-started v17 backlog was folded in: `gnulte --compare`, gnulte-watch `--json`, `--watch` stderr alerts, and gofmt of the drifted files. The soak runner was deliberately skipped at the cap; `docs/VERIFY.md` records the live root checks it would have covered.
 
 ## Constraints (hard)
 
 - Pure stdlib Go 1.21; **no new dependencies, no go.mod change** (module proxy blocked; github only).
-- Linux target. `GOOS=darwin go vet ./...` must stay clean → use `*_linux.go` / build tags for platform-specific code; cross-platform code stays shared.
+- Scope Go checks to `./cmd/... ./internal/...`: plain `./...` also walks an unreadable ignored sample directory. Linux target. `GOOS=darwin go vet ./cmd/... ./internal/...` must stay clean → use `*_linux.go` / build tags for platform-specific code; cross-platform code stays shared.
 - Sandbox has **no root**: the engine cannot be exercised end-to-end here. `GNULTE_AS_ROOT=1` is the harness shim (re-exec skip). Live net checks go through PTY harnesses (`~/Documents/gnulte-verify/pty17.py` pattern; add `pty18.py` per feature as needed).
-- `gofmt -l` must show **only** the 7 pre-existing drifted files until 16.15 (when they get formatted as a targeted cleanup): `cmd/gnulte-watch/view.go`, `internal/engine/qdisc.go`, `internal/engine/qdisc_test.go`, `internal/inventory/inventory.go`, `internal/inventory/inventory_test.go`, `internal/scanner/diff.go`, `internal/scanner/diff_test.go`. New code must not add drift.
-- Verification per bump: `go build ./...` → `go vet ./...` → `go test -count=1 ./...` → `go test -race -count=1 ./...` → `GOOS=darwin go vet ./...` → gofmt check. Version bump (`const version` in the 6 `cmd/*/main.go` + README title/shield/alt) in the same commit as the feature.
+- The seven files once allowed to drift (`cmd/gnulte-watch/view.go`, `internal/engine/qdisc.go`, `internal/engine/qdisc_test.go`, `internal/inventory/inventory.go`, `internal/inventory/inventory_test.go`, `internal/scanner/diff.go`, `internal/scanner/diff_test.go`) were formatted in v16.14; `gofmt -l cmd internal` is now clean. New code must not reintroduce drift.
+- Verification per bump: `go build ./cmd/... ./internal/...` → `go vet ./cmd/... ./internal/...` → `go test -count=1 ./cmd/... ./internal/...` → `go test -race -count=1 ./cmd/... ./internal/...` → `GOOS=darwin go vet ./cmd/... ./internal/...` → `gofmt -l cmd internal`. Version bump (`const version` in the seven `cmd/*/main.go` + README badge) in the same commit as the feature; commit locally once green, push only when asked.
 
 ## Build chain
 
@@ -216,14 +216,14 @@ the result as text or a self-contained HTML page; `gnulte` reaches it through
 inventory tools. Tests cover the sighting merge, the diff, the banner parsers,
 the snapshot round-trip and the CSV override.
 
-### 16.15 — Cleanup + soak + report + wifi
+### 16.15 — Cleanup + soak + report + wifi — **SHIPPED** (v17.0)
 - **gofmt the 7 drifted files** (targeted cleanup; verify the diff is formatting-only).
-- **Soak runner**: a `go test`-tagged long test / hidden `gnulte soak` running sessions back-to-back asserting clean restores + a script.
+- **Soak runner**: a `go test`-tagged long test / hidden `gnulte soak` running sessions back-to-back asserting clean restores + a script. **Skipped by decision at the cap** — it needs root and live hardware; `docs/VERIFY.md` lists the checks it would have covered.
 - **`gnulte-report`**: archive/merge/compare reports across tools and days (backs `--compare`), index HTML.
 - **Wifi**: `--reason <code|preset>` (named deauthentication reasons), `--streak`/client-steer, per-frame jitter counters, channel-dwell stats. No monitor mode.
 - Touch: repo-wide formatting, new cmd/gnulte-report, cmd/gnulte-wifi.
 
-**Report chunk built (16.15 is not yet complete):** new `cmd/gnulte-report` and
+**Report chunk (shipped in v17.0):** new `cmd/gnulte-report` and
 pure `internal/report`. `Discover` finds reports by their established filenames
 (tool, `YYYYMMDD-HHMMSS` stamp, optional count, `.html`/`.json`) and sorts newest
 first; `Index` renders a self-contained HTML page grouped by tool with every
@@ -234,9 +234,9 @@ union without duplicates, and `WriteJSON` emits a bare array that
 `<root>/YYYY/MM/` using the filename stamp or the file mtime, adding a `-2`
 suffix instead of overwriting. The `compare` subcommand wraps `internal/snapshot`,
 so the same diff is now a standalone tool. Wired into build/install/uninstall
-and `.gitignore`. The version stays 16.14 until 16.15 ships as a whole.
+and `.gitignore`. 16.15 shipped as v17.0.
 
-**Wifi chunk built (16.15 is not yet complete):** `--reason` now takes a numeric
+**Wifi chunk (shipped in v17.0):** `--reason` now takes a numeric
 code or a preset name, with `--list-reasons` printing the presets. Presets live
 in `internal/airframes` (`ParseReason`, `ReasonPresets`, `FormatReason`) beside
 the existing frame builders; named codes are aliases for the same 0-65535
@@ -246,21 +246,26 @@ switching to the next (client steering). New pure helpers in `cmd/gnulte-wifi`:
 `ParseStations`, `stationForBurst`, `JitterStats` (per-frame delay counts) and
 `DwellStats` (hop time per channel). Both accumulators are fed by the burst loop
 and read no clock; the closing summary reports jitter and dwell totals. The
-adapter must already be in monitor mode — no channel scanning was added. The
-version stays 16.14 until 16.15 ships as a whole.
+adapter must already be in monitor mode — no channel scanning was added.
+16.15 shipped as v17.0.
 
-### 17.0 — Cap
-Full docs pass, bare-box verification checklist executed, version → 17.0, README title/shield/alt + tool table (6 tools), `social-preview` refresh if time allows.
+### 17.0 — Cap — **SHIPPED** (v17.0)
+Version bumped to 17.0 in all seven commands, the README badge and the site's
+current-version stamps; historical v16.13 release entries stay as history. The
+full docs pass covers the site, the report and Wi-Fi references, the seven-tool
+directory and the search index. `docs/VERIFY.md` records the matrix run here and
+the root and live checks this sandbox cannot perform. There are no
+`social-preview` assets in the tree, so that optional item does not apply.
 
 ## Verification conventions (every bump)
 
-1. `go build ./... && go vet ./...`
-2. `go test -count=1 ./...` then `go test -race -count=1 ./...`
-3. `GOOS=darwin go vet ./...` clean
-4. `gofmt -l` == the 7 pre-existing files only (until 16.15)
+1. `go build ./cmd/... ./internal/... && go vet ./cmd/... ./internal/...`
+2. `go test -count=1 ./cmd/... ./internal/...` then `go test -race -count=1 ./cmd/... ./internal/...`
+3. `GOOS=darwin go vet ./cmd/... ./internal/...` clean
+4. `gofmt -l cmd internal` empty
 5. New tests must **discriminate** against old behaviour (prove they fail on the pre-bump code; the v16 lesson).
 6. PTY harness for interactive paths, `--no-report`, `GNULTE_AS_ROOT=1` in the sandbox.
-7. Version string + README bump in the same commit; push `main` after green.
+7. Version string + README bump in the same commit; commit locally once green, push only when asked.
 
 ## Historical notes
 

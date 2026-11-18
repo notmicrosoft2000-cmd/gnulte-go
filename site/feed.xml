@@ -5,16 +5,24 @@
   <link href="https://notmicrosoft2000-cmd.github.io/gnulte/feed.xml" rel="self" type="application/atom+xml"/>
   <link href="https://notmicrosoft2000-cmd.github.io/gnulte/" rel="alternate" type="text/html"/>
   <id>https://notmicrosoft2000-cmd.github.io/gnulte/feed.xml</id>
-  <updated>2026-10-10T00:00:00Z</updated>
+  <updated>2026-11-18T00:00:00Z</updated>
   <author><name>Neptune Productions</name></author>
   <rights>Copyright (C) 2026 Neptune Productions. Site content under the GNU GPL v3 or later.</rights>
 
   <entry>
-    <title>v16.14 in development: sweepers with memory and gnulte --compare</title>
+    <title>GNULTE v17.0 released: report desk, reason presets and client steering</title>
     <link href="https://notmicrosoft2000-cmd.github.io/gnulte/changelog.html"/>
-    <id>https://notmicrosoft2000-cmd.github.io/gnulte/news/16.14-dev</id>
-    <updated>2026-10-10T00:00:00Z</updated>
-    <summary>Work in progress on main: sweepers that remember what they have seen, and a --compare mode that diffs two report JSON snapshots, optionally as an HTML comparison report. Unreleased.</summary>
+    <id>https://notmicrosoft2000-cmd.github.io/gnulte/news/17.0</id>
+    <updated>2026-11-18T00:00:00Z</updated>
+    <summary>gnulte-report lists and indexes saved reports, merges device snapshots, diffs two exports and files reports into dated folders. gnulte-wifi accepts named deauth reasons and comma-separated station lists, counts jitter per frame and reports channel dwell. Seven tools, standard library only.</summary>
+  </entry>
+
+  <entry>
+    <title>GNULTE v16.14 released: sweepers with memory and --compare</title>
+    <link href="https://notmicrosoft2000-cmd.github.io/gnulte/changelog.html"/>
+    <id>https://notmicrosoft2000-cmd.github.io/gnulte/news/16.14</id>
+    <updated>2026-11-18T00:00:00Z</updated>
+    <summary>Per-host ports, banners and awake time, new and closed port alerts in the scan report, standard-library TLS, SSH and SMB banners, --oui-file, and gnulte --compare for two JSON snapshots.</summary>
   </entry>
 
   <entry>

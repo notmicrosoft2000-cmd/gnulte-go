@@ -35,7 +35,7 @@ import (
 	"gnulte-go/internal/snapshot"
 )
 
-const version = "16.14"
+const version = "17.0"
 
 const usageText = `gnulte-report — work with saved GNULTE reports
 

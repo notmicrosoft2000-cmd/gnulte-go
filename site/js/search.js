@@ -10,7 +10,7 @@ var SEARCH_INDEX = [
     d: "The GNULTE manual: installation, configuration, usage and one reference page per binary." },
   { u: "downloads.html", t: "Downloads", k: "download source tarball git clone install build release",
     d: "Source-only distribution. Clone the tree, build with Go 1.21+, install with install.sh." },
-  { u: "changelog.html", t: "Changelog", k: "changelog release history versions 16.13 16.12 16.11 unplugged compare",
+  { u: "changelog.html", t: "Changelog", k: "changelog release history versions 17.0 16.13 16.12 unplugged compare",
     d: "Every release of the Go edition, newest first, plus the Unplugged programme." },
   { u: "about.html", t: "About GNULTE", k: "about philosophy contributors license gpl safety authorised authorized neptune productions",
     d: "What GNULTE is, how it is developed, licensing, authorised use and where to send a patch." },

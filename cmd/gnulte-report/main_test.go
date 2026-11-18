@@ -24,7 +24,7 @@ func TestVersionAndHelp(t *testing.T) {
 	if err := run([]string{"-version"}, &out, &errOut); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "v16.14") {
+	if !strings.Contains(out.String(), "v17.0") {
 		t.Errorf("version output wrong: %q", out.String())
 	}
 	out.Reset()

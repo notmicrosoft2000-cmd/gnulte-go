@@ -16,18 +16,16 @@ test. Scan the LAN, shape a target’s traffic with real kernel `tc netem`,
 watch every device live, and hand off from one tool to the next: the whole
 toolkit shares one live view of your network.
 
-## The eight tools
+## The six tools
 
 | Binary | Root | What it does |
 | --- | --- | --- |
 | `gnulte` | **yes** | Interactive shaping engine — ARP-spoofed routing into `tc netem` (latency, jitter, loss, duplication, reordering, bandwidth), live dashboard, live `tc -s qdisc` telemetry, HTML report. Discreet `-S` stealth spoofing |
-| `gnulte-lan` | optional | Live LAN watch with a **six-screen console** — hosts, talkers (ranked with bars & peers), flows (A ⇄ B, root socket), neighbours (ARP), screen 5’s **Live Interconnection map** (devices as nodes, live flows as pulsing edges), and screen 6’s **history** (session alarms + today’s recorded timeline). `--json` emits a JSON-lines feed; the report adds a 7-day trend |
+| `gnulte-watch` | optional | Live LAN watch with a **six-screen console**: hosts, talkers (ranked with bars & peers), flows (A ⇄ B, root socket), neighbours (ARP), screen 5's **Live Interconnection map** (devices as nodes, live flows as pulsing edges), and screen 6's **history** (session alarms + today's recorded timeline). Its `top` and `trace` subcommands add live per-host bandwidth and mtr-style hop-by-hop probes. `--json` emits a JSON-lines feed; the report adds a 7-day trend |
 | `gnulte-scan` | optional | Parallel sweep + in-Go deep port scanner — OUI vendor, mDNS/NetBIOS names, device types, OS fingerprinting, `-T` tabbed browser, and live re-scanning with `--watch N` |
-| `gnulte-devices` | no | Instant ARP/neighbour inventory — vendors, mDNS hostnames, type guesses, HTML reports |
+| `gnulte-inventory` | no | Instant ARP/neighbour inventory: vendors, mDNS hostnames, type guesses, HTML reports |
 | `gnulte-wifi` | **yes** | Targeted 802.11 deauthentication for authorised Wi-Fi disassociation testing — per-frame jitter, rotating reason codes, channel hopping |
-| `gnulte-doctor` | no | Pre-flight health check — privileges, `tc`/`iptables`, `ip_forward`, the netem/netfilter modules, default route and interface, duplicate IPs, and the safety-record. PASS/WARN/FAIL table with fix-it hints, `--json`, non-zero exit on any failure |
-| `gnulte-trace` | **yes** | mtr-style hop-by-hop path probe — in-process ICMP echo at every TTL, a live table with per-hop last/avg/best/worst and loss, `--json`, and a self-contained HTML report. No `traceroute(8)` |
-| `gnulte-top` | **yes** | Live per-host and per-conversation bandwidth — an in-process AF_PACKET counter ranked into a top-talker table with ↓/↑ rates, peers and bars, plus `--flows`, `--csv` and `--json`. No iptables, no `top(1)` |
+| `gnulte-quicksum` | no | Pre-flight health check: privileges, `tc`/`iptables`, `ip_forward`, the netem/netfilter modules, default route and interface, duplicate IPs, and the safety record. PASS/WARN/FAIL table with fix-it hints, `--json`, non-zero exit on any failure |
 
 ## Unplugged (v16.6+)
 
@@ -49,7 +47,7 @@ each independently shippable.
   to `ping`: echo requests are built, checksummed and matched in-process over a
   raw `IPPROTO_ICMP` socket, with the round-trip measured on the socket and the
   reply TTL read back from the IP header. Non-root tools keep the system `ping`
-  as a fallback, so `gnulte-lan` and `gnulte-scan` behave exactly as before;
+  as a fallback, so `gnulte-watch` and `gnulte-scan` behave exactly as before;
   the shaping engine no longer needs `ping` installed at all.
 
 - **v16.8 — in-Go capture.** `gnulte --capture FILE` no longer runs `tcpdump`.
@@ -58,14 +56,14 @@ each independently shippable.
   cleanly on teardown, with the file handed back to the invoking user.
   `tcpdump` is no longer required by the engine.
 
-- **v16.9 — `gnulte-doctor`.** A new zero-dependency pre-flight command that
+- **v16.9 — `gnulte-quicksum`.** A new zero-dependency pre-flight command that
   reports whether a machine is ready to run the toolkit: privileges, the
   `tc`/`iptables` binaries, `ip_forward`, the netem/netfilter kernel modules, the
   default route and interface, duplicate IPs, and the safety-record. It prints a
   PASS/WARN/FAIL table with fix-it hints, supports `--json`, and exits non-zero
   when anything fails, so a script can gate on it.
 
-- **v16.10 — `gnulte-trace`.** An mtr-style hop-by-hop path probe with no
+- **v16.10 — `gnulte-watch trace`.** An mtr-style hop-by-hop path probe with no
   `traceroute(8)` behind it: `internal/icmp` gains a per-TTL echo probe that
   decodes the time-exceeded and destination-unreachable errors routers send
   back, and `internal/trace` walks the path accumulating last/avg/best/worst and
@@ -73,8 +71,8 @@ each independently shippable.
   table in the scrollback, and can emit `--json` or a self-contained HTML
   report.
 
-- **v16.11 — `gnulte-top`.** A live per-host and per-conversation bandwidth
-  view built on the same in-process `AF_PACKET` counter the LAN watch already
+- **v16.11 — `gnulte-watch top`.** A live per-host and per-conversation bandwidth
+  view built on the same in-process `AF_PACKET` counter the watch already
   uses. It ranks the talkers (`internal/toptalk`) with ↓/↑ rates, peer counts
   and bars, can follow `--flows`, and exports a snapshot as `--csv` or `--json`
   instead of painting the screen.
@@ -125,7 +123,7 @@ together — with the sharp edges filed off and a few things added:
   not from when the probe started, so a target that takes two seconds to answer
   still gets its full one-second gap instead of the next probe firing the
   instant the slow one returns. A run also starts measuring immediately.
-- **gnulte-lan arrows do one thing.** The phantom-repeat bug is gone: holding
+- **gnulte-watch arrows do one thing.** The phantom-repeat bug is gone: holding
   an arrow key no longer scoots the cursor dozens of rows past where you
   pointed it. Two quick taps still queue and drain as two moves.
 - **`gnulte --note TEXT`.** Label a run at launch; the note rides into the
@@ -148,7 +146,7 @@ required: raw ARP probing/injection and capture are implemented in-process.
 ```sh
 git clone https://github.com/notmicrosoft2000-cmd/gnulte-go.git
 cd gnulte-go
-./build.sh          # builds all eight binaries, runs go vet + go test ./...
+./build.sh          # builds all six binaries, runs go vet + go test on the Go packages
 sudo ./install.sh   # installs to /usr/local/bin + safety docs
 ```
 
@@ -163,15 +161,18 @@ sudo gnulte                                            # guided menu: target →
 sudo gnulte -t 192.168.1.50 -l 300 -j 30 --duration 90 # 300ms latency + 30ms jitter, 90s auto-stop
 sudo gnulte -r 192.168.1.0/24 -w 192.168.1.100 --profile throttle --duration 600
 
-gnulte-lan                                            # six-screen live watch (auto-discovers subnet)
-gnulte-lan -t 192.168.1.20 --duration 60              # one host, up close
+gnulte-watch                                          # six-screen live watch (auto-discovers subnet)
+gnulte-watch -t 192.168.1.20 --duration 60            # one host, up close
+gnulte-watch top                                      # live bandwidth by host and conversation
+gnulte-watch trace 192.168.1.1                        # hop-by-hop path probe
 gnulte-scan --deep                                    # sweep + in-Go port scan + OS fingerprint
 gnulte-scan --watch 5                                 # live re-scan: ▲ new · ▼ gone · ~ changed
 gnulte-scan -T                                        # tabbed browser: Devices / Log / Summary
-gnulte-devices -s                                     # instant ARP inventory + optional sweep
+gnulte-inventory -s                                   # instant ARP inventory + optional sweep
+gnulte-quicksum -j                                    # pre-flight check as JSON
 ```
 
-### gnulte-lan keys
+### gnulte-watch keys
 
 `↑↓` browse · `⏎`/`g` hand off to `gnulte -t <ip>` · `Tab`/`d` detail ·
 `1–6` (or `t`/`f`/`n`/`m`/`y`) screens · `x` save the watch to the shared store ·
@@ -184,8 +185,9 @@ impairment, packet capture, LAN discovery, and 802.11 injection. **Only use
 these tools on networks, systems and devices you own or are explicitly
 authorised to test.** The authors grant no permission to test any particular
 third-party network; users are responsible for complying with all applicable
-laws, contracts and policies. See `SAFETY.md`, `DISCLAIMER.md` and
-`AUTHORIZED-USE.md`.
+laws, contracts and policies. See the
+[safety and authorised-use page](https://notmicrosoft2000-cmd.github.io/gnulte/about.html#safety)
+and the project licence.
 
 ## Website & documentation
 

@@ -21,13 +21,13 @@ site/
   feed.xml              Atom field-notes feed
   docs/                 manual: install, configuration, usage, troubleshooting, faq
     gnulte.html         command reference, one page per binary
-    gnulte-lan.html
+    gnulte-watch.html
     gnulte-scan.html
-    gnulte-devices.html
+    gnulte-inventory.html
     gnulte-wifi.html
-    gnulte-doctor.html
-    gnulte-trace.html
-    gnulte-top.html
+    gnulte-quicksum.html
+    gnulte-watch-trace.html
+    gnulte-watch-top.html
   css/gnulte.css        the field-manual stylesheet
   js/site.js            mobile nav toggle and terminal copy buttons
   js/search.js          search index + filtering

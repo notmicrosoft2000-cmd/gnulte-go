@@ -34,7 +34,7 @@
   </entry>
 
   <entry>
-    <title>GNULTE v16.11 released: gnulte-top, the live bandwidth top</title>
+    <title>GNULTE v16.11 released: gnulte-watch top, the live bandwidth top</title>
     <link href="https://notmicrosoft2000-cmd.github.io/gnulte/changelog.html"/>
     <id>https://notmicrosoft2000-cmd.github.io/gnulte/news/16.11</id>
     <updated>2026-10-02T00:00:00Z</updated>
@@ -42,11 +42,11 @@
   </entry>
 
   <entry>
-    <title>GNULTE v16.9 and v16.10 released: gnulte-doctor and gnulte-trace</title>
+    <title>GNULTE v16.9 and v16.10 released: gnulte-quicksum and gnulte-watch trace</title>
     <link href="https://notmicrosoft2000-cmd.github.io/gnulte/changelog.html"/>
     <id>https://notmicrosoft2000-cmd.github.io/gnulte/news/16.9-16.10</id>
     <updated>2026-10-01T00:00:00Z</updated>
-    <summary>gnulte-doctor is a zero-dependency pre-flight check (PASS/WARN/FAIL with fix-it hints, --json, non-zero exit on failure). gnulte-trace is an mtr-style hop-by-hop path probe with in-process ICMP echo at every TTL, per-hop last/avg/best/worst and loss, --json and an HTML report. No traceroute(8) behind it.</summary>
+    <summary>gnulte-quicksum is a zero-dependency pre-flight check (PASS/WARN/FAIL with fix-it hints, --json, non-zero exit on failure). gnulte-watch trace is an mtr-style hop-by-hop path probe with in-process ICMP echo at every TTL, per-hop last/avg/best/worst and loss, --json and an HTML report. No traceroute(8) behind it.</summary>
   </entry>
 
   <entry>

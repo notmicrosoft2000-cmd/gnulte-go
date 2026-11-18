@@ -24,19 +24,19 @@
 <nav class="mainnav" aria-label="Primary"><div class="wrap mainnav-inner"><button class="navtoggle" type="button" aria-expanded="false">menu</button><ul class="navlist"><li><a href="../index.html">Overview</a></li><li><a href="../tools.html">Tools</a></li><li><a href="../docs.html">Manual</a></li><li><a href="../downloads.html">Downloads</a></li><li><a href="../changelog.html">Changelog</a></li><li><a href="../about.html">About</a></li><li><a href="../support.html">Help</a></li></ul></div></nav>
 <main id="content" class="wrap">
 <div class="crumbs"><a href="../index.html">GNULTE</a><span class="sep">/</span><a href="../docs.html">Manual</a><span class="sep">/</span>Troubleshooting</div>
-<header class="page-head"><div class="page-kicker">MANUAL &middot; v16.13</div><h1>Troubleshooting</h1><p class="lede">last updated 2026-10-15</p></header><div class="docgrid"><nav class="docnav" aria-label="Manual"><div class="docnav-title">Manual · v16.13</div><ul><li class="grp">Guides</li><li><a href="../docs/install.html">Installation</a></li><li><a href="../docs/configuration.html">Configuration</a></li><li><a href="../docs/usage.html">Usage</a></li><li><a href="../docs/gnulte.html">gnulte(8)</a></li><li><a href="../docs/gnulte-lan.html">gnulte-lan(8)</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan(8)</a></li><li><a href="../docs/gnulte-devices.html">gnulte-devices(8)</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi(8)</a></li><li><a href="../docs/gnulte-doctor.html">gnulte-doctor(8)</a></li><li><a href="../docs/gnulte-trace.html">gnulte-trace(8)</a></li><li><a href="../docs/gnulte-top.html">gnulte-top(8)</a></li><li class="grp">Help</li><li><a href="../docs/troubleshooting.html">Troubleshooting</a></li><li><a href="../docs/faq.html">FAQ</a></li></ul></nav><div class="docmain"><div class="col-main">
+<header class="page-head"><div class="page-kicker">MANUAL &middot; v16.13</div><h1>Troubleshooting</h1><p class="lede">last updated 2026-10-15</p></header><div class="docgrid"><nav class="docnav" aria-label="Manual"><div class="docnav-title">Manual · v16.13</div><ul><li class="grp">Guides</li><li><a href="../docs/install.html">Installation</a></li><li><a href="../docs/configuration.html">Configuration</a></li><li><a href="../docs/usage.html">Usage</a></li><li><a href="../docs/gnulte.html">gnulte(8)</a></li><li><a href="../docs/gnulte-watch.html">gnulte-watch(8)</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan(8)</a></li><li><a href="../docs/gnulte-inventory.html">gnulte-inventory(8)</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi(8)</a></li><li><a href="../docs/gnulte-quicksum.html">gnulte-quicksum(8)</a></li><li class="grp">Help</li><li><a href="../docs/troubleshooting.html">Troubleshooting</a></li><li><a href="../docs/faq.html">FAQ</a></li></ul></nav><div class="docmain"><div class="col-main">
     
     
     
 
     <h2 id="run-the-doctor-first">Run the doctor first</h2>
     <p>Almost everything that can be wrong with the machine is checked by
-    <code>gnulte-doctor</code>. It prints a PASS/WARN/FAIL table with fix-it hints,
+    <code>gnulte-quicksum</code>. It prints a PASS/WARN/FAIL table with fix-it hints,
     supports <code>--json</code>, and exits non-zero when anything fails — so it can
     gate a script:</p>
-<div class="terminal"><div class="terminal-head"><span><span class="dots"><i></i><i></i><i></i></span>command / output</span><button class="copy" type="button">copy</button></div><div class="terminal-body"><pre><code>gnulte-doctor          # human table
-gnulte-doctor --json   # for scripts
-gnulte-doctor -q       # only warnings and failures</code></pre></div></div>
+<div class="terminal"><div class="terminal-head"><span><span class="dots"><i></i><i></i><i></i></span>command / output</span><button class="copy" type="button">copy</button></div><div class="terminal-body"><pre><code>gnulte-quicksum          # human table
+gnulte-quicksum --json   # for scripts
+gnulte-quicksum -q       # only warnings and failures</code></pre></div></div>
 
     <h2 id="symptoms">Symptoms</h2>
 
@@ -89,12 +89,12 @@ gnulte-doctor -q       # only warnings and failures</code></pre></div></div>
           the interface subnet so the answer does not depend on prior traffic.</li>
     </ul>
 
-    <h3>&ldquo;gnulte-trace shows only <code>*</code> for every hop&rdquo;</h3>
+    <h3>&ldquo;gnulte-watch trace shows only <code>*</code> for every hop&rdquo;</h3>
     <p>The path probes need raw ICMP sockets and therefore root; routers along the path
     may also rate-limit their ICMP replies, which shows up as per-hop loss rather than
     as total failure. Loss is part of the measurement.</p>
 
-    <h3>&ldquo;gnulte-top / flows screen: no per-host rates&rdquo;</h3>
+    <h3>&ldquo;gnulte-watch top / flows screen: no per-host rates&rdquo;</h3>
     <p>The in-process AF_PACKET counter needs a capture socket, which needs root. Run
     with <code>sudo</code>.</p>
 
@@ -127,7 +127,7 @@ gnulte-doctor -q       # only warnings and failures</code></pre></div></div>
     <h2 id="still-stuck">Still stuck?</h2>
     <p>Open an issue on the
     <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a>
-    with the output of <code>gnulte-doctor --json</code>, the exact command line, your
+    with the output of <code>gnulte-quicksum --json</code>, the exact command line, your
     distribution and kernel version. That is most of a diagnosis already.</p>
   </div></div><aside class="docrail"><div class="docrail-title">On this page</div><ul><li><a href="#run-the-doctor-first">Run the doctor first</a></li><li><a href="#symptoms">Symptoms</a></li><li><a href="#still-stuck">Still stuck?</a></li></ul><div class="docrail-title">Manual</div><ul class="link-list"><li><span class="arrow">&rarr;</span><a href="../docs.html">Documentation index</a></li><li><span class="arrow">&rarr;</span><a href="../docs/usage.html">Usage recipes</a></li></ul></aside></div>
 </main>
@@ -144,10 +144,10 @@ gnulte-doctor -q       # only warnings and failures</code></pre></div></div>
 <circle cx="31" cy="31" r="2.2" fill="currentColor" stroke="none"/>
 </svg>
     <h3>GNULTE</h3>
-    <p>GNU LAN Network Testing Environment. Eight single-purpose Linux tools, standard library only, GPL-3.0-or-later.</p>
+    <p>GNU LAN Network Testing Environment. Six single-purpose Linux tools, standard library only, GPL-3.0-or-later.</p>
     <p>Maintained by Neptune Productions. Built on <code>tc</code>/netem, netfilter, AF_PACKET and mac80211.</p>
   </div>
-  <div><h3>The suite</h3><ul><li><a href="../docs/gnulte.html">gnulte</a></li><li><a href="../docs/gnulte-lan.html">gnulte-lan</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan</a></li><li><a href="../docs/gnulte-devices.html">gnulte-devices</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi</a></li><li><a href="../docs/gnulte-doctor.html">gnulte-doctor</a></li><li><a href="../docs/gnulte-trace.html">gnulte-trace</a></li><li><a href="../docs/gnulte-top.html">gnulte-top</a></li></ul></div>
+  <div><h3>The suite</h3><ul><li><a href="../docs/gnulte.html">gnulte</a></li><li><a href="../docs/gnulte-watch.html">gnulte-watch</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan</a></li><li><a href="../docs/gnulte-inventory.html">gnulte-inventory</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi</a></li><li><a href="../docs/gnulte-quicksum.html">gnulte-quicksum</a></li></ul></div>
   <div><h3>Manual</h3><ul><li><a href="../docs/install.html">Installation</a></li><li><a href="../docs/configuration.html">Configuration</a></li><li><a href="../docs/usage.html">Usage</a></li><li><a href="../docs/troubleshooting.html">Troubleshooting</a></li><li><a href="../docs/faq.html">FAQ</a></li></ul></div>
   <div><h3>Project</h3><ul>
     <li><a href="../about.html">About &amp; safety</a></li>

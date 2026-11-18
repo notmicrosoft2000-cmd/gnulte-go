@@ -24,7 +24,7 @@
 <nav class="mainnav" aria-label="Primary"><div class="wrap mainnav-inner"><button class="navtoggle" type="button" aria-expanded="false">menu</button><ul class="navlist"><li><a href="../index.html">Overview</a></li><li><a href="../tools.html">Tools</a></li><li><a href="../docs.html">Manual</a></li><li><a href="../downloads.html">Downloads</a></li><li><a href="../changelog.html">Changelog</a></li><li><a href="../about.html">About</a></li><li><a href="../support.html">Help</a></li></ul></div></nav>
 <main id="content" class="wrap">
 <div class="crumbs"><a href="../index.html">GNULTE</a><span class="sep">/</span><a href="../docs.html">Manual</a><span class="sep">/</span>Configuration</div>
-<header class="page-head"><div class="page-kicker">MANUAL &middot; v16.13</div><h1>Configuration</h1><p class="lede">last updated 2026-10-15</p></header><div class="docgrid"><nav class="docnav" aria-label="Manual"><div class="docnav-title">Manual · v16.13</div><ul><li class="grp">Guides</li><li><a href="../docs/install.html">Installation</a></li><li><a href="../docs/configuration.html">Configuration</a></li><li><a href="../docs/usage.html">Usage</a></li><li><a href="../docs/gnulte.html">gnulte(8)</a></li><li><a href="../docs/gnulte-lan.html">gnulte-lan(8)</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan(8)</a></li><li><a href="../docs/gnulte-devices.html">gnulte-devices(8)</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi(8)</a></li><li><a href="../docs/gnulte-doctor.html">gnulte-doctor(8)</a></li><li><a href="../docs/gnulte-trace.html">gnulte-trace(8)</a></li><li><a href="../docs/gnulte-top.html">gnulte-top(8)</a></li><li class="grp">Help</li><li><a href="../docs/troubleshooting.html">Troubleshooting</a></li><li><a href="../docs/faq.html">FAQ</a></li></ul></nav><div class="docmain"><div class="col-main">
+<header class="page-head"><div class="page-kicker">MANUAL &middot; v16.13</div><h1>Configuration</h1><p class="lede">last updated 2026-10-15</p></header><div class="docgrid"><nav class="docnav" aria-label="Manual"><div class="docnav-title">Manual · v16.13</div><ul><li class="grp">Guides</li><li><a href="../docs/install.html">Installation</a></li><li><a href="../docs/configuration.html">Configuration</a></li><li><a href="../docs/usage.html">Usage</a></li><li><a href="../docs/gnulte.html">gnulte(8)</a></li><li><a href="../docs/gnulte-watch.html">gnulte-watch(8)</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan(8)</a></li><li><a href="../docs/gnulte-inventory.html">gnulte-inventory(8)</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi(8)</a></li><li><a href="../docs/gnulte-quicksum.html">gnulte-quicksum(8)</a></li><li class="grp">Help</li><li><a href="../docs/troubleshooting.html">Troubleshooting</a></li><li><a href="../docs/faq.html">FAQ</a></li></ul></nav><div class="docmain"><div class="col-main">
     
     
     
@@ -38,7 +38,7 @@
     sounds, report behaviour) and exits. Settings are stored in
     <code>~/.config/gnulte-go/config.json</code> and apply to every future run of that
     tool; command-line flags always override them for a single run.</p>
-    <p>Editors inside the tools: press <code>o</code> in <code>gnulte-lan</code> and in
+    <p>Editors inside the tools: press <code>o</code> in <code>gnulte-watch</code> and in
     the <code>gnulte-scan -T</code> browser.</p>
 
     <h2 id="impairment-profiles">Impairment profiles</h2>
@@ -109,7 +109,7 @@
     <div class="table-wrap"><table class="data">
       <tr><th>File</th><th>Written by / read by</th></tr>
       <tr><td><code>devices.json</code></td><td>the shared device store — written by
-          <code>gnulte-lan</code> (<code>x</code> to save a watch) and
+          <code>gnulte-watch</code> (<code>x</code> to save a watch) and
           <code>gnulte-scan</code>, read by <code>gnulte</code>'s target picker
           (<code>w</code>) and by the scanner for cross-reference.</td></tr>
       <tr><td><code>watch-history.jsonl</code></td><td>the LAN-watch up/down timeline
@@ -136,10 +136,10 @@
 <circle cx="31" cy="31" r="2.2" fill="currentColor" stroke="none"/>
 </svg>
     <h3>GNULTE</h3>
-    <p>GNU LAN Network Testing Environment. Eight single-purpose Linux tools, standard library only, GPL-3.0-or-later.</p>
+    <p>GNU LAN Network Testing Environment. Six single-purpose Linux tools, standard library only, GPL-3.0-or-later.</p>
     <p>Maintained by Neptune Productions. Built on <code>tc</code>/netem, netfilter, AF_PACKET and mac80211.</p>
   </div>
-  <div><h3>The suite</h3><ul><li><a href="../docs/gnulte.html">gnulte</a></li><li><a href="../docs/gnulte-lan.html">gnulte-lan</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan</a></li><li><a href="../docs/gnulte-devices.html">gnulte-devices</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi</a></li><li><a href="../docs/gnulte-doctor.html">gnulte-doctor</a></li><li><a href="../docs/gnulte-trace.html">gnulte-trace</a></li><li><a href="../docs/gnulte-top.html">gnulte-top</a></li></ul></div>
+  <div><h3>The suite</h3><ul><li><a href="../docs/gnulte.html">gnulte</a></li><li><a href="../docs/gnulte-watch.html">gnulte-watch</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan</a></li><li><a href="../docs/gnulte-inventory.html">gnulte-inventory</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi</a></li><li><a href="../docs/gnulte-quicksum.html">gnulte-quicksum</a></li></ul></div>
   <div><h3>Manual</h3><ul><li><a href="../docs/install.html">Installation</a></li><li><a href="../docs/configuration.html">Configuration</a></li><li><a href="../docs/usage.html">Usage</a></li><li><a href="../docs/troubleshooting.html">Troubleshooting</a></li><li><a href="../docs/faq.html">FAQ</a></li></ul></div>
   <div><h3>Project</h3><ul>
     <li><a href="../about.html">About &amp; safety</a></li>

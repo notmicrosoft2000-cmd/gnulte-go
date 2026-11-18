@@ -24,7 +24,7 @@
 <nav class="mainnav" aria-label="Primary"><div class="wrap mainnav-inner"><button class="navtoggle" type="button" aria-expanded="false">menu</button><ul class="navlist"><li><a href="../index.html">Overview</a></li><li><a href="../tools.html">Tools</a></li><li><a href="../docs.html">Manual</a></li><li><a href="../downloads.html">Downloads</a></li><li><a href="../changelog.html">Changelog</a></li><li><a href="../about.html">About</a></li><li><a href="../support.html">Help</a></li></ul></div></nav>
 <main id="content" class="wrap">
 <div class="crumbs"><a href="../index.html">GNULTE</a><span class="sep">/</span><a href="../docs.html">Manual</a><span class="sep">/</span>Frequently asked questions</div>
-<header class="page-head"><div class="page-kicker">MANUAL &middot; v16.13</div><h1>Frequently asked questions</h1><p class="lede">last updated 2026-10-15</p></header><div class="docgrid"><nav class="docnav" aria-label="Manual"><div class="docnav-title">Manual · v16.13</div><ul><li class="grp">Guides</li><li><a href="../docs/install.html">Installation</a></li><li><a href="../docs/configuration.html">Configuration</a></li><li><a href="../docs/usage.html">Usage</a></li><li><a href="../docs/gnulte.html">gnulte(8)</a></li><li><a href="../docs/gnulte-lan.html">gnulte-lan(8)</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan(8)</a></li><li><a href="../docs/gnulte-devices.html">gnulte-devices(8)</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi(8)</a></li><li><a href="../docs/gnulte-doctor.html">gnulte-doctor(8)</a></li><li><a href="../docs/gnulte-trace.html">gnulte-trace(8)</a></li><li><a href="../docs/gnulte-top.html">gnulte-top(8)</a></li><li class="grp">Help</li><li><a href="../docs/troubleshooting.html">Troubleshooting</a></li><li><a href="../docs/faq.html">FAQ</a></li></ul></nav><div class="docmain"><div class="col-main">
+<header class="page-head"><div class="page-kicker">MANUAL &middot; v16.13</div><h1>Frequently asked questions</h1><p class="lede">last updated 2026-10-15</p></header><div class="docgrid"><nav class="docnav" aria-label="Manual"><div class="docnav-title">Manual · v16.13</div><ul><li class="grp">Guides</li><li><a href="../docs/install.html">Installation</a></li><li><a href="../docs/configuration.html">Configuration</a></li><li><a href="../docs/usage.html">Usage</a></li><li><a href="../docs/gnulte.html">gnulte(8)</a></li><li><a href="../docs/gnulte-watch.html">gnulte-watch(8)</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan(8)</a></li><li><a href="../docs/gnulte-inventory.html">gnulte-inventory(8)</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi(8)</a></li><li><a href="../docs/gnulte-quicksum.html">gnulte-quicksum(8)</a></li><li class="grp">Help</li><li><a href="../docs/troubleshooting.html">Troubleshooting</a></li><li><a href="../docs/faq.html">FAQ</a></li></ul></nav><div class="docmain"><div class="col-main">
     
     
     
@@ -40,10 +40,10 @@
 
       <dt>Which tools need root?</dt>
       <dd><code>gnulte</code> (shaping and spoofing), <code>gnulte-wifi</code>
-          (injection), <code>gnulte-trace</code> and <code>gnulte-top</code> (raw
-          sockets). <code>gnulte-lan</code> and <code>gnulte-scan</code> run unprivileged
+          (injection), <code>gnulte-watch trace</code> and <code>gnulte-watch top</code> (raw
+          sockets). <code>gnulte-watch</code> and <code>gnulte-scan</code> run unprivileged
           with reduced coverage (no flows screen, no per-host rates),
-          <code>gnulte-devices</code> and <code>gnulte-doctor</code> need no privileges
+          <code>gnulte-inventory</code> and <code>gnulte-quicksum</code> need no privileges
           at all.</dd>
 
       <dt>Do I need arp-scan, arping, tcpdump, ping or traceroute?</dt>
@@ -67,7 +67,7 @@
       <dd>An explicit authorised-use acceptance record stored in
           <code>~/.config/gnulte-go/acceptance.json</code>. Consent-gated tools ask once
           and remember; <code>--reset-safety</code> on any tool clears it. The state of
-          the record is part of <code>gnulte-doctor</code>'s report.</dd>
+          the record is part of <code>gnulte-quicksum</code>'s report.</dd>
 
       <dt>Will it shape my own machine or the gateway?</dt>
       <dd>No. The engine refuses to target the gateway or the machine it runs on, and
@@ -82,13 +82,13 @@
       <dt>Can I script it?</dt>
       <dd>Yes. Every tool supports <code>--json</code> at minimum; most also support
           <code>--csv</code> or <code>--yaml</code>, <code>--quiet</code> and an explicit
-          <code>--duration</code>. <code>gnulte-doctor</code> exits non-zero on failure
+          <code>--duration</code>. <code>gnulte-quicksum</code> exits non-zero on failure
           so a script can gate on it.</dd>
 
       <dt>How do I report a bug?</dt>
       <dd>Open an issue on the
           <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/issues">issue tracker</a>
-          with <code>gnulte-doctor --json</code> output, the exact command line, your
+          with <code>gnulte-quicksum --json</code> output, the exact command line, your
           distribution and kernel version.</dd>
 
       <dt>What licence is it?</dt>
@@ -115,10 +115,10 @@
 <circle cx="31" cy="31" r="2.2" fill="currentColor" stroke="none"/>
 </svg>
     <h3>GNULTE</h3>
-    <p>GNU LAN Network Testing Environment. Eight single-purpose Linux tools, standard library only, GPL-3.0-or-later.</p>
+    <p>GNU LAN Network Testing Environment. Six single-purpose Linux tools, standard library only, GPL-3.0-or-later.</p>
     <p>Maintained by Neptune Productions. Built on <code>tc</code>/netem, netfilter, AF_PACKET and mac80211.</p>
   </div>
-  <div><h3>The suite</h3><ul><li><a href="../docs/gnulte.html">gnulte</a></li><li><a href="../docs/gnulte-lan.html">gnulte-lan</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan</a></li><li><a href="../docs/gnulte-devices.html">gnulte-devices</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi</a></li><li><a href="../docs/gnulte-doctor.html">gnulte-doctor</a></li><li><a href="../docs/gnulte-trace.html">gnulte-trace</a></li><li><a href="../docs/gnulte-top.html">gnulte-top</a></li></ul></div>
+  <div><h3>The suite</h3><ul><li><a href="../docs/gnulte.html">gnulte</a></li><li><a href="../docs/gnulte-watch.html">gnulte-watch</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan</a></li><li><a href="../docs/gnulte-inventory.html">gnulte-inventory</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi</a></li><li><a href="../docs/gnulte-quicksum.html">gnulte-quicksum</a></li></ul></div>
   <div><h3>Manual</h3><ul><li><a href="../docs/install.html">Installation</a></li><li><a href="../docs/configuration.html">Configuration</a></li><li><a href="../docs/usage.html">Usage</a></li><li><a href="../docs/troubleshooting.html">Troubleshooting</a></li><li><a href="../docs/faq.html">FAQ</a></li></ul></div>
   <div><h3>Project</h3><ul>
     <li><a href="../about.html">About &amp; safety</a></li>

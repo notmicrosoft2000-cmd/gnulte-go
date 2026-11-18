@@ -24,7 +24,7 @@
 <nav class="mainnav" aria-label="Primary"><div class="wrap mainnav-inner"><button class="navtoggle" type="button" aria-expanded="false">menu</button><ul class="navlist"><li><a href="../index.html">Overview</a></li><li><a href="../tools.html">Tools</a></li><li><a href="../docs.html">Manual</a></li><li><a href="../downloads.html">Downloads</a></li><li><a href="../changelog.html">Changelog</a></li><li><a href="../about.html">About</a></li><li><a href="../support.html">Help</a></li></ul></div></nav>
 <main id="content" class="wrap">
 <div class="crumbs"><a href="../index.html">GNULTE</a><span class="sep">/</span><a href="../docs.html">Manual</a><span class="sep">/</span>Usage</div>
-<header class="page-head"><div class="page-kicker">MANUAL &middot; v16.13</div><h1>Usage</h1><p class="lede">last updated 2026-10-15</p></header><div class="docgrid"><nav class="docnav" aria-label="Manual"><div class="docnav-title">Manual · v16.13</div><ul><li class="grp">Guides</li><li><a href="../docs/install.html">Installation</a></li><li><a href="../docs/configuration.html">Configuration</a></li><li><a href="../docs/usage.html">Usage</a></li><li><a href="../docs/gnulte.html">gnulte(8)</a></li><li><a href="../docs/gnulte-lan.html">gnulte-lan(8)</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan(8)</a></li><li><a href="../docs/gnulte-devices.html">gnulte-devices(8)</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi(8)</a></li><li><a href="../docs/gnulte-doctor.html">gnulte-doctor(8)</a></li><li><a href="../docs/gnulte-trace.html">gnulte-trace(8)</a></li><li><a href="../docs/gnulte-top.html">gnulte-top(8)</a></li><li class="grp">Help</li><li><a href="../docs/troubleshooting.html">Troubleshooting</a></li><li><a href="../docs/faq.html">FAQ</a></li></ul></nav><div class="docmain"><div class="col-main">
+<header class="page-head"><div class="page-kicker">MANUAL &middot; v16.13</div><h1>Usage</h1><p class="lede">last updated 2026-10-15</p></header><div class="docgrid"><nav class="docnav" aria-label="Manual"><div class="docnav-title">Manual · v16.13</div><ul><li class="grp">Guides</li><li><a href="../docs/install.html">Installation</a></li><li><a href="../docs/configuration.html">Configuration</a></li><li><a href="../docs/usage.html">Usage</a></li><li><a href="../docs/gnulte.html">gnulte(8)</a></li><li><a href="../docs/gnulte-watch.html">gnulte-watch(8)</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan(8)</a></li><li><a href="../docs/gnulte-inventory.html">gnulte-inventory(8)</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi(8)</a></li><li><a href="../docs/gnulte-quicksum.html">gnulte-quicksum(8)</a></li><li class="grp">Help</li><li><a href="../docs/troubleshooting.html">Troubleshooting</a></li><li><a href="../docs/faq.html">FAQ</a></li></ul></nav><div class="docmain"><div class="col-main">
     
     
     
@@ -32,7 +32,7 @@
     <div class="warn">
       <b>Before you start:</b> these tools shape, spoof, capture and inject on a live
       network. Only run them on networks you own or are explicitly authorised to test.
-      If in doubt, run <code>gnulte-doctor</code> and read <a href="../about.html#safety">authorised use</a>.
+      If in doubt, run <code>gnulte-quicksum</code> and read <a href="../about.html#safety">authorised use</a>.
     </div>
 
     <h2 id="quick-start">Quick start</h2>
@@ -40,12 +40,12 @@
 sudo gnulte -t 192.168.1.50 -l 300 -j 30 --duration 90 # 300ms latency + 30ms jitter, 90s auto-stop
 sudo gnulte -r 192.168.1.0/24 -w 192.168.1.100 --profile throttle --duration 600
 
-gnulte-lan                                             # six-screen live watch (auto-discovers subnet)
-gnulte-lan -t 192.168.1.20 --duration 60               # one host, up close
+gnulte-watch                                             # six-screen live watch (auto-discovers subnet)
+gnulte-watch -t 192.168.1.20 --duration 60               # one host, up close
 gnulte-scan --deep                                     # sweep + in-Go port scan + OS fingerprint
 gnulte-scan --watch 5                                  # live re-scan: &#9650; new &#9660; gone ~ changed
 gnulte-scan -T                                         # tabbed browser: Devices / Log / Summary
-gnulte-devices -s                                      # instant ARP inventory + optional sweep</code></pre></div></div>
+gnulte-inventory -s                                      # instant ARP inventory + optional sweep</code></pre></div></div>
 
     <h2 id="recipe-shape-one-host-and-keep-the-evidence">Recipe: shape one host and keep the evidence</h2>
     <p>A labelled run that auto-stops, records the traffic and files a report:</p>
@@ -61,7 +61,7 @@ gnulte-devices -s                                      # instant ARP inventory +
     <p>The tools hand off to each other. Start a watch, pick the noisy
     host, and press <kbd>&#9166;</kbd> to open <code>gnulte -t &lt;ip&gt;</code> in a
     terminal window with that host already loaded:</p>
-<div class="terminal"><div class="terminal-head"><span><span class="dots"><i></i><i></i><i></i></span>command / output</span><button class="copy" type="button">copy</button></div><div class="terminal-body"><pre><code>gnulte-lan                    # discover and watch the whole LAN
+<div class="terminal"><div class="terminal-head"><span><span class="dots"><i></i><i></i><i></i></span>command / output</span><button class="copy" type="button">copy</button></div><div class="terminal-body"><pre><code>gnulte-watch                    # discover and watch the whole LAN
 # ... find the host, press &#9166; to test it, or x to save the watch to the device store</code></pre></div></div>
     <p>The device store is shared: <code>gnulte</code> reads it with <code>w</code> in
     the target picker, and <code>gnulte-scan</code> marks devices it already knows with
@@ -92,14 +92,14 @@ gnulte-devices -s                                      # instant ARP inventory +
     stderr:</p>
 <div class="terminal"><div class="terminal-head"><span><span class="dots"><i></i><i></i><i></i></span>command / output</span><button class="copy" type="button">copy</button></div><div class="terminal-body"><pre><code>gnulte-scan --watch 5 --json | jq 'select(.kind=="delta")'
 
-gnulte-lan --json | jq .          # JSON-lines: baseline, per-second rates + alerts
-gnulte-top --json                 # one bandwidth sample as JSON
-gnulte-trace --json               # the finished path table as JSON
-gnulte-doctor --json              # the pre-flight report as JSON</code></pre></div></div>
+gnulte-watch --json | jq .          # JSON-lines: baseline, per-second rates + alerts
+gnulte-watch top --json                 # one bandwidth sample as JSON
+gnulte-watch trace --json               # the finished path table as JSON
+gnulte-quicksum --json              # the pre-flight report as JSON</code></pre></div></div>
 
     <h2 id="recipe-find-what-a-slow-network-is-doing-to-a-path">Recipe: find what a slow network is doing to a path</h2>
-<div class="terminal"><div class="terminal-head"><span><span class="dots"><i></i><i></i><i></i></span>command / output</span><button class="copy" type="button">copy</button></div><div class="terminal-body"><pre><code>sudo gnulte-trace 1.1.1.1                 # live hop-by-hop table with loss per hop
-sudo gnulte-trace -m 20 --html trace.html # bounded, with a self-contained report</code></pre></div></div>
+<div class="terminal"><div class="terminal-head"><span><span class="dots"><i></i><i></i><i></i></span>command / output</span><button class="copy" type="button">copy</button></div><div class="terminal-body"><pre><code>sudo gnulte-watch trace 1.1.1.1                 # live hop-by-hop table with loss per hop
+sudo gnulte-watch trace -m 20 --html trace.html # bounded, with a self-contained report</code></pre></div></div>
 
     <h2 id="ending-a-run">Ending a run</h2>
     <p>The first <kbd>Ctrl+C</kbd> restores the screen and lets the shutdown finish —
@@ -125,10 +125,10 @@ sudo gnulte-trace -m 20 --html trace.html # bounded, with a self-contained repor
 <circle cx="31" cy="31" r="2.2" fill="currentColor" stroke="none"/>
 </svg>
     <h3>GNULTE</h3>
-    <p>GNU LAN Network Testing Environment. Eight single-purpose Linux tools, standard library only, GPL-3.0-or-later.</p>
+    <p>GNU LAN Network Testing Environment. Six single-purpose Linux tools, standard library only, GPL-3.0-or-later.</p>
     <p>Maintained by Neptune Productions. Built on <code>tc</code>/netem, netfilter, AF_PACKET and mac80211.</p>
   </div>
-  <div><h3>The suite</h3><ul><li><a href="../docs/gnulte.html">gnulte</a></li><li><a href="../docs/gnulte-lan.html">gnulte-lan</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan</a></li><li><a href="../docs/gnulte-devices.html">gnulte-devices</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi</a></li><li><a href="../docs/gnulte-doctor.html">gnulte-doctor</a></li><li><a href="../docs/gnulte-trace.html">gnulte-trace</a></li><li><a href="../docs/gnulte-top.html">gnulte-top</a></li></ul></div>
+  <div><h3>The suite</h3><ul><li><a href="../docs/gnulte.html">gnulte</a></li><li><a href="../docs/gnulte-watch.html">gnulte-watch</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan</a></li><li><a href="../docs/gnulte-inventory.html">gnulte-inventory</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi</a></li><li><a href="../docs/gnulte-quicksum.html">gnulte-quicksum</a></li></ul></div>
   <div><h3>Manual</h3><ul><li><a href="../docs/install.html">Installation</a></li><li><a href="../docs/configuration.html">Configuration</a></li><li><a href="../docs/usage.html">Usage</a></li><li><a href="../docs/troubleshooting.html">Troubleshooting</a></li><li><a href="../docs/faq.html">FAQ</a></li></ul></div>
   <div><h3>Project</h3><ul>
     <li><a href="../about.html">About &amp; safety</a></li>

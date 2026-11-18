@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>gnulte-lan(8) · GNULTE</title>
+<title>gnulte-watch(8) · GNULTE</title>
 <meta name="description" content="GNULTE · GNU LAN Network Testing Environment">
 <link rel="icon" href="../img/favicon.ico">
 <link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
@@ -23,8 +23,8 @@
 </svg><span><span class="wordmark-name">GNULTE</span><span class="wordmark-sub">field manual &middot; Linux network testing</span></span></a><form class="site-search" action="../search.html" method="get" role="search"><label class="sr-only" for="site-q">Search the site</label><input id="site-q" type="search" name="q" placeholder="search the manual"><button type="submit" aria-label="Search">&#9166;</button></form></div></header>
 <nav class="mainnav" aria-label="Primary"><div class="wrap mainnav-inner"><button class="navtoggle" type="button" aria-expanded="false">menu</button><ul class="navlist"><li><a href="../index.html">Overview</a></li><li><a href="../tools.html">Tools</a></li><li><a href="../docs.html">Manual</a></li><li><a href="../downloads.html">Downloads</a></li><li><a href="../changelog.html">Changelog</a></li><li><a href="../about.html">About</a></li><li><a href="../support.html">Help</a></li></ul></div></nav>
 <main id="content" class="wrap">
-<div class="crumbs"><a href="../index.html">GNULTE</a><span class="sep">/</span><a href="../docs.html">Manual</a><span class="sep">/</span>gnulte-lan(8)</div>
-<header class="page-head"><div class="page-kicker">COMMAND REFERENCE &middot; v16.13</div><h1>gnulte-lan(8)</h1><p class="lede">Applies to gnulte-lan v16.13 · last updated 2026-10-15</p></header><div class="docgrid"><nav class="docnav" aria-label="Manual"><div class="docnav-title">Manual · v16.13</div><ul><li class="grp">Guides</li><li><a href="../docs/install.html">Installation</a></li><li><a href="../docs/configuration.html">Configuration</a></li><li><a href="../docs/usage.html">Usage</a></li><li><a href="../docs/gnulte.html">gnulte(8)</a></li><li><a href="../docs/gnulte-lan.html">gnulte-lan(8)</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan(8)</a></li><li><a href="../docs/gnulte-devices.html">gnulte-devices(8)</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi(8)</a></li><li><a href="../docs/gnulte-doctor.html">gnulte-doctor(8)</a></li><li><a href="../docs/gnulte-trace.html">gnulte-trace(8)</a></li><li><a href="../docs/gnulte-top.html">gnulte-top(8)</a></li><li class="grp">Help</li><li><a href="../docs/troubleshooting.html">Troubleshooting</a></li><li><a href="../docs/faq.html">FAQ</a></li></ul></nav><div class="docmain"><div class="col-main">
+<div class="crumbs"><a href="../index.html">GNULTE</a><span class="sep">/</span><a href="../docs.html">Manual</a><span class="sep">/</span>gnulte-watch(8)</div>
+<header class="page-head"><div class="page-kicker">COMMAND REFERENCE &middot; v16.13</div><h1>gnulte-watch(8)</h1><p class="lede">Applies to gnulte-watch v16.13 · last updated 2026-10-15</p></header><div class="docgrid"><nav class="docnav" aria-label="Manual"><div class="docnav-title">Manual · v16.13</div><ul><li class="grp">Guides</li><li><a href="../docs/install.html">Installation</a></li><li><a href="../docs/configuration.html">Configuration</a></li><li><a href="../docs/usage.html">Usage</a></li><li><a href="../docs/gnulte.html">gnulte(8)</a></li><li><a href="../docs/gnulte-watch.html">gnulte-watch(8)</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan(8)</a></li><li><a href="../docs/gnulte-inventory.html">gnulte-inventory(8)</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi(8)</a></li><li><a href="../docs/gnulte-quicksum.html">gnulte-quicksum(8)</a></li><li class="grp">Help</li><li><a href="../docs/troubleshooting.html">Troubleshooting</a></li><li><a href="../docs/faq.html">FAQ</a></li></ul></nav><div class="docmain"><div class="col-main">
     
     
     
@@ -32,7 +32,8 @@
     <p>Discover what is online, identify each device (MAC, vendor, type, hostname), and
     watch its down/up speed, packet rate and latency live — with alarms when a host
     crosses a rate or latency threshold. Passive: frames are only counted, nothing is
-    shaped or intercepted.</p>
+    shaped or intercepted. The same binary also carries <code>top</code> for live
+    bandwidth and <code>trace</code> for hop-by-hop path probes.</p>
 
     <h2 id="requirements">Requirements</h2>
     <ul>
@@ -43,7 +44,7 @@
     </ul>
 
     <h2 id="synopsis">Synopsis</h2>
-<div class="terminal"><div class="terminal-head"><span><span class="dots"><i></i><i></i><i></i></span>command / output</span><button class="copy" type="button">copy</button></div><div class="terminal-body"><pre><code>gnulte-lan [flags]</code></pre></div></div>
+<div class="terminal"><div class="terminal-head"><span><span class="dots"><i></i><i></i><i></i></span>command / output</span><button class="copy" type="button">copy</button></div><div class="terminal-body"><pre><code>gnulte-watch [flags]</code></pre></div></div>
 
     <h2 id="the-six-screens">The six screens</h2>
     <div class="table-wrap"><table class="data">
@@ -92,10 +93,10 @@
     </table></div>
 
     <h2 id="examples">Examples</h2>
-<div class="terminal"><div class="terminal-head"><span><span class="dots"><i></i><i></i><i></i></span>command / output</span><button class="copy" type="button">copy</button></div><div class="terminal-body"><pre><code>gnulte-lan                                    # watch the whole LAN (auto-discovery)
-gnulte-lan -t 192.168.1.20 --duration 60      # one host, up close
-gnulte-lan --duration 60 --export watch.csv --alarm-rate 500
-gnulte-lan --json | jq 'select(.kind=="alert")'   # alerts only (narrative is on stderr)</code></pre></div></div>
+<div class="terminal"><div class="terminal-head"><span><span class="dots"><i></i><i></i><i></i></span>command / output</span><button class="copy" type="button">copy</button></div><div class="terminal-body"><pre><code>gnulte-watch                                    # watch the whole LAN (auto-discovery)
+gnulte-watch -t 192.168.1.20 --duration 60      # one host, up close
+gnulte-watch --duration 60 --export watch.csv --alarm-rate 500
+gnulte-watch --json | jq 'select(.kind=="alert")'   # alerts only (narrative is on stderr)</code></pre></div></div>
 
     <h2 id="reports-and-history">Reports and history</h2>
     <p>An HTML report is written at the end of the session (suppress with
@@ -108,9 +109,9 @@ gnulte-lan --json | jq 'select(.kind=="alert")'   # alerts only (narrative is on
     <p>Part of the GNULTE suite. Build and install everything at once;</p>
 <div class="terminal"><div class="terminal-head"><span><span class="dots"><i></i><i></i><i></i></span>command / output</span><button class="copy" type="button">copy</button></div><div class="terminal-body"><pre><code>git clone https://github.com/notmicrosoft2000-cmd/gnulte-go.git
 cd gnulte-go
-./build.sh          # builds all eight binaries, runs go vet + go test ./...
+./build.sh          # builds all six binaries, runs go vet + go test ./...
 sudo ./install.sh   # installs to /usr/local/bin + safety docs</code></pre></div></div>
-    <p>installs <code>gnulte-lan</code> to <code>/usr/local/bin/gnulte-lan</code>. See
+    <p>installs <code>gnulte-watch</code> to <code>/usr/local/bin/gnulte-watch</code>. See
     <a href="install.html">installation</a> for requirements.</p>
 
     <h2 id="common-errors">Common errors</h2>
@@ -127,9 +128,10 @@ sudo ./install.sh   # installs to /usr/local/bin + safety docs</code></pre></div
     <ul>
       <li><a href="gnulte.html">gnulte</a> — the hand-off target: test a host from the watch</li>
       <li><a href="gnulte-scan.html">gnulte-scan</a> — deeper identification and port scanning</li>
-      <li><a href="gnulte-top.html">gnulte-top</a> — the same counter without the console UI</li>
+      <li><a href="gnulte-watch-top.html">gnulte-watch top</a> — the bandwidth subcommand, without the six-screen console</li>
+      <li><a href="gnulte-watch-trace.html">gnulte-watch trace</a> — the hop-by-hop path probe, run from the same binary</li>
     </ul>
-  </div></div><aside class="docrail"><div class="docrail-title">On this page</div><ul><li><a href="#requirements">Requirements</a></li><li><a href="#synopsis">Synopsis</a></li><li><a href="#the-six-screens">The six screens</a></li><li><a href="#keys">Keys</a></li><li><a href="#options">Options</a></li><li><a href="#examples">Examples</a></li><li><a href="#reports-and-history">Reports and history</a></li><li><a href="#installation">Installation</a></li><li><a href="#common-errors">Common errors</a></li><li><a href="#related-tools">Related tools</a></li></ul><div class="docrail-title">Command</div><dl class="facts"><dt>binary</dt><dd>gnulte-lan(8)</dd><dt>v16.13 reference</dt><dd>flags as shipped</dd><dt>also</dt><dd><a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">source</a></dd></dl><ul class="link-list"><li><span class="arrow">&rarr;</span><a href="#options">All flags: <code>-h</code></a></li></ul></aside></div>
+  </div></div><aside class="docrail"><div class="docrail-title">On this page</div><ul><li><a href="#requirements">Requirements</a></li><li><a href="#synopsis">Synopsis</a></li><li><a href="#the-six-screens">The six screens</a></li><li><a href="#keys">Keys</a></li><li><a href="#options">Options</a></li><li><a href="#examples">Examples</a></li><li><a href="#reports-and-history">Reports and history</a></li><li><a href="#installation">Installation</a></li><li><a href="#common-errors">Common errors</a></li><li><a href="#related-tools">Related tools</a></li></ul><div class="docrail-title">Command</div><dl class="facts"><dt>binary</dt><dd>gnulte-watch(8)</dd><dt>v16.13 reference</dt><dd>flags as shipped</dd><dt>also</dt><dd><a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">source</a></dd></dl><ul class="link-list"><li><span class="arrow">&rarr;</span><a href="#options">All flags: <code>-h</code></a></li></ul></aside></div>
 </main>
 <footer class="colophon"><div class="wrap">
 <div class="colophon-grid">
@@ -144,10 +146,10 @@ sudo ./install.sh   # installs to /usr/local/bin + safety docs</code></pre></div
 <circle cx="31" cy="31" r="2.2" fill="currentColor" stroke="none"/>
 </svg>
     <h3>GNULTE</h3>
-    <p>GNU LAN Network Testing Environment. Eight single-purpose Linux tools, standard library only, GPL-3.0-or-later.</p>
+    <p>GNU LAN Network Testing Environment. Six single-purpose Linux tools, standard library only, GPL-3.0-or-later.</p>
     <p>Maintained by Neptune Productions. Built on <code>tc</code>/netem, netfilter, AF_PACKET and mac80211.</p>
   </div>
-  <div><h3>The suite</h3><ul><li><a href="../docs/gnulte.html">gnulte</a></li><li><a href="../docs/gnulte-lan.html">gnulte-lan</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan</a></li><li><a href="../docs/gnulte-devices.html">gnulte-devices</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi</a></li><li><a href="../docs/gnulte-doctor.html">gnulte-doctor</a></li><li><a href="../docs/gnulte-trace.html">gnulte-trace</a></li><li><a href="../docs/gnulte-top.html">gnulte-top</a></li></ul></div>
+  <div><h3>The suite</h3><ul><li><a href="../docs/gnulte.html">gnulte</a></li><li><a href="../docs/gnulte-watch.html">gnulte-watch</a></li><li><a href="../docs/gnulte-scan.html">gnulte-scan</a></li><li><a href="../docs/gnulte-inventory.html">gnulte-inventory</a></li><li><a href="../docs/gnulte-wifi.html">gnulte-wifi</a></li><li><a href="../docs/gnulte-quicksum.html">gnulte-quicksum</a></li></ul></div>
   <div><h3>Manual</h3><ul><li><a href="../docs/install.html">Installation</a></li><li><a href="../docs/configuration.html">Configuration</a></li><li><a href="../docs/usage.html">Usage</a></li><li><a href="../docs/troubleshooting.html">Troubleshooting</a></li><li><a href="../docs/faq.html">FAQ</a></li></ul></div>
   <div><h3>Project</h3><ul>
     <li><a href="../about.html">About &amp; safety</a></li>

@@ -2,21 +2,23 @@
 
 Status: **locked**. Owner: this session. Branch/chain: incremental bumps `16.6 → 16.7 → … → 17.0` on `main`, each independently shippable and testable.
 
+Tool names below use the post-consolidation suite. The pre-flight check started as `gnulte-doctor`, the path probe as `gnulte-trace`, the bandwidth view as `gnulte-top`, the inventory as `gnulte-devices`, and the watch as `gnulte-lan`. All were renamed or folded into `gnulte-watch` in the six-tool consolidation.
+
 ## Locked decisions
 
 - **Spine: Program A — zero-dependency core.** Replace every helper-binary shell-out with in-Go implementations so the toolkit runs on a bare box. `tc` / `iptables` stay: they *are* the kernel interface.
-- **New tools:** `gnulte-doctor`, `gnulte-trace`, `gnulte-top` (the top-3 from the vetting list). Total tool count goes 5 → 8.
+- **New tools:** the pre-flight check, the path probe and the bandwidth view, shipped as `gnulte-quicksum` and as `top`/`trace` subcommands of `gnulte-watch`. Tool count went 5 → 8, then the suite was consolidated to six binaries: `gnulte`, `gnulte-watch`, `gnulte-scan`, `gnulte-inventory`, `gnulte-wifi`, `gnulte-quicksum`.
 - **Cadence:** incremental, each bump tested end-to-end before the next.
 - **Wifi:** reason-code presets + client-steer ship. **Monitor-mode channel scanning is OUT for v17** (no nl80211 spike, no verification-mode scope creep).
-- The agreed-but-never-started v17 backlog is folded in: `gnulte --compare`, gnulte-lan `--json`, `--watch` stderr alerts, soak runner, gofmt of the 7 drifted files.
+- The agreed-but-never-started v17 backlog is folded in: `gnulte --compare`, gnulte-watch `--json`, `--watch` stderr alerts, soak runner, gofmt of the 7 drifted files.
 
 ## Constraints (hard)
 
 - Pure stdlib Go 1.21; **no new dependencies, no go.mod change** (module proxy blocked; github only).
 - Linux target. `GOOS=darwin go vet ./...` must stay clean → use `*_linux.go` / build tags for platform-specific code; cross-platform code stays shared.
 - Sandbox has **no root**: the engine cannot be exercised end-to-end here. `GNULTE_AS_ROOT=1` is the harness shim (re-exec skip). Live net checks go through PTY harnesses (`~/Documents/gnulte-verify/pty17.py` pattern; add `pty18.py` per feature as needed).
-- `gofmt -l` must show **only** the 7 pre-existing drifted files until 16.15 (when they get formatted as a targeted cleanup): `cmd/gnulte-lan/view.go`, `internal/engine/qdisc.go`, `internal/engine/qdisc_test.go`, `internal/inventory/inventory.go`, `internal/inventory/inventory_test.go`, `internal/scanner/diff.go`, `internal/scanner/diff_test.go`. New code must not add drift.
-- Verification per bump: `go build ./...` → `go vet ./...` → `go test -count=1 ./...` → `go test -race -count=1 ./...` → `GOOS=darwin go vet ./...` → gofmt check. Version bump (`const version` in the 5 `cmd/*/main.go` + README title/shield/alt) in the same commit as the feature.
+- `gofmt -l` must show **only** the 7 pre-existing drifted files until 16.15 (when they get formatted as a targeted cleanup): `cmd/gnulte-watch/view.go`, `internal/engine/qdisc.go`, `internal/engine/qdisc_test.go`, `internal/inventory/inventory.go`, `internal/inventory/inventory_test.go`, `internal/scanner/diff.go`, `internal/scanner/diff_test.go`. New code must not add drift.
+- Verification per bump: `go build ./...` → `go vet ./...` → `go test -count=1 ./...` → `go test -race -count=1 ./...` → `GOOS=darwin go vet ./...` → gofmt check. Version bump (`const version` in the 6 `cmd/*/main.go` + README title/shield/alt) in the same commit as the feature.
 
 ## Build chain
 
@@ -26,7 +28,7 @@ Kill the `arping` / `arp-scan` shell-outs in `internal/discover`. Benefits every
 - New raw AF_PACKET socket path (reuse frame craft/parse from `internal/arpspoof`; add what's missing, e.g. a who-has request builder).
 - Bounded-concurrency sweep over the /24; sends who-has per target, reads replies, collects MAC + RTT-ish timing.
 - Delete the `exec.LookPath("arping")` / `arp-scan` fallbacks and the `menu.go` pre-flight entry for them.
-- Tests: unit tests feed synthesized ARP reply frames → parser (deterministic, no root); update pty harness to prove gnulte-devices / gnulte-lan sweeps still list real hosts.
+- Tests: unit tests feed synthesized ARP reply frames → parser (deterministic, no root); update pty harness to prove gnulte-inventory / gnulte-watch sweeps still list real hosts.
 - Touch: internal/discover, internal/arpspoof (maybe), cmd/gnulte/menu.go.
 
 **As built:** `arpspoof.BuildARPRequest` / `ParseARPReply` / `ReadReply` / `LocalIP` added; the sweep lives in `internal/discover/arpsweep{,_linux,_other}.go` (`runSweep`, `probeSet.note`); `Neighbors` split into the cheap kernel read and `DiscoverNeighbors` (the old `arp-scan --localnet` boost), with the six discovery call sites switched over. `engine.arpLookupMAC` now uses `discover.ResolveMAC` instead of `arping -c 1`. Tests: `internal/arpspoof/frame_test.go`, `internal/discover/arpsweep_test.go`. Live-sweep proof needs a root box — pending user verification.
@@ -35,7 +37,7 @@ Kill the `arping` / `arp-scan` shell-outs in `internal/discover`. Benefits every
 Engine per-second telemetry stops shelling to `ping`. Builds the raw-ICMP core later tools reuse.
 
 - Raw `IPPROTO_ICMP` echo request/reply: checksum, id/seq, timeout, RTT. Engine already re-execs as root, so this is the root path.
-- Non-root tools (gnulte-lan/scan pings) keep their current TCP/UDP probes — no behavior change there.
+- Non-root tools (gnulte-watch/scan pings) keep their current TCP/UDP probes — no behavior change there.
 - Feed `hostStat` (avg/p50/p95) in the same shape as today.
 - Tests: synthetic echo-reply parsing; framing checks; keep old `ping`-based behaviour behind nothing — it just goes away in the engine.
 - Touch: internal/engine, internal/discover (share the ICMP pinger).
@@ -77,13 +79,13 @@ filter/normalisation plus a fake-source loop test (filtering, empty filter,
 cancel-and-valid-partial-file). Live AF_PACKET proof needs a root box — pending
 user verification.
 
-### 16.9 — `gnulte-doctor` (new tool)  — **SHIPPED** (v16.9)
+### 16.9 — `gnulte-quicksum` (new tool)  — **SHIPPED** (v16.9)
 Pre-flight + fix-it report; makes the zero-dep chain a friendly claim.
 
 - Checks: euid root (per tool), ip_forward, netem/iptables kernel modules (`/proc/modules` or `tc qdisc show`), `tc`/`iptables` present, interface up + has IPv4, default route, duplicate-IP scan (reuse dupcheck), safety acceptance record.
 - Output: PASS/WARN/FAIL table + fix-it hints; `--json`; non-zero exit on FAIL. Reuses the install.sh guidance.
 - Tests: check registry against injected fake facts (dependency-inject the gatherers).
-- Touch: new cmd/gnulte-doctor.
+- Touch: new cmd/gnulte-quicksum.
 
 **As built:** new `internal/doctor` separates gathering (`Gather(ctx) Facts`,
 reads euid, PATH, `/proc/sys/net/ipv4/ip_forward`, `/proc/modules`, netutil's
@@ -94,18 +96,18 @@ duplicate IPs, safety acceptance. `Warn` (not `Fail`) covers non-root, missing
 modules that may be built in, an empty ARP table, LAN conflicts and an
 unaccepted safety record; `Fail` (→ exit 1) covers a missing `tc`/`iptables`,
 an unavailable `ip_forward`, no route, or a down interface. `Check` marshals
-`status` as the word PASS/WARN/FAIL for `--json`. New `cmd/gnulte-doctor`
+`status` as the word PASS/WARN/FAIL for `--json`. New `cmd/gnulte-quicksum`
 (`-j/--json`, `-q/--quiet`, `-v/--version`) renders the table with fix-it hints;
 wired into build/install/uninstall and the README tool table. Tests inject fake
 facts for every branch, plus exit-code and JSON-wording guards.
 
-### 16.10 — `gnulte-trace` (new tool)  — **SHIPPED** (v16.10)
+### 16.10 — `gnulte-watch trace` (new tool)  — **SHIPPED** (v16.10)
 mtr-style traceroute: hop-by-hop RTT, animated TUI + HTML report + `--json`.
 
 - Raw ICMP probes at TTL 1..N (reuses 16.7 core): each hop probed several times for min/avg/max/loss; stop on "port unreachable"/echo-reply from target. Re-exec as root (like the other root tools).
 - Live table (mtr-like), final HTML report, machine output.
 - Tests: synthetic ICMP time-exceeded frames; hop-extraction logic; live only with root → pty proof skipped in sandbox, rely on unit level + `GOOS` build tags.
-- Touch: new cmd/gnulte-trace.
+- Touch: the trace subcommand in cmd/gnulte-watch.
 
 **As built:** `internal/icmp` gains `TraceProbe` (Linux raw ICMP echo with a
 per-probe `IP_TTL`, `icmp_other.go` stub off Linux) and the pure `DecodeTrace`,
@@ -115,23 +117,23 @@ packets that are not our probe's answer. New `internal/trace` owns the walk:
 `Walk(ctx, target, Options, ProbeFunc, onHop)` probes each TTL `Probes` times,
 accumulates min/avg/max/loss and the hop address, and stops at the target, an
 unreachable, the hop limit or context cancellation — all behind a probe seam so
-it is tested without a socket. New `cmd/gnulte-trace` (`-m/-c/-t/-i`, `--json`,
+it is tested without a socket. New `gnulte-watch trace` (`-m/-c/-t/-i`, `--json`,
 `--html`, `-q`) drives a `tui.Screen` live table (goroutine walk + mutex-guarded
 hops + `Poll` for `q`), falls back to an incremental plain view when stdout is
 not a terminal, prints the finished table to the scrollback, and re-execs
 through sudo once like the other root tools. Wired into build/install/uninstall
 and the README tool table.
 
-### 16.11 — `gnulte-top` (new tool)  — **SHIPPED** (v16.11)
+### 16.11 — `gnulte-watch top` (new tool)  — **SHIPPED** (v16.11)
 Live per-host/per-flow bandwidth top + CSV/JSON export.
 
-- Reuse `internal/traffic` Counter (AF_PACKET). Live TUI sorted by combined rate (gnulte-lan talkers pattern), ↓/↑ rate, totals, peers; `--interval`, `--json`/`--csv`, per-host filter. Re-exec as root.
+- Reuse `internal/traffic` Counter (AF_PACKET). Live TUI sorted by combined rate (gnulte-watch talkers pattern), ↓/↑ rate, totals, peers; `--interval`, `--json`/`--csv`, per-host filter. Re-exec as root.
 - Tests: formatting/sorting units; pty render-check with the GNULTE_AS_ROOT shim (rates 0 in sandbox, must render + quit clean).
-- Touch: new cmd/gnulte-top.
+- Touch: the top subcommand in cmd/gnulte-watch.
 
 **As built:** new pure `internal/toptalk` owns the ranking and formatting core
 (`Rows`, `FlowRows`, `Peers`, `HostOf`, `HumanBytes`, `HumanRate`, `Bar`), so the
-table maths is `go test`-able with no socket. New `cmd/gnulte-top` (`-i/-n`,
+table maths is `go test`-able with no socket. New `gnulte-watch top` (`-i/-n`,
 `--json`, `--csv`, `--flows`, `--host`, `--iface`, `-q/-v`) reuses the
 `internal/traffic` AF_PACKET `Counter`, re-execs through sudo once like the other
 root tools, and drives a `tui.Screen` live table; the counter is a **garnish** —
@@ -168,7 +170,7 @@ dashboard phase. New `cmd/gnulte/summary.go` computes the console/report rollup
 Monitor records a parallel `LossSeries` (0/100 per attempt) for the loss
 sparkline and run-length distribution, both trimmed with the latency history.
 
-### 16.13 — Watch history (gnulte-lan)  — **SHIPPED** (v16.13)
+### 16.13 — Watch history (gnulte-watch)  — **SHIPPED** (v16.13)
 - `--json` live feed (baseline + per-second host/alert events; narrative to stderr — same pattern as gnulte-scan).
 - **stderr alerts** with hysteresis (N consecutive hits before firing/unfiring).
 - **Device timeline**: JSONL store of host up/down transitions (reuse inventory dir layout).
@@ -176,13 +178,13 @@ sparkline and run-length distribution, both trimmed with the latency history.
 - **Network health score** (loss, RTT vs baseline, churn).
 - **Screen 6**: alarms history + today's timeline.
 - Tests: alert hysteresis FSM, timeline round-trip, JSON feed schema, screen-6 render via pty.
-- Touch: cmd/gnulte-lan, internal/monitor or new internal/history.
+- Touch: cmd/gnulte-watch, internal/monitor or new internal/history.
 
 **As built:** the timeline lives in a new pure `internal/history` package
 (`Kind{up,down,snapshot}`, `Entry`, `Path`/`Append`/`Load`, `Window`/`OnDay`/
 `Daily` rollups with a per-day mean loss, `HealthScore`, and a `Latch`
 debouncer) writing JSONL to `~/.config/gnulte-go/watch-history.jsonl` — the same
-config dir as the device store, not the plan text's bare `gnulte`. `cmd/gnulte-lan`
+config dir as the device store, not the plan text's bare `gnulte`. `cmd/gnulte-watch`
 gains `-json` (baseline/tick/alert objects on stdout, every narrative line moved
 to stderr), `-history-file`, `-no-history` and `-alert-debounce N` (default 2).
 Each tick feeds one `Latch` per host from the latest ping result and appends a
@@ -200,7 +202,7 @@ the feed schema, the screen-6 render and the trend/health math.
 - **Sleep/wake tracking**: derive awake-hours from repeated sightings; report it.
 - **`gnulte --compare A B`**: diff two report JSON snapshots → human + HTML "what changed".
 - **`--oui-file`**: merge a user CSV vendor table on top of the built-in.
-- Touch: cmd/gnulte-scan, cmd/gnulte-devices, cmd/gnulte, internal/inventory, internal/ident.
+- Touch: cmd/gnulte-scan, cmd/gnulte-inventory, cmd/gnulte, internal/inventory, internal/ident.
 
 ### 16.15 — Cleanup + soak + report + wifi
 - **gofmt the 7 drifted files** (targeted cleanup; verify the diff is formatting-only).
@@ -210,7 +212,7 @@ the feed schema, the screen-6 render and the trend/health math.
 - Touch: repo-wide formatting, new cmd/gnulte-report, cmd/gnulte-wifi.
 
 ### 17.0 — Cap
-Full docs pass, bare-box verification checklist executed, version → 17.0, README title/shield/alt + tool table (8 tools), `social-preview` refresh if time allows.
+Full docs pass, bare-box verification checklist executed, version → 17.0, README title/shield/alt + tool table (6 tools), `social-preview` refresh if time allows.
 
 ## Verification conventions (every bump)
 

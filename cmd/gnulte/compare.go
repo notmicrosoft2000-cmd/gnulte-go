@@ -28,7 +28,7 @@ import (
 // runCompare diffs two report JSON snapshots and prints a human "what changed"
 // listing; with outPath set it also writes an HTML version. It is driven by
 // `gnulte --compare A B` (or `--compare A,B`) and the snapshots are the `-j`
-// exports of gnulte-scan / gnulte-devices. It needs no network, no root and no
+// exports of gnulte-scan / gnulte-inventory. It needs no network, no root and no
 // acceptance gate — it only reads files the operator already has.
 func runCompare(aPath string, rest []string, outPath string) error {
 	bPath := ""

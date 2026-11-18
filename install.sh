@@ -43,15 +43,13 @@ cd "$SRC_DIR"
 go build -trimpath -ldflags "-s -w" -o gnulte ./cmd/gnulte || exit 1
 go build -trimpath -ldflags "-s -w" -o gnulte-scan ./cmd/gnulte-scan || exit 1
 go build -trimpath -ldflags "-s -w" -o gnulte-wifi ./cmd/gnulte-wifi || exit 1
-go build -trimpath -ldflags "-s -w" -o gnulte-lan ./cmd/gnulte-lan || exit 1
-go build -trimpath -ldflags "-s -w" -o gnulte-devices ./cmd/gnulte-devices || exit 1
-go build -trimpath -ldflags "-s -w" -o gnulte-doctor ./cmd/gnulte-doctor || exit 1
-go build -trimpath -ldflags "-s -w" -o gnulte-trace ./cmd/gnulte-trace || exit 1
-go build -trimpath -ldflags "-s -w" -o gnulte-top ./cmd/gnulte-top || exit 1
+go build -trimpath -ldflags "-s -w" -o gnulte-watch ./cmd/gnulte-watch || exit 1
+go build -trimpath -ldflags "-s -w" -o gnulte-inventory ./cmd/gnulte-inventory || exit 1
+go build -trimpath -ldflags "-s -w" -o gnulte-quicksum ./cmd/gnulte-quicksum || exit 1
 
 # --- verify before installing ---
 
-for f in gnulte gnulte-scan gnulte-wifi gnulte-lan gnulte-devices gnulte-doctor gnulte-trace gnulte-top; do
+for f in gnulte gnulte-scan gnulte-wifi gnulte-watch gnulte-inventory gnulte-quicksum; do
     if ! file "$f" | grep -q "ELF"; then
         echo "built $f does not look like an ELF binary; aborting." >&2
         exit 1
@@ -64,7 +62,7 @@ if [[ -z "$VERSION" ]]; then
     echo "gnulte does not report a version number; aborting." >&2
     exit 1
 fi
-for b in gnulte gnulte-scan gnulte-wifi gnulte-lan gnulte-devices gnulte-doctor gnulte-trace gnulte-top; do
+for b in gnulte gnulte-scan gnulte-wifi gnulte-watch gnulte-inventory gnulte-quicksum; do
     if ! "./$b" --version 2>/dev/null | grep -q "$VERSION"; then
         echo "$b does not report $VERSION; aborting." >&2
         exit 1
@@ -76,11 +74,9 @@ mkdir -p "$BINDIR"
 install -m755 "$SRC_DIR/gnulte" "$BINDIR/gnulte"
 install -m755 "$SRC_DIR/gnulte-scan" "$BINDIR/gnulte-scan"
 install -m755 "$SRC_DIR/gnulte-wifi" "$BINDIR/gnulte-wifi"
-install -m755 "$SRC_DIR/gnulte-lan" "$BINDIR/gnulte-lan"
-install -m755 "$SRC_DIR/gnulte-devices" "$BINDIR/gnulte-devices"
-install -m755 "$SRC_DIR/gnulte-doctor" "$BINDIR/gnulte-doctor"
-install -m755 "$SRC_DIR/gnulte-trace" "$BINDIR/gnulte-trace"
-install -m755 "$SRC_DIR/gnulte-top" "$BINDIR/gnulte-top"
+install -m755 "$SRC_DIR/gnulte-watch" "$BINDIR/gnulte-watch"
+install -m755 "$SRC_DIR/gnulte-inventory" "$BINDIR/gnulte-inventory"
+install -m755 "$SRC_DIR/gnulte-quicksum" "$BINDIR/gnulte-quicksum"
 
 # --- install legal / safety documentation ---
 
@@ -99,7 +95,7 @@ done
 
 echo ""
 echo "GNULTE ${VERSION} installed successfully."
-echo "  Binaries: ${BINDIR}/gnulte, ${BINDIR}/gnulte-scan, ${BINDIR}/gnulte-wifi, ${BINDIR}/gnulte-lan, ${BINDIR}/gnulte-devices, ${BINDIR}/gnulte-doctor, ${BINDIR}/gnulte-trace, ${BINDIR}/gnulte-top"
+echo "  Binaries: ${BINDIR}/gnulte, ${BINDIR}/gnulte-scan, ${BINDIR}/gnulte-wifi, ${BINDIR}/gnulte-watch, ${BINDIR}/gnulte-inventory, ${BINDIR}/gnulte-quicksum"
 echo "  Docs:     ${DOCDIR}/"
 echo ""
 echo "Run gnulte (it elevates via sudo as needed)."

@@ -657,7 +657,7 @@ func gateLines(name, why string) []string {
 		"",
 		"  " + ux.C(ux.Dim, why),
 		"",
-		"  " + ux.C(ux.Green, "  re-run with: sudo gnulte-lan"),
+		"  " + ux.C(ux.Green, "  re-run with: sudo gnulte-watch"),
 		"  " + ux.C(ux.Dim, "  (the watch auto-elevates via sudo — a socket here means root is live)"),
 		"",
 		ux.C(ux.Dim, "  meanwhile the HOSTS screen still shows latency, identity and alarms."),

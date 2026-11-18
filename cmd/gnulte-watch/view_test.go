@@ -351,7 +351,7 @@ func TestFlowsScreenListsPairsAndGates(t *testing.T) {
 	env.hasCounter = false
 	out = flowsLines(flows, hostSet, stats, env, 30)
 	all = strings.Join(out, "\n")
-	if !strings.Contains(all, "⛔") || !strings.Contains(all, "sudo gnulte-lan") {
+	if !strings.Contains(all, "⛔") || !strings.Contains(all, "sudo gnulte-watch") {
 		t.Fatalf("root gate missing:\n%s", all)
 	}
 }
@@ -480,7 +480,7 @@ func TestMapLinesGatesWithoutSocket(t *testing.T) {
 	hosts, info, rates, stats, flows, hostSet, env := mapTestEnv(100, false)
 	out := mapLines(hosts, info, rates, stats, flows, hostSet, env, 30)
 	all := strings.Join(out, "\n")
-	if !strings.Contains(all, "⛔") || !strings.Contains(all, "sudo gnulte-lan") {
+	if !strings.Contains(all, "⛔") || !strings.Contains(all, "sudo gnulte-watch") {
 		t.Fatalf("map without socket must gate:\n%s", all)
 	}
 	if strings.Contains(all, "LIVE EDGES") {

@@ -46,9 +46,8 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "16.13"
 
-func main() {
+func topMain() {
 	var (
 		interval = flag.Int("i", 1, "sampling interval in seconds")
 		samples  = flag.Int("n", 0, "number of intervals to sample (0 = until quit)")
@@ -60,12 +59,12 @@ func main() {
 		quiet    = flag.Bool("q", false, "quiet: no banner")
 		showVer  = flag.Bool("v", false, "print version and exit")
 	)
-	flag.Usage = usage
+	flag.Usage = topUsage
 	flag.BoolVar(showVer, "version", false, "print version and exit")
 	flag.Parse()
 
 	if *showVer {
-		fmt.Printf("gnulte-top (Go) v%s\n", version)
+		fmt.Printf("gnulte-watch top (Go) v%s\n", version)
 		return
 	}
 	if *asJSON && *asCSV {
@@ -77,13 +76,13 @@ func main() {
 
 	// The AF_PACKET counter needs root; re-exec through sudo once, like the
 	// other root tools.
-	elevate()
+	topElevate()
 
 	if err := safety.EnsureAccepted(); err != nil {
 		fatal(err)
 	}
 
-	nic, err := pickInterface(*iface)
+	nic, err := topPickInterface(*iface)
 	if err != nil {
 		fatal(err)
 	}
@@ -91,7 +90,7 @@ func main() {
 	if err != nil {
 		// The counter is a garnish: without the raw socket we still run and
 		// simply report no rates, so the view and its keys keep working.
-		fmt.Fprintf(os.Stderr, "gnulte-top: traffic counter unavailable (%v) — no rates to show\n", err)
+		fmt.Fprintf(os.Stderr, "gnulte-watch top: traffic counter unavailable (%v) — no rates to show\n", err)
 	}
 	if counter != nil {
 		counter.Snapshot() // baseline so the first interval is a real delta
@@ -109,34 +108,34 @@ func main() {
 	iv := time.Duration(*interval) * time.Second
 
 	if *asJSON || *asCSV {
-		if err := runExport(ctx, counter, nic, iv, *samples, match, *flows, *asJSON); err != nil {
+		if err := topRunExport(ctx, counter, nic, iv, *samples, match, *flows, *asJSON); err != nil {
 			fatal(err)
 		}
 		return
 	}
 	if !*quiet && ux.TTY() {
-		banner(nic)
+		topBanner(nic)
 	}
 	if scr, e := tui.Open(); e == nil {
-		runLive(ctx, scr, counter, nic, iv, *samples, match, *flows)
+		topRunLive(ctx, scr, counter, nic, iv, *samples, match, *flows)
 		scr.Close()
 		return
 	}
-	if err := runPlain(ctx, counter, nic, iv, *samples, match, *flows); err != nil {
+	if err := topRunPlain(ctx, counter, nic, iv, *samples, match, *flows); err != nil {
 		fatal(err)
 	}
 }
 
-// elevate re-runs the tool through sudo when a plain user asked for it. The
+// topElevate re-runs the tool through sudo when a plain user asked for it. The
 // child is tagged with GNULTE_AS_ROOT so the prompt happens once.
-func elevate() {
+func topElevate() {
 	if os.Geteuid() == 0 || os.Getenv("GNULTE_AS_ROOT") == "1" {
 		return
 	}
 	if !tui.StdinTTY() {
-		fatal(errors.New("gnulte-top needs root for the AF_PACKET counter — run it from a terminal or with sudo"))
+		fatal(errors.New("gnulte-watch top needs root for the AF_PACKET counter — run it from a terminal or with sudo"))
 	}
-	fmt.Fprintln(os.Stderr, "GNULTE TOP needs root for the AF_PACKET counter; requesting administrator access…")
+	fmt.Fprintln(os.Stderr, "GNULTE-WATCH TOP needs root for the AF_PACKET counter; requesting administrator access…")
 	args := append([]string{"-E", os.Args[0]}, os.Args[1:]...)
 	cmd := exec.Command("sudo", args...)
 	cmd.Env = append(os.Environ(), "GNULTE_AS_ROOT=1")
@@ -151,9 +150,9 @@ func elevate() {
 	os.Exit(0)
 }
 
-// pickInterface returns the explicitly requested interface, or the one that
+// topPickInterface returns the explicitly requested interface, or the one that
 // carries the default route.
-func pickInterface(override string) (string, error) {
+func topPickInterface(override string) (string, error) {
 	if override != "" {
 		if _, err := net.InterfaceByName(override); err != nil {
 			return "", fmt.Errorf("no such interface %q: %w", override, err)
@@ -175,9 +174,9 @@ type sample struct {
 	totalUp   int64
 }
 
-// takeSample reads the counter and ranks what it saw. A nil counter (no root,
+// topTakeSample reads the counter and ranks what it saw. A nil counter (no root,
 // or a down interface) yields an empty sample rather than an error.
-func takeSample(c *traffic.Counter, seconds float64, match func(string) bool, flowsMode bool) sample {
+func topTakeSample(c *traffic.Counter, seconds float64, match func(string) bool, flowsMode bool) sample {
 	if c == nil {
 		return sample{}
 	}
@@ -197,9 +196,9 @@ func takeSample(c *traffic.Counter, seconds float64, match func(string) bool, fl
 	return sample{rows: rows, totalDown: down, totalUp: up}
 }
 
-// runLive paints the full-screen table, resampling every interval. It stops on
+// topRunLive paints the full-screen table, resampling every interval. It stops on
 // q/Esc/Enter, on ctx cancellation, or after n intervals when n > 0.
-func runLive(ctx context.Context, scr *tui.Screen, c *traffic.Counter, iface string, interval time.Duration, n int, match func(string) bool, flowsMode bool) {
+func topRunLive(ctx context.Context, scr *tui.Screen, c *traffic.Counter, iface string, interval time.Duration, n int, match func(string) bool, flowsMode bool) {
 	scr.Draw(placeholder(iface, flowsMode))
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
@@ -209,7 +208,7 @@ func runLive(ctx context.Context, scr *tui.Screen, c *traffic.Counter, iface str
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			s := takeSample(c, interval.Seconds(), match, flowsMode)
+			s := topTakeSample(c, interval.Seconds(), match, flowsMode)
 			scr.Draw(sampleLines(iface, s, flowsMode))
 			drawn++
 			if n > 0 && drawn >= n {
@@ -217,15 +216,15 @@ func runLive(ctx context.Context, scr *tui.Screen, c *traffic.Counter, iface str
 			}
 		default:
 		}
-		if k, r := scr.Poll(100); isQuitKey(k, r) {
+		if k, r := scr.Poll(100); topQuitKey(k, r) {
 			return
 		}
 	}
 }
 
-// runPlain is the non-terminal path: one ranked table per interval, appended to
+// topRunPlain is the non-terminal path: one ranked table per interval, appended to
 // the transcript.
-func runPlain(ctx context.Context, c *traffic.Counter, iface string, interval time.Duration, n int, match func(string) bool, flowsMode bool) error {
+func topRunPlain(ctx context.Context, c *traffic.Counter, iface string, interval time.Duration, n int, match func(string) bool, flowsMode bool) error {
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	drawn := 0
@@ -234,7 +233,7 @@ func runPlain(ctx context.Context, c *traffic.Counter, iface string, interval ti
 		case <-ctx.Done():
 			return nil
 		case <-tick.C:
-			s := takeSample(c, interval.Seconds(), match, flowsMode)
+			s := topTakeSample(c, interval.Seconds(), match, flowsMode)
 			for _, ln := range sampleLines(iface, s, flowsMode) {
 				fmt.Fprintln(ux.Out, ln)
 			}
@@ -247,9 +246,9 @@ func runPlain(ctx context.Context, c *traffic.Counter, iface string, interval ti
 	}
 }
 
-// runExport waits out n intervals (default 1), takes a single sample across the
+// topRunExport waits out n intervals (default 1), takes a single sample across the
 // whole window, and writes it as JSON or CSV.
-func runExport(ctx context.Context, c *traffic.Counter, iface string, interval time.Duration, n int, match func(string) bool, flowsMode, jsonMode bool) error {
+func topRunExport(ctx context.Context, c *traffic.Counter, iface string, interval time.Duration, n int, match func(string) bool, flowsMode, jsonMode bool) error {
 	if n <= 0 {
 		n = 1
 	}
@@ -263,9 +262,9 @@ func runExport(ctx context.Context, c *traffic.Counter, iface string, interval t
 		}
 	}
 	seconds := float64(n) * interval.Seconds()
-	s := takeSample(c, seconds, match, flowsMode)
+	s := topTakeSample(c, seconds, match, flowsMode)
 	if jsonMode {
-		return writeJSON(os.Stdout, buildDoc(iface, seconds, flowsMode, s))
+		return writeTopJSON(os.Stdout, buildDoc(iface, seconds, flowsMode, s))
 	}
 	return writeCSV(os.Stdout, s, flowsMode)
 }
@@ -393,8 +392,8 @@ func buildDoc(iface string, seconds float64, flowsMode bool, s sample) jsonDoc {
 	return doc
 }
 
-// writeJSON emits the document with two-space indentation.
-func writeJSON(w io.Writer, doc jsonDoc) error {
+// writeTopJSON emits the document with two-space indentation.
+func writeTopJSON(w io.Writer, doc jsonDoc) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(doc)
@@ -435,7 +434,7 @@ func writeCSV(w io.Writer, s sample, flowsMode bool) error {
 	return cw.Error()
 }
 
-func isQuitKey(k tui.Key, r rune) bool {
+func topQuitKey(k tui.Key, r rune) bool {
 	switch k {
 	case tui.KeyEsc, tui.KeyEnter:
 		return true
@@ -445,22 +444,17 @@ func isQuitKey(k tui.Key, r rune) bool {
 	return false
 }
 
-func banner(iface string) {
+func topBanner(iface string) {
 	fmt.Fprintln(ux.Out)
-	fmt.Fprintln(ux.Out, "  "+ux.C(ux.Header, "GNULTE TOP")+"   "+ux.C(ux.Cyan, "v"+version)+"   "+ux.C(ux.Dim, "live bandwidth by host")+"   "+ux.C(ux.Target, iface))
+	fmt.Fprintln(ux.Out, "  "+ux.C(ux.Header, "GNULTE-WATCH TOP")+"   "+ux.C(ux.Cyan, "v"+version)+"   "+ux.C(ux.Dim, "live bandwidth by host")+"   "+ux.C(ux.Target, iface))
 	fmt.Fprintln(ux.Out)
 }
 
-func fatal(err error) {
-	fmt.Fprintln(os.Stderr, "gnulte-top: "+err.Error())
-	os.Exit(1)
-}
-
-func usage() {
-	fmt.Fprintf(os.Stderr, `gnulte-top v%s — live per-host and per-conversation bandwidth.
+func topUsage() {
+	fmt.Fprintf(os.Stderr, `gnulte-watch top v%s — live per-host and per-conversation bandwidth.
 
 Usage:
-  gnulte-top [flags]
+  gnulte-watch top [flags]
 
 Flags:
   -i N          sampling interval in seconds (default 1)
@@ -477,8 +471,8 @@ Rates are per second, measured with an in-process AF_PACKET counter (root
 required). Press q, Esc or Enter to stop the live view.
 
 Examples:
-  sudo gnulte-top
-  sudo gnulte-top --flows -i 2
-  sudo gnulte-top --host 192.168.1 --csv > talkers.csv
+  sudo gnulte-watch top
+  sudo gnulte-watch top --flows -i 2
+  sudo gnulte-watch top --host 192.168.1 --csv > talkers.csv
 `, version)
 }

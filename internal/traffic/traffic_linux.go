@@ -307,7 +307,7 @@ func (r *Rate) clamp() {
 }
 
 // Close stops the capture loop and frees the socket. It runs at most once,
-// on any number of concurrent callers: gnulte-lan registers this method as a
+// on any number of concurrent callers: gnulte-watch registers this method as a
 // signal cleanup *and* defers the raw method, so both the tui goroutine and
 // the main loop can reach it on the same Ctrl+C. The check-then-act select
 // below was fine for one caller but panicked ("close of closed channel") when

@@ -15,7 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-// Command gnulte-doctor checks whether this machine is ready to run GNULTE:
+// Command gnulte-quicksum checks whether this machine is ready to run GNULTE:
 // privileges, tools, interfaces, and the shared device store.
 package main
 
@@ -45,7 +45,7 @@ func main() {
 	flag.Parse()
 
 	if *showVer {
-		fmt.Printf("gnulte-doctor (Go) v%s\n", version)
+		fmt.Printf("gnulte-quicksum (Go) v%s\n", version)
 		return
 	}
 
@@ -59,7 +59,7 @@ func main() {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(checks); err != nil {
-			fmt.Fprintf(os.Stderr, "gnulte-doctor: %v\n", err)
+			fmt.Fprintf(os.Stderr, "gnulte-quicksum: %v\n", err)
 			os.Exit(2)
 		}
 	case *quiet:
@@ -74,7 +74,7 @@ func main() {
 // that is not passing.
 func printReport(checks []doctor.Check) {
 	fmt.Fprintln(ux.Out)
-	fmt.Fprintln(ux.Out, "  "+ux.C(ux.Header, "GNULTE DOCTOR")+"   "+ux.C(ux.Cyan, "v"+version)+"   "+ux.C(ux.Dim, "pre-flight health check"))
+	fmt.Fprintln(ux.Out, "  "+ux.C(ux.Header, "GNULTE QUICKSUM")+"   "+ux.C(ux.Cyan, "v"+version)+"   "+ux.C(ux.Dim, "pre-flight health check"))
 	fmt.Fprintln(ux.Out)
 	for _, c := range checks {
 		fmt.Fprintf(ux.Out, "  %s  %-22s %s\n", statusLabel(c.Status), c.Name, c.Detail)
@@ -122,10 +122,10 @@ func statusLabel(s doctor.Status) string {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `gnulte-doctor v%s — check whether this machine is ready to run GNULTE.
+	fmt.Fprintf(os.Stderr, `gnulte-quicksum v%s — check whether this machine is ready to run GNULTE.
 
 Usage:
-  gnulte-doctor [flags]
+  gnulte-quicksum [flags]
 
 Flags:
   -j, --json      print the report as JSON (machine readable)

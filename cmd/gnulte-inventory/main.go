@@ -53,7 +53,7 @@ func main() {
 	flag.Parse()
 
 	if *showVer {
-		fmt.Printf("gnulte-devices (Go) v%s\n", version)
+		fmt.Printf("gnulte-inventory (Go) v%s\n", version)
 		return
 	}
 
@@ -152,7 +152,7 @@ func main() {
 
 	if *htmlReport != "" {
 		if err := writeHTML(*htmlReport, rows, cfg, *doScan, memory); err != nil {
-			fmt.Fprintf(os.Stderr, "gnulte-devices: html: %v\n", err)
+			fmt.Fprintf(os.Stderr, "gnulte-inventory: html: %v\n", err)
 		} else if !*quiet {
 			fmt.Fprintf(ux.Out, "HTML report written to %s\n", *htmlReport)
 		}
@@ -386,6 +386,6 @@ func orDash(s string) string {
 }
 
 func fatal(err error) {
-	fmt.Fprintf(os.Stderr, "gnulte-devices: %v\n", err)
+	fmt.Fprintf(os.Stderr, "gnulte-inventory: %v\n", err)
 	os.Exit(1)
 }

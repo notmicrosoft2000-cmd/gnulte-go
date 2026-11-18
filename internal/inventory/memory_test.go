@@ -103,7 +103,7 @@ func TestRememberToAccumulatesAwakeAndPorts(t *testing.T) {
 
 func TestRememberToBaselineSilentForARPHost(t *testing.T) {
 	path := saveToTmp(t)
-	// A gnulte-lan record carries identity but no port set.
+	// A gnulte-watch record carries identity but no port set.
 	if err := SaveTo(path, []Record{{IP: "192.168.99.20", MAC: "aa:bb:cc:dd:ee:02", Kind: "Phone"}}); err != nil {
 		t.Fatalf("SaveTo: %v", err)
 	}

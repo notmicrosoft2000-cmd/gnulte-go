@@ -29,7 +29,7 @@ import (
 // The --json feed is a JSON-lines stream on stdout: one baseline object when
 // the watch starts, one tick object per interval, and one alert object on each
 // debounced up/down transition. Everything human stays on stderr so
-// `gnulte-lan --json | jq` sees nothing but the feed. The record shapes are
+// `gnulte-watch --json | jq` sees nothing but the feed. The record shapes are
 // plain structs so a test can marshal one and pin the schema.
 
 type feedBaseline struct {

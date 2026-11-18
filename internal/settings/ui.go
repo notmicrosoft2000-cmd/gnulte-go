@@ -150,7 +150,7 @@ func (e *editor) run() {
 				c.TrafficSec = clamp(n, 1, 10)
 				return nil
 			},
-			"refresh interval for the GNULTE-LAN watch window (1-10)", "1s"),
+			"refresh interval for the GNULTE-WATCH watch window (1-10)", "1s"),
 		row("lan alarm rate (kbps)", itemInt,
 			func(c Config) string { return orOff(fmt.Sprintf("%dkbps", c.AlarmRateKbps)) },
 			func(c *Config, v string) error {
@@ -161,7 +161,7 @@ func (e *editor) run() {
 				c.AlarmRateKbps = clamp(n, 0, 1000000)
 				return nil
 			},
-			"GNULTE-LAN: mark any host whose down/up speed exceeds this (0 = off)", "0"),
+			"GNULTE-WATCH: mark any host whose down/up speed exceeds this (0 = off)", "0"),
 		row("lan alarm latency (ms)", itemInt,
 			func(c Config) string { return orOff(fmt.Sprintf("%dms", c.AlarmLatencyMs)) },
 			func(c *Config, v string) error {
@@ -172,7 +172,7 @@ func (e *editor) run() {
 				c.AlarmLatencyMs = clamp(n, 0, 60000)
 				return nil
 			},
-			"GNULTE-LAN: mark any host whose average ping exceeds this (0 = off)", "0"),
+			"GNULTE-WATCH: mark any host whose average ping exceeds this (0 = off)", "0"),
 		head("SCANLTE SCAN"),
 		row("scan threads", itemInt,
 			func(c Config) string { return fmt.Sprintf("%d", c.ScanThreads) },

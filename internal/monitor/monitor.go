@@ -296,7 +296,7 @@ func (m *Monitor) trimHistory(st *Stats) {
 // maxLogLines caps the session transcript. The log gains a line per sample
 // per target, so a long run (the default is one sample per second) grew it
 // without limit — tens of thousands of lines per target per day, all of which
-// the HTML report then embeds. gnulte-lan already caps its transcript at a
+// the HTML report then embeds. gnulte-watch already caps its transcript at a
 // few thousand lines; this is the same guard on the gnulte side, keeping the
 // tail (the interesting end) and dropping the oldest lines.
 const maxLogLines = 4000

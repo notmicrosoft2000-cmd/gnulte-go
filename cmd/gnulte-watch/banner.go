@@ -24,10 +24,10 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-// gnultelanLogo is the GNULTE-LAN wordmark, hand-set in the same six-line
+// gnultewatchLogo is the GNULTE-WATCH wordmark, hand-set in the same six-line
 // block style as the GNULTE and SCANLTE logos so the whole toolkit reads the
 // same at boot. It fits an 80-column terminal.
-const gnultelanLogo = `  ██████╗ ███╗   ██╗ ██╗   ██╗ ██╗      ████████╗ ███████╗          ██╗       █████╗  ███╗   ██╗
+const gnultewatchLogo = `  ██████╗ ███╗   ██╗ ██╗   ██╗ ██╗      ████████╗ ███████╗          ██╗       █████╗  ███╗   ██╗
   ██╔════╝ ████╗  ██║ ██║   ██║ ██║      ╚══██╔══╝ ██╔════╝          ██║      ██╔══██╗ ████╗  ██║
   ██║  ███╗ ██╔██╗ ██║ ██║   ██║ ██║         ██║    █████╗    ███████╗ ██║      ███████║ ██╔██╗ ██║
   ██║   ██║ ██║╚██╗██║ ██║   ██║ ██║         ██║    ██╔══╝    ╚══════╝ ██║      ██╔══██║ ██║╚██╗██║
@@ -44,10 +44,10 @@ func printBanner() {
 	w := ux.Clamp(ux.Width()-2, 24, 78)
 	line := "  " + strings.Repeat("═", w)
 	fmt.Println(ux.C(ux.Dim, line))
-	for _, r := range strings.Split(gnultelanLogo, "\n") {
+	for _, r := range strings.Split(gnultewatchLogo, "\n") {
 		fmt.Println(ux.C(ux.Header, r))
 	}
-	fmt.Println("  " + ux.C(ux.Bold+ux.Header, "GNULTE-LAN v"+version) +
+	fmt.Println("  " + ux.C(ux.Bold+ux.Header, "GNULTE-WATCH v"+version) +
 		ux.C(ux.Dim, "  ·  the live LAN watch — who is here, how fast, who talks to whom"))
 	fmt.Println("  " + ux.C(ux.Dim, "passive watch only: counts packets and pings, never shapes or intercepts"))
 	fmt.Println("  " + ux.C(ux.Dim, "screens: 1 hosts · 2 talkers · 3 flows (root) · 4 neighbours · 5 map (live edges) · 6 alarms/history · each IP keeps one colour"))
@@ -57,7 +57,7 @@ func printBanner() {
 
 // purpose returns the one-line "what is this for" text used by --help.
 func purpose() string {
-	return "gnulte-lan is the LAN watch: discover what is online, identify each device\n" +
+	return "gnulte-watch is the LAN watch: discover what is online, identify each device\n" +
 		"  (MAC, vendor, type, hostname), watch its down/up speed, packet rate and latency\n" +
 		"  live, see who is talking to whom (top talkers), and get flagged when a host\n" +
 		"  crosses a rate or latency threshold. Run with no -t to watch the whole LAN.\n" +

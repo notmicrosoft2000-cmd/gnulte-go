@@ -219,7 +219,7 @@ func quickRef() {
 	fmt.Println("    gnulte --no-sound                                   silence the ping beeps")
 	fmt.Println("    gnulte --scan / --dupcheck                          discovery tools")
 	fmt.Println("    gnulte --settings                                 edit saved defaults")
-	fmt.Println("    gnulte-lan -i wlan0 -t 192.168.1.1,192.168.1.50   live LAN watch (speed + top talkers)")
+	fmt.Println("    gnulte-watch -i wlan0 -t 192.168.1.1,192.168.1.50   live LAN watch (speed + top talkers)")
 	fmt.Println("  " + c(cDim, "  With no targeting flags, the guided menu opens below."))
 	fmt.Println(c(cDim, "  ─────────────────────────────────────────────────"))
 	fmt.Println()
@@ -324,7 +324,7 @@ func scanAndSelect(ctx context.Context, cfg netutil.Config) []string {
 	out.SortByIP(rows)
 
 	// Devices this watch environment already knows about — the shared store
-	// written by gnulte-lan's 'x save' and read by gnulte-scan — get a '*'
+	// written by gnulte-watch's 'x save' and read by gnulte-scan — get a '*'
 	// mark, so the quick scan's table ties straight back into their identity
 	// instead of asking the sweep to re-baptise everything.
 	known := map[string]bool{}
@@ -390,7 +390,7 @@ func scanAndSelect(ctx context.Context, cfg netutil.Config) []string {
 		var chosen []string
 		valid := true
 		if sel == "w" || sel == "W" {
-			// Live Interconnection: pick targets saved by gnulte-lan's watch.
+			// Live Interconnection: pick targets saved by gnulte-watch's watch.
 			chosen = pickFromStore(cfg)
 			if chosen == nil {
 				valid = false
@@ -470,7 +470,7 @@ func scanAndSelect(ctx context.Context, cfg netutil.Config) []string {
 }
 
 // pickFromStore offers the shared cross-tool device store
-// (~/.config/gnulte-go/devices.json, written by gnulte-lan's watch and read by
+// (~/.config/gnulte-go/devices.json, written by gnulte-watch's watch and read by
 // gnulte-scan) as a target picker — the Live Interconnection handoff in
 // reverse. It is useful even when the live sweep misses quiet hosts: the store
 // remembers what the watch saw. Returns the chosen IPs, or nil on cancel.
@@ -731,13 +731,13 @@ const (
 )
 
 // trafficWindowChoice asks how to watch multiple targets: the combined console
-// dashboard, one GNULTE-LAN watch window, or one separate window per target
+// dashboard, one GNULTE-WATCH watch window, or one separate window per target
 // (tabs in terminal emulators that support them).
 func trafficWindowChoice() watchMode {
 	fmt.Println()
 	fmt.Println(c(cCyan+cBold, " Two or more targets selected — how do you want to watch them?"))
 	fmt.Println("   1) all targets in this console dashboard (default)")
-	fmt.Println("   2) GNULTE-LAN watch in one separate window")
+	fmt.Println("   2) GNULTE-WATCH watch in one separate window")
 	fmt.Println("   3) one separate window per target (tabs)")
 	sel := strings.TrimSpace(prompt("   choice [1/2/3]: "))
 	fmt.Println()
@@ -751,13 +751,13 @@ func trafficWindowChoice() watchMode {
 	}
 }
 
-// launchTrafficWindow detaches a gnulte-lan window for the watched targets so
+// launchTrafficWindow detaches a gnulte-watch window for the watched targets so
 // the two views can be compared side by side. It warns rather than failing
 // when no terminal emulator is available.
 func launchTrafficWindow(interval int, iface string, targets []string) {
 	bin := trafficBinary()
 	if bin == "" {
-		fmt.Println("  " + warnText("gnulte-lan is not installed — run the LAN watch separately (gnulte-lan -i ... -t ...)"))
+		fmt.Println("  " + warnText("gnulte-watch is not installed — run the LAN watch separately (gnulte-watch -i ... -t ...)"))
 		return
 	}
 	args := []string{bin, "-i", iface, "-t", strings.Join(targets, ",")}
@@ -773,16 +773,16 @@ func launchTrafficWindow(interval int, iface string, targets []string) {
 		fmt.Println("  " + warnText("no terminal emulator found — add $TERMINAL (e.g. export TERMINAL='xterm -e') to enable the separate window"))
 		return
 	}
-	fmt.Println("  " + okText("GNULTE-LAN watch opened in a separate window — "+strings.Join(targets, ", ")))
+	fmt.Println("  " + okText("GNULTE-WATCH watch opened in a separate window — "+strings.Join(targets, ", ")))
 }
 
-// launchTrafficWindows detaches one gnulte-lan terminal window per target,
+// launchTrafficWindows detaches one gnulte-watch terminal window per target,
 // so each target gets a focused monitor of its own (tabs where the terminal
 // emulator supports them). Warns rather than failing mid-way.
 func launchTrafficWindows(interval int, iface string, targets []string) {
 	bin := trafficBinary()
 	if bin == "" {
-		fmt.Println("  " + warnText("gnulte-lan is not installed — run the LAN watch separately (gnulte-lan -i ... -t ...)"))
+		fmt.Println("  " + warnText("gnulte-watch is not installed — run the LAN watch separately (gnulte-watch -i ... -t ...)"))
 		return
 	}
 	startedAny := false
@@ -803,19 +803,19 @@ func launchTrafficWindows(interval int, iface string, targets []string) {
 		startedAny = true
 	}
 	if startedAny {
-		fmt.Println("  " + okText(fmt.Sprintf("One GNULTE-LAN watch window per target opened (%d/%d) — Ctrl+C in any window closes it.",
+		fmt.Println("  " + okText(fmt.Sprintf("One GNULTE-WATCH watch window per target opened (%d/%d) — Ctrl+C in any window closes it.",
 			len(targets), len(targets))))
 	}
 }
 
-// trafficBinary locates the installed gnulte-lan binary (directly beside the
+// trafficBinary locates the installed gnulte-watch binary (directly beside the
 // running gnulte or in PATH).
 func trafficBinary() string {
-	if p, err := exec.LookPath("gnulte-lan"); err == nil {
+	if p, err := exec.LookPath("gnulte-watch"); err == nil {
 		return p
 	}
 	if exe, err := os.Executable(); err == nil {
-		p := filepath.Join(filepath.Dir(exe), "gnulte-lan")
+		p := filepath.Join(filepath.Dir(exe), "gnulte-watch")
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}

@@ -9,7 +9,7 @@ import (
 )
 
 // TestWriteSampleReport renders a realistic watch report to
-// GNULTE_SAMPLE_REPORT (or /tmp/gnulte-lan-sample.html) so the layout can be
+// GNULTE_SAMPLE_REPORT (or /tmp/gnulte-watch-sample.html) so the layout can be
 // reviewed in a browser without a live session. Skipped unless the env var is
 // set.
 func TestWriteSampleReport(t *testing.T) {

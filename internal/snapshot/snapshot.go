@@ -15,7 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-// Package snapshot reads device-list JSON exports (gnulte-scan / gnulte-devices
+// Package snapshot reads device-list JSON exports (gnulte-scan / gnulte-inventory
 // -j output) and diffs two of them, so an operator can answer "what changed on
 // my network since last time?" without replaying a full scan. It is pure: no
 // sockets, no clock, no terminal.

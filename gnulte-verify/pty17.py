@@ -4,11 +4,11 @@
 Covers the interactive paths changed by the bug batch, where a unit test can
 pin the logic but only a real pty proves the keys reach the right host:
 
-  A  gnulte-lan  ⏎ handoff names the row under the cursor on talkers
-  B  gnulte-lan  same after a sort change (the live repro of the stale-IP bug)
-  C  gnulte-lan  ⏎ on flows never launches a gnulte test
-  D  gnulte-lan  ⏎ on the map never launches a gnulte test
-  E  gnulte-lan  the four non-hosts screens still render and quit cleanly
+  A  gnulte-watch  ⏎ handoff names the row under the cursor on talkers
+  B  gnulte-watch  same after a sort change (the live repro of the stale-IP bug)
+  C  gnulte-watch  ⏎ on flows never launches a gnulte test
+  D  gnulte-watch  ⏎ on the map never launches a gnulte test
+  E  gnulte-watch  the four non-hosts screens still render and quit cleanly
   F  gnulte-scan  --watch runs its first sweep immediately and reports the
                   real effective cadence (v16's swallowed-interval bug)
 
@@ -170,7 +170,7 @@ def handoff_ip(frame):
 
 
 def lan(iface):
-    return Term([f"{BIN}/gnulte-lan", "--no-report", "-i", iface])
+    return Term([f"{BIN}/gnulte-watch", "--no-report", "-i", iface])
 
 
 def test_a(bundle):

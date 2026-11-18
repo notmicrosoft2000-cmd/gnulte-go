@@ -45,9 +45,8 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-const version = "16.13"
 
-func main() {
+func traceMain() {
 	var (
 		maxHops  = flag.Int("m", 30, "maximum number of hops")
 		probes   = flag.Int("c", 3, "probes per hop")
@@ -58,22 +57,22 @@ func main() {
 		quiet    = flag.Bool("q", false, "quiet: no live view, print the final table only")
 		showVer  = flag.Bool("v", false, "print version and exit")
 	)
-	flag.Usage = usage
+	flag.Usage = traceUsage
 	flag.BoolVar(showVer, "version", false, "print version and exit")
 	flag.Parse()
 
 	if *showVer {
-		fmt.Printf("gnulte-trace (Go) v%s\n", version)
+		fmt.Printf("gnulte-watch trace (Go) v%s\n", version)
 		return
 	}
 	if flag.NArg() != 1 {
-		usage()
+		traceUsage()
 		os.Exit(2)
 	}
 
 	// Raw ICMP needs root. The parent process re-executes itself through sudo
 	// and gets out of the way; the elevated child does the work.
-	elevate()
+	traceElevate()
 
 	if err := safety.EnsureAccepted(); err != nil {
 		fatal(err)
@@ -95,7 +94,7 @@ func main() {
 	started := time.Now()
 
 	if !*asJSON && !*quiet && ux.TTY() {
-		banner()
+		traceBanner()
 	}
 
 	var res trace.Result
@@ -104,18 +103,18 @@ func main() {
 	case *asJSON:
 		res, err = trace.Walk(ctx, target, opts, icmp.TraceProbe, nil)
 	case *quiet || !ux.TTY():
-		res, err = runPlain(ctx, target, opts)
+		res, err = traceRunPlain(ctx, target, opts)
 	default:
 		if scr, e := tui.Open(); e == nil {
 			live = true
 			var aborted bool
-			res, aborted, err = runLive(ctx, scr, target, opts)
+			res, aborted, err = traceRunLive(ctx, scr, target, opts)
 			scr.Close()
 			if aborted {
 				fmt.Fprintln(ux.Out, ux.C(ux.Dim, "  stopped."))
 			}
 		} else {
-			res, err = runPlain(ctx, target, opts)
+			res, err = traceRunPlain(ctx, target, opts)
 		}
 	}
 	if err != nil {
@@ -144,7 +143,7 @@ func emitOutput(res trace.Result, opts trace.Options, started time.Time, live, a
 			}
 			// stdout must stay a single JSON document, so the notice goes to
 			// stderr.
-			fmt.Fprintf(notice, "gnulte-trace: report written to %s\n", reportPath)
+			fmt.Fprintf(notice, "gnulte-watch trace: report written to %s\n", reportPath)
 		}
 		return nil
 	}
@@ -161,17 +160,17 @@ func emitOutput(res trace.Result, opts trace.Options, started time.Time, live, a
 	return nil
 }
 
-// elevate re-runs the tool through sudo when a plain user asked for it, so the
+// traceElevate re-runs the tool through sudo when a plain user asked for it, so the
 // raw socket can be opened. It mirrors the other root tools: the child is
 // tagged with GNULTE_AS_ROOT so the prompt happens once.
-func elevate() {
+func traceElevate() {
 	if os.Geteuid() == 0 || os.Getenv("GNULTE_AS_ROOT") == "1" {
 		return
 	}
 	if !tui.StdinTTY() {
-		fatal(errors.New("gnulte-trace needs root for raw ICMP sockets — run it from a terminal or with sudo"))
+		fatal(errors.New("gnulte-watch trace needs root for raw ICMP sockets — run it from a terminal or with sudo"))
 	}
-	fmt.Fprintln(os.Stderr, "GNULTE TRACE needs root for raw ICMP sockets; requesting administrator access…")
+	fmt.Fprintln(os.Stderr, "GNULTE-WATCH PATH needs root for raw ICMP sockets; requesting administrator access…")
 	args := append([]string{"-E", os.Args[0]}, os.Args[1:]...)
 	cmd := exec.Command("sudo", args...)
 	cmd.Env = append(os.Environ(), "GNULTE_AS_ROOT=1")
@@ -192,7 +191,7 @@ func elevate() {
 // error a user is most likely to hit.
 func privilegeHint(err error) error {
 	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
-		return fmt.Errorf("%w — raw ICMP sockets need root, run gnulte-trace with sudo", err)
+		return fmt.Errorf("%w — raw ICMP sockets need root, run gnulte-watch trace with sudo", err)
 	}
 	return err
 }
@@ -214,10 +213,10 @@ func resolveTarget(t string) (string, error) {
 	return addr.IP.String(), nil
 }
 
-// runPlain walks the path and prints each hop the moment it is complete. It is
+// traceRunPlain walks the path and prints each hop the moment it is complete. It is
 // the mode used when stdout is not a terminal, and the fallback when the
 // full-screen view cannot open.
-func runPlain(ctx context.Context, ip string, opts trace.Options) (trace.Result, error) {
+func traceRunPlain(ctx context.Context, ip string, opts trace.Options) (trace.Result, error) {
 	fmt.Fprintf(ux.Out, "\n  %s  %s\n\n", ux.C(ux.Header, "GNULTE TRACE"), ux.C(ux.Target, ip))
 	fmt.Fprintln(ux.Out, tableHeader())
 	res, err := trace.Walk(ctx, ip, opts, icmp.TraceProbe, func(h trace.Hop) {
@@ -226,10 +225,10 @@ func runPlain(ctx context.Context, ip string, opts trace.Options) (trace.Result,
 	return res, err
 }
 
-// runLive drives the full-screen table: the walk runs in a goroutine and hands
+// traceRunLive drives the full-screen table: the walk runs in a goroutine and hands
 // each finished hop back under a mutex, while this loop redraws and watches the
 // keyboard. It reports whether the user quit early.
-func runLive(ctx context.Context, scr *tui.Screen, ip string, opts trace.Options) (trace.Result, bool, error) {
+func traceRunLive(ctx context.Context, scr *tui.Screen, ip string, opts trace.Options) (trace.Result, bool, error) {
 	wctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -266,7 +265,7 @@ func runLive(ctx context.Context, scr *tui.Screen, ip string, opts trace.Options
 		default:
 		}
 
-		if k, r := scr.Poll(150); isQuitKey(k, r) {
+		if k, r := scr.Poll(150); traceQuitKey(k, r) {
 			cancel()
 			<-done
 			return res, true, walkErr
@@ -281,8 +280,8 @@ func snapshot(mu *sync.Mutex, hops *[]trace.Hop) []trace.Hop {
 	return append([]trace.Hop(nil), *hops...)
 }
 
-// isQuitKey decides whether a key press ends the live view.
-func isQuitKey(k tui.Key, r rune) bool {
+// traceQuitKey decides whether a key press ends the live view.
+func traceQuitKey(k tui.Key, r rune) bool {
 	switch k {
 	case tui.KeyEsc, tui.KeyEnter:
 		return true
@@ -485,22 +484,17 @@ func writeHTML(path string, res trace.Result, opts trace.Options, started time.T
 	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
-func banner() {
+func traceBanner() {
 	fmt.Fprintln(ux.Out)
-	fmt.Fprintln(ux.Out, "  "+ux.C(ux.Header, "GNULTE TRACE")+"   "+ux.C(ux.Cyan, "v"+version)+"   "+ux.C(ux.Dim, "hop-by-hop path probe"))
+	fmt.Fprintln(ux.Out, "  "+ux.C(ux.Header, "GNULTE-WATCH PATH")+"   "+ux.C(ux.Cyan, "v"+version)+"   "+ux.C(ux.Dim, "hop-by-hop path probe"))
 	fmt.Fprintln(ux.Out)
 }
 
-func fatal(err error) {
-	fmt.Fprintln(os.Stderr, "gnulte-trace: "+err.Error())
-	os.Exit(1)
-}
-
-func usage() {
-	fmt.Fprintf(os.Stderr, `gnulte-trace v%s — hop-by-hop path probe (mtr-style), no traceroute(8).
+func traceUsage() {
+	fmt.Fprintf(os.Stderr, `gnulte-watch trace v%s — hop-by-hop path probe (mtr-style), no traceroute(8).
 
 Usage:
-  gnulte-trace [flags] HOST
+  gnulte-watch trace [flags] HOST
 
 Flags:
   -m N          maximum number of hops (default 30)
@@ -516,7 +510,7 @@ HOST is an IPv4 address or a hostname. Raw ICMP sockets require root, so a
 regular user is re-executed through sudo (once).
 
 Examples:
-  sudo gnulte-trace 1.1.1.1
-  gnulte-trace --json --html trace.html example.com
+  sudo gnulte-watch trace 1.1.1.1
+  gnulte-watch trace --json --html trace.html example.com
 `, version)
 }

@@ -19,7 +19,7 @@
 // "Live Interconnection": one JSON file under the user's config directory
 // that every tool feeds and reads.
 //
-//	gnulte-lan    writes the live watch list (key x, and on a clean quit)
+//	gnulte-watch    writes the live watch list (key x, and on a clean quit)
 //	gnulte        offers "from last LAN watch" in the target picker
 //	gnulte-scan   cross-references its -T table against the known inventory
 //
@@ -350,7 +350,7 @@ func UpdateTo(recs []Record, sighting Record, path, devices string) ([]Record, s
 }
 
 // MergeList merges many sightings in one pass and saves once — the bulk
-// counterpart of Update, used by gnulte-lan's "save the watch" and the
+// counterpart of Update, used by gnulte-watch's "save the watch" and the
 // auto-save on quit. It returns the merged store and how many records are new.
 func MergeList(recs []Record, sightings []Record) ([]Record, int, error) {
 	return MergeListTo(recs, Path(), sightings)

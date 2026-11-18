@@ -39,9 +39,9 @@ type Config struct {
 	ScanThreads    int    `json:"scan_threads"`     // parallel ping workers, 1-512
 	WifiCount      int    `json:"wifi_count"`       // 802.11 frames per burst, 1-256
 	WifiDelaySec   int    `json:"wifi_delay_sec"`   // seconds between bursts, 1-60
-	TrafficSec     int    `json:"traffic_sec"`      // gnulte-lan watch update interval, 1-10
-	AlarmRateKbps  int    `json:"alarm_rate_kbps"`  // gnulte-lan: mark hosts above this rate (kbps), 0=off
-	AlarmLatencyMs int    `json:"alarm_latency_ms"` // gnulte-lan: mark hosts above this avg RTT (ms), 0=off
+	TrafficSec     int    `json:"traffic_sec"`      // gnulte-watch watch update interval, 1-10
+	AlarmRateKbps  int    `json:"alarm_rate_kbps"`  // gnulte-watch: mark hosts above this rate (kbps), 0=off
+	AlarmLatencyMs int    `json:"alarm_latency_ms"` // gnulte-watch: mark hosts above this avg RTT (ms), 0=off
 
 	// SCANLTE technical tuning (v12).
 	ProbeRetries int  `json:"probe_retries"` // deep-scan retries per open port, 1-5

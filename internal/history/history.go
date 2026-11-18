@@ -15,7 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-// Package history records what gnulte-lan's watch mode saw over time: host
+// Package history records what gnulte-watch's watch mode saw over time: host
 // up/down transitions and one daily rollup per host per session, kept as an
 // append-only JSONL file beside the device inventory. It also owns the small
 // pure pieces the live watch needs — a debounce latch for up/down edges, a

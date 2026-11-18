@@ -15,7 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-// Package doctor is the pre-flight health check behind gnulte-doctor. Gathering
+// Package doctor is the pre-flight health check behind gnulte-quicksum. Gathering
 // the facts about a machine is separated from judging them, so the check
 // registry can be tested against any combination of conditions — including the
 // ones this sandbox cannot create (root, a missing binary, a broken route).

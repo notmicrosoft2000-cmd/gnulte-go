@@ -627,7 +627,7 @@ func (t *tvTable) summaryLines() []string {
 	lines = append(lines, fmt.Sprintf("    mDNS services      %d", svcTotal))
 	lines = append(lines, fmt.Sprintf("    flagged (rogue?)   %d", flagged))
 	// Live Interconnection: the shared cross-tool device store (written by
-	// gnulte-lan) tells the scan how much of today's table it already knew.
+	// gnulte-watch) tells the scan how much of today's table it already knew.
 	if recs, err := inventory.Load(); err == nil && len(recs) > 0 {
 		known := 0
 		onNet := map[string]bool{}

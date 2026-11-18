@@ -21,7 +21,7 @@
 //
 //	~/GNULTE Reports/GNULTE go!/gnulte-go-scan-report-20060102-150405-2.html
 //	~/GNULTE Reports/Gnulte-scan/gnulte-scan-report-20060102-150405.html
-//	~/GNULTE Reports/GNULTE-LAN/gnulte-lan-report-20060102-150405-2.html
+//	~/GNULTE Reports/GNULTE-WATCH/gnulte-watch-report-20060102-150405-2.html
 package reportdir
 
 import (
@@ -39,8 +39,8 @@ const (
 	GNULTEGo SubDir = "GNULTE go!"
 	// GnulteScan is the destination for the gnulte-scan (SCANLTE) reports.
 	GnulteScan SubDir = "Gnulte-scan"
-	// GNULTELan is the destination for the gnulte-lan (GNULTE-LAN) reports.
-	GNULTELan SubDir = "GNULTE-LAN"
+	// GNULTEWatch is the destination for the gnulte-watch (GNULTE-WATCH) reports.
+	GNULTEWatch SubDir = "GNULTE-WATCH"
 )
 
 // Hub returns the hub directory (e.g. ~/GNULTE Reports). It does not create
@@ -59,7 +59,7 @@ func Hub() (string, bool) {
 // never create junk directories in the user's home.
 func Sub(sub SubDir) (string, error) {
 	switch sub {
-	case GNULTEGo, GnulteScan, GNULTELan:
+	case GNULTEGo, GnulteScan, GNULTEWatch:
 	default:
 		return "", fmt.Errorf("unknown report folder %q", sub)
 	}

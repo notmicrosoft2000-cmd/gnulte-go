@@ -39,7 +39,7 @@ func sampleHosts() sample {
 }
 
 func TestTakeSampleWithoutCounterIsEmpty(t *testing.T) {
-	s := takeSample(nil, 1, nil, false)
+	s := topTakeSample(nil, 1, nil, false)
 	if len(s.rows) != 0 || len(s.flows) != 0 || s.totalDown != 0 || s.totalUp != 0 {
 		t.Fatalf("nil counter produced %+v, want an empty sample", s)
 	}
@@ -70,8 +70,8 @@ func TestBuildDocHostsAndFlows(t *testing.T) {
 
 func TestWriteJSONRoundTrips(t *testing.T) {
 	var b bytes.Buffer
-	if err := writeJSON(&b, buildDoc("wlan0", 1, false, sampleHosts())); err != nil {
-		t.Fatalf("writeJSON: %v", err)
+	if err := writeTopJSON(&b, buildDoc("wlan0", 1, false, sampleHosts())); err != nil {
+		t.Fatalf("writeTopJSON: %v", err)
 	}
 	var got jsonDoc
 	if err := json.Unmarshal(b.Bytes(), &got); err != nil {
@@ -131,10 +131,10 @@ func TestPlaceholderSaysMeasuring(t *testing.T) {
 }
 
 func TestIsQuitKeyTop(t *testing.T) {
-	if !isQuitKey(tui.KeyRune, 'q') || !isQuitKey(tui.KeyEsc, 0) || !isQuitKey(tui.KeyEnter, 0) {
+	if !topQuitKey(tui.KeyRune, 'q') || !topQuitKey(tui.KeyEsc, 0) || !topQuitKey(tui.KeyEnter, 0) {
 		t.Fatal("q, Esc and Enter should quit")
 	}
-	if isQuitKey(tui.KeyRune, 'x') {
+	if topQuitKey(tui.KeyRune, 'x') {
 		t.Fatal("x should not quit")
 	}
 }

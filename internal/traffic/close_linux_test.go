@@ -11,7 +11,7 @@ import (
 )
 
 // Close must be safe from any number of concurrent callers, and safe to call
-// more than once: gnulte-lan registers counter.Close as a signal cleanup AND
+// more than once: gnulte-watch registers counter.Close as a signal cleanup AND
 // defers the same method, so a single Ctrl+C can reach it from both the tui
 // goroutine and the main loop. The old check-then-act select could pass from
 // two goroutines and then panic with "close of closed channel" (and close the

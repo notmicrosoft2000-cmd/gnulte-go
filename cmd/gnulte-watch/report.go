@@ -29,7 +29,7 @@ func sessionHTML(s *lanSession) string {
 	var b strings.Builder
 	b.WriteString("<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">")
 	b.WriteString(`<meta name="viewport" content="width=device-width, initial-scale=1">`)
-	b.WriteString("<title>GNULTE-LAN report</title>")
+	b.WriteString("<title>GNULTE-WATCH report</title>")
 	b.WriteString(cssReport)
 	b.WriteString("</head><body>\n")
 
@@ -41,7 +41,7 @@ func sessionHTML(s *lanSession) string {
 	if !s.end.IsZero() {
 		endTxt = s.end.Format("15:04:05")
 	}
-	fmt.Fprintf(&b, "<header><h1>GNULTE-LAN <span class=sub>watch report</span></h1>\n")
+	fmt.Fprintf(&b, "<header><h1>GNULTE-WATCH <span class=sub>watch report</span></h1>\n")
 	fmt.Fprintf(&b, "<p class=meta>iface <b>%s</b>", htmlEscape(s.iface))
 	if s.subnet != "" {
 		fmt.Fprintf(&b, " · net <b>%s</b> (router excluded)", htmlEscape(s.subnet))
@@ -115,7 +115,7 @@ func sessionHTML(s *lanSession) string {
 		b.WriteString(htmlEscape(strings.Join(s.log, "\n")))
 		b.WriteString("\n</pre></section>\n")
 	}
-	b.WriteString("<footer>GNULTE-LAN " + version + " · passive capture · GPLv3</footer>\n</body></html>\n")
+	b.WriteString("<footer>GNULTE-WATCH " + version + " · passive capture · GPLv3</footer>\n</body></html>\n")
 	return b.String()
 }
 

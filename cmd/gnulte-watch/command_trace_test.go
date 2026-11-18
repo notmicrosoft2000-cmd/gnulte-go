@@ -33,7 +33,7 @@ import (
 )
 
 // sample is a small finished trace reused by the rendering tests.
-func sample() trace.Result {
+func traceSampleResult() trace.Result {
 	return trace.Result{
 		Target:  "203.0.113.5",
 		Reached: true,
@@ -72,19 +72,19 @@ func TestHopRow(t *testing.T) {
 
 func TestSummaryStates(t *testing.T) {
 	var b bytes.Buffer
-	printSummary(&b, sample(), time.Now().Add(-time.Second))
+	printSummary(&b, traceSampleResult(), time.Now().Add(-time.Second))
 	if !strings.Contains(b.String(), "REACHED") || !strings.Contains(b.String(), "203.0.113.5") {
 		t.Fatalf("reached summary = %q", b.String())
 	}
 
 	b.Reset()
-	printSummary(&b, trace.Result{Target: "203.0.113.9", Unreachable: true, Hops: sample().Hops}, time.Now())
+	printSummary(&b, trace.Result{Target: "203.0.113.9", Unreachable: true, Hops: traceSampleResult().Hops}, time.Now())
 	if !strings.Contains(b.String(), "UNREACHABLE") {
 		t.Fatalf("unreachable summary = %q", b.String())
 	}
 
 	b.Reset()
-	printSummary(&b, trace.Result{Target: "203.0.113.9", Hops: sample().Hops}, time.Now())
+	printSummary(&b, trace.Result{Target: "203.0.113.9", Hops: traceSampleResult().Hops}, time.Now())
 	if !strings.Contains(b.String(), "no answer") {
 		t.Fatalf("incomplete summary = %q", b.String())
 	}
@@ -92,7 +92,7 @@ func TestSummaryStates(t *testing.T) {
 
 func TestEmitJSONContract(t *testing.T) {
 	var b bytes.Buffer
-	emitJSON(&b, sample(), trace.Options{Probes: 3, MaxHops: 30}, time.Now())
+	emitJSON(&b, traceSampleResult(), trace.Options{Probes: 3, MaxHops: 30}, time.Now())
 
 	var got jsonResult
 	if err := json.Unmarshal(b.Bytes(), &got); err != nil {
@@ -114,7 +114,7 @@ func TestEmitJSONContract(t *testing.T) {
 
 func TestWriteHTMLReport(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "trace.html")
-	if err := writeHTML(path, sample(), trace.Options{Probes: 3, MaxHops: 30}, time.Now()); err != nil {
+	if err := writeHTML(path, traceSampleResult(), trace.Options{Probes: 3, MaxHops: 30}, time.Now()); err != nil {
 		t.Fatalf("writeHTML: %v", err)
 	}
 	raw, err := os.ReadFile(path)
@@ -145,12 +145,12 @@ func TestIsQuitKey(t *testing.T) {
 	}{
 		{tui.KeyEsc, 0}, {tui.KeyEnter, 0}, {tui.KeyRune, 'q'}, {tui.KeyRune, 'Q'},
 	} {
-		if !isQuitKey(tc.k, tc.r) {
-			t.Errorf("isQuitKey(%v,%q) = false, want true", tc.k, tc.r)
+		if !traceQuitKey(tc.k, tc.r) {
+			t.Errorf("traceQuitKey(%v,%q) = false, want true", tc.k, tc.r)
 		}
 	}
-	if isQuitKey(tui.KeyRune, 'x') {
-		t.Error("isQuitKey('x') = true, want false")
+	if traceQuitKey(tui.KeyRune, 'x') {
+		t.Error("traceQuitKey('x') = true, want false")
 	}
 }
 
@@ -171,7 +171,7 @@ func TestPrivilegeHintNamesRoot(t *testing.T) {
 func TestEmitOutputJSONAlsoWritesHTML(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "both.html")
 	var stdout, human, notice bytes.Buffer
-	if err := emitOutput(sample(), trace.Options{Probes: 3, MaxHops: 30}, time.Now(), false, true, path, &stdout, &human, &notice); err != nil {
+	if err := emitOutput(traceSampleResult(), trace.Options{Probes: 3, MaxHops: 30}, time.Now(), false, true, path, &stdout, &human, &notice); err != nil {
 		t.Fatalf("emitOutput: %v", err)
 	}
 	// stdout stays exactly one JSON document...
@@ -198,7 +198,7 @@ func TestEmitOutputJSONAlsoWritesHTML(t *testing.T) {
 func TestEmitOutputHumanPath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "human.html")
 	var stdout, human, notice bytes.Buffer
-	if err := emitOutput(sample(), trace.Options{Probes: 3, MaxHops: 30}, time.Now(), false, false, path, &stdout, &human, &notice); err != nil {
+	if err := emitOutput(traceSampleResult(), trace.Options{Probes: 3, MaxHops: 30}, time.Now(), false, false, path, &stdout, &human, &notice); err != nil {
 		t.Fatalf("emitOutput: %v", err)
 	}
 	if stdout.Len() != 0 {

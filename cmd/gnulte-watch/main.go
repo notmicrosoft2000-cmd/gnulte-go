@@ -15,7 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-// Command gnulte-lan is GNULTE's live LAN watch — the observation half of the
+// Command gnulte-watch is GNULTE's live LAN watch — the observation half of the
 // toolkit. Tell it what to watch and it answers three questions live:
 //
 //  1. What is on the network? With no -t it discovers the whole LAN in a few
@@ -244,6 +244,47 @@ type lanSession struct {
 }
 
 func main() {
+	// Two tools live in this binary. `trace`/`top` (and the --trace convenience
+	// flag) are dispatched here, before the watch's own flag set is registered,
+	// so their flags — which share -t, -q, -json with the watch — never collide
+	// on the global flag.CommandLine.
+	if args, ok := traceArgs(os.Args[1:]); ok {
+		os.Args = append([]string{os.Args[0]}, args...)
+		traceMain()
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "top" {
+		os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
+		topMain()
+		return
+	}
+	lanMain()
+}
+
+// traceArgs recognises the path-probe entry points: the `trace` subcommand and
+// the `--trace HOST` convenience flag. It returns the arguments to hand to
+// traceMain, with the subcommand token removed.
+func traceArgs(argv []string) ([]string, bool) {
+	if len(argv) > 0 && argv[0] == "trace" {
+		return argv[1:], true
+	}
+	for i, a := range argv {
+		switch {
+		case a == "--trace" || a == "-trace":
+			if i+1 < len(argv) {
+				return []string{argv[i+1]}, true
+			}
+			return nil, true
+		case strings.HasPrefix(a, "--trace="):
+			return []string{a[len("--trace="):]}, true
+		case strings.HasPrefix(a, "-trace="):
+			return []string{a[len("-trace="):]}, true
+		}
+	}
+	return nil, false
+}
+
+func lanMain() {
 	var (
 		iface       = flag.String("i", "", "network interface (default: auto-detect)")
 		targets     = flag.String("t", "", "host IP(s) to watch, comma-separated (empty = watch the whole LAN)")
@@ -263,12 +304,12 @@ func main() {
 	)
 	flag.BoolVar(showVer, "v", false, "print version and exit")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "%s\n\nUsage: gnulte-lan [flags]\n\n", purpose())
+		fmt.Fprintf(flag.CommandLine.Output(), "%s\n\nUsage: gnulte-watch [flags]\n\n", purpose())
 		flag.PrintDefaults()
 		fmt.Fprintf(flag.CommandLine.Output(), "\nExamples:\n"+
-			"  gnulte-lan                 watch the whole LAN (auto-discovery)\n"+
-			"  gnulte-lan -t 192.168.1.20 watch one host\n"+
-			"  gnulte-lan --duration 60 --export watch.csv --alarm-rate 500\n")
+			"  gnulte-watch                 watch the whole LAN (auto-discovery)\n"+
+			"  gnulte-watch -t 192.168.1.20 watch one host\n"+
+			"  gnulte-watch --duration 60 --export watch.csv --alarm-rate 500\n")
 	}
 	flag.Parse()
 
@@ -282,7 +323,7 @@ func main() {
 	}
 
 	if *showVer {
-		fmt.Printf("GNULTE-LAN v%s (Go)\n", version)
+		fmt.Printf("GNULTE-WATCH v%s (Go)\n", version)
 		return
 	}
 
@@ -290,7 +331,7 @@ func main() {
 	if c, err := settings.Load(); err == nil {
 		cfgLoaded = c
 	} else {
-		fmt.Fprintf(os.Stderr, "gnulte-lan: %v\n", err)
+		fmt.Fprintf(os.Stderr, "gnulte-watch: %v\n", err)
 	}
 	// Live-tunable knobs from settings plus CLI overrides, re-clamped after a
 	// mid-watch edit (a nonzero flag always beats saved settings).
@@ -364,7 +405,7 @@ func main() {
 		// The packet counter is a garnish, not a dependency (see the traffic
 		// package doc): without the raw socket the watch still shows latency,
 		// identity and alarm history, just no speeds or talkers.
-		fmt.Fprintf(os.Stderr, "gnulte-lan: traffic counter unavailable (%v) — running speeds-free\n", err)
+		fmt.Fprintf(os.Stderr, "gnulte-watch: traffic counter unavailable (%v) — running speeds-free\n", err)
 	}
 	// A down interface yields a nil counter (traffic.New returns (nil, nil)):
 	// the dashboard then shows every host as idle instead of panicking.
@@ -449,7 +490,7 @@ func main() {
 			histStore = loaded
 			todayEvents = watchEvents(history.OnDay(loaded, time.Now()))
 		} else {
-			fmt.Fprintf(os.Stderr, "gnulte-lan: history unavailable (%v) — continuing without it\n", err)
+			fmt.Fprintf(os.Stderr, "gnulte-watch: history unavailable (%v) — continuing without it\n", err)
 		}
 	}
 	// The kernel neighbour table is cheap to read fresh whenever the ARP
@@ -643,7 +684,7 @@ func main() {
 					if eerr == nil {
 						cfgLoaded = updated
 						if serr := settings.Save(cfgLoaded); serr != nil {
-							fmt.Fprintf(os.Stderr, "gnulte-lan: settings: %v\n", serr)
+							fmt.Fprintf(os.Stderr, "gnulte-watch: settings: %v\n", serr)
 						}
 						iv, histCap, alarmRateKbps, alarmLatencyMs, timeout =
 							configLive(cfgLoaded, *interval, *histSamples, *alarmRate, *alarmLat)
@@ -697,7 +738,7 @@ func main() {
 				}
 				if err := history.Append(histPath, snap); err != nil && !histWriteErr {
 					histWriteErr = true
-					fmt.Fprintf(os.Stderr, "gnulte-lan: history not writable (%v) — timeline disabled\n", err)
+					fmt.Fprintf(os.Stderr, "gnulte-watch: history not writable (%v) — timeline disabled\n", err)
 				}
 				sess.hist = append(sess.hist, snap)
 			}
@@ -728,7 +769,7 @@ func main() {
 			rec := history.Entry{Kind: kind, TS: ev.when.Format(time.RFC3339), IP: ev.ip, Name: ev.name}
 			if err := history.Append(histPath, rec); err != nil && !histWriteErr {
 				histWriteErr = true
-				fmt.Fprintf(os.Stderr, "gnulte-lan: history not writable (%v) — timeline disabled\n", err)
+				fmt.Fprintf(os.Stderr, "gnulte-watch: history not writable (%v) — timeline disabled\n", err)
 			}
 		}
 		if jsonMode {
@@ -1363,14 +1404,14 @@ func dirLine(mark string, b, p int64, iv int) string {
 // asking first when a human is at the keyboard. Human output goes through
 // ux.Out, so --json (which points ux.Out at stderr) keeps stdout pure.
 func wrapUpReport(sess *lanSession, htmlDefault bool) {
-	path := reportdir.DefaultPathCount(reportdir.GNULTELan, "gnulte-lan-report", len(sess.hosts))
+	path := reportdir.DefaultPathCount(reportdir.GNULTEWatch, "gnulte-watch-report", len(sess.hosts))
 	if ux.TTY() && ux.Out == os.Stdout {
 		defaultYes := "y"
 		if !htmlDefault {
 			defaultYes = "n"
 		}
 		reader := bufio.NewReader(os.Stdin)
-		fmt.Fprintf(ux.Out, "\nWrite the GNULTE-LAN report to %s? [Y/n] ", path)
+		fmt.Fprintf(ux.Out, "\nWrite the GNULTE-WATCH report to %s? [Y/n] ", path)
 		ans, _ := reader.ReadString('\n')
 		ans = strings.TrimSpace(strings.ToLower(ans))
 		if ans == "" {
@@ -1384,7 +1425,7 @@ func wrapUpReport(sess *lanSession, htmlDefault bool) {
 		return // scripted (non-TTY) runs only file a report when settings allow
 	}
 	if err := writeReport(path, sess); err != nil {
-		fmt.Fprintf(os.Stderr, "gnulte-lan: could not write report: %v\n", err)
+		fmt.Fprintf(os.Stderr, "gnulte-watch: could not write report: %v\n", err)
 		return
 	}
 	fmt.Fprintf(ux.Out, "  Report: %s\n", path)
@@ -1415,6 +1456,6 @@ func configLive(c settings.Config, intervalFlag, historyFlag, alarmRateFlag, ala
 }
 
 func fatal(err error) {
-	fmt.Fprintf(os.Stderr, "gnulte-lan: %v\n", err)
+	fmt.Fprintf(os.Stderr, "gnulte-watch: %v\n", err)
 	os.Exit(1)
 }

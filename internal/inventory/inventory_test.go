@@ -121,7 +121,7 @@ func TestMergeListBulk(t *testing.T) {
 	path := saveToTmp(t)
 	existing := []Record{{IP: "10.0.0.1", Kind: "Router", FirstSeen: "old", LastSeen: "old"}}
 	sightings := []Record{
-		{IP: "10.0.0.1", Vendor: "ACME", Kind: "Router"}, // refresh
+		{IP: "10.0.0.1", Vendor: "ACME", Kind: "Router"},  // refresh
 		{IP: "10.0.0.2", Vendor: "Xiaomi", Kind: "Phone"}, // new
 		{IP: "10.0.0.3", Vendor: "Self", IsSelf: true},    // new
 	}

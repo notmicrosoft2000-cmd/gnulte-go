@@ -195,7 +195,7 @@ host and a 0–100 health score (loss first, then drift from the host's own
 baseline, spread and churn). Tests cover the latch FSM, daily loss aggregation,
 the feed schema, the screen-6 render and the trend/health math.
 
-### 16.14 — Sweepers with memory + `--compare`
+### 16.14 — Sweepers with memory + `--compare`  — **SHIPPED** (v16.14)
 - Extend the inventory store with ports / banners / alive-times.
 - gnulte-scan/devices alert "**new port appeared**" / "port closed since last run" on stderr + report.
 - **Banner depth**: TLS ClientHello via stdlib `tls.Dial` (ServerHello version/cipher, SNI), SSH version grab (line read), SMB negotiate parse — all pure stdlib, tested against in-process fake servers.
@@ -203,6 +203,18 @@ the feed schema, the screen-6 render and the trend/health math.
 - **`gnulte --compare A B`**: diff two report JSON snapshots → human + HTML "what changed".
 - **`--oui-file`**: merge a user CSV vendor table on top of the built-in.
 - Touch: cmd/gnulte-scan, cmd/gnulte-inventory, cmd/gnulte, internal/inventory, internal/ident.
+
+**As built:** `internal/inventory` now keeps a per-host sighting history with
+ports, banners and accumulated awake time behind `FormatAwake`, merged on every
+`RememberTo`; the scan reports it. `internal/scanner` diffs the last sighting
+against the new one, and both stderr and the HTML report name new and closed
+ports. `internal/banners` adds stdlib TLS, SSH and SMB grabs behind in-process
+fake servers. `internal/snapshot` parses and diffs two `-j` exports and renders
+the result as text or a self-contained HTML page; `gnulte` reaches it through
+`--compare A B` and `--compare-html FILE`. The `--oui-file` flag takes a
+`prefix,vendor` CSV and overlays the embedded OUI table in both the scan and
+inventory tools. Tests cover the sighting merge, the diff, the banner parsers,
+the snapshot round-trip and the CSV override.
 
 ### 16.15 — Cleanup + soak + report + wifi
 - **gofmt the 7 drifted files** (targeted cleanup; verify the diff is formatting-only).

@@ -19,8 +19,8 @@ func TestDiffLifecycle(t *testing.T) {
 	}
 	next := []discover.Row{
 		row("10.0.0.1", "aa:1", "RouterCo", "Router/Gateway", "gateway"), // same → ALIVE
-		row("10.0.0.2", "aa:2", "ACME", "Phone", "renamed"),               // host moved → CHANGED
-		row("10.0.0.9", "aa:9", "Tesla", "Car", "model-s"),                // brand new
+		row("10.0.0.2", "aa:2", "ACME", "Phone", "renamed"),              // host moved → CHANGED
+		row("10.0.0.9", "aa:9", "Tesla", "Car", "model-s"),               // brand new
 	}
 	d := Diff(prev, next)
 	if got := d["10.0.0.1"]; got != DeltaAlive {
@@ -108,10 +108,10 @@ func TestDeltaChangesNarrowsToMovement(t *testing.T) {
 
 func TestDeltaChangeIPsSorted(t *testing.T) {
 	d := Delta{
-		"10.0.0.1": DeltaAlive,
+		"10.0.0.1":  DeltaAlive,
 		"10.0.0.10": DeltaNew,
-		"10.0.0.2": DeltaGone,
-		"10.0.0.3": DeltaChanged,
+		"10.0.0.2":  DeltaGone,
+		"10.0.0.3":  DeltaChanged,
 	}
 	got := d.ChangeIPs()
 	want := []string{"10.0.0.10", "10.0.0.2", "10.0.0.3"}

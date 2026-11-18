@@ -39,14 +39,14 @@ import (
 
 // Record is one device in the shared store.
 type Record struct {
-	IP       string `json:"ip"`
-	MAC      string `json:"mac,omitempty"`
-	Vendor   string `json:"vendor,omitempty"`
-	Host     string `json:"host,omitempty"`
-	Kind     string `json:"kind,omitempty"`
+	IP        string `json:"ip"`
+	MAC       string `json:"mac,omitempty"`
+	Vendor    string `json:"vendor,omitempty"`
+	Host      string `json:"host,omitempty"`
+	Kind      string `json:"kind,omitempty"`
 	FirstSeen string `json:"first_seen,omitempty"` // RFC3339
-	LastSeen string `json:"last_seen,omitempty"`   // RFC3339
-	IsSelf   bool   `json:"is_self,omitempty"`
+	LastSeen  string `json:"last_seen,omitempty"`  // RFC3339
+	IsSelf    bool   `json:"is_self,omitempty"`
 
 	// The fields below are the "sweeper memory": what the last deep scan saw
 	// and how long the host has been reachable across sweeps.

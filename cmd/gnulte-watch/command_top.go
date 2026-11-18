@@ -46,7 +46,6 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-
 func topMain() {
 	var (
 		interval = flag.Int("i", 1, "sampling interval in seconds")

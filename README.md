@@ -1,7 +1,7 @@
 # GNULTE · Go edition
 
 
-![version](https://img.shields.io/badge/version-16.13-62a0ea)
+![version](https://img.shields.io/badge/version-16.14-62a0ea)
 ![language](https://img.shields.io/badge/Go-1.21-00ADD8)
 ![platform](https://img.shields.io/badge/platform-Linux-9cf)
 ![tests](https://img.shields.io/badge/tests-go%20vet%20%2B%20go%20test-2ea44f)

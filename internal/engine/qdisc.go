@@ -28,13 +28,13 @@ import (
 // `tc -s qdisc show` while a test runs. It is the "see the hand" telemetry of
 // GNULTE 15: the operator watches the impairment land on real packets.
 type Qdisc struct {
-	Found    bool  // a netem leaf was present in the qdisc dump
-	Limit    int   // netem packet limit (1000 by default)
-	DelayMs  int   // configured base delay, ms (the whole "delay a.b c.d" spec is not parsed)
-	Delayed  int64 // packets the netem tree delayed (lifetime)
+	Found     bool  // a netem leaf was present in the qdisc dump
+	Limit     int   // netem packet limit (1000 by default)
+	DelayMs   int   // configured base delay, ms (the whole "delay a.b c.d" spec is not parsed)
+	Delayed   int64 // packets the netem tree delayed (lifetime)
 	Reordered int64 // packets re-ordered (lifetime)
-	Dropped  int64 // packets dropped by the qdisc (lifetime)
-	Backlog  int64 // packets waiting in the queue right now
+	Dropped   int64 // packets dropped by the qdisc (lifetime)
+	Backlog   int64 // packets waiting in the queue right now
 }
 
 // QdiscStats reads the current qdisc tree of the interface and parses the

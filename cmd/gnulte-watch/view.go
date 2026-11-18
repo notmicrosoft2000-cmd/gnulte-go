@@ -867,7 +867,7 @@ func mapLines(hosts []string, info map[string]hostInfo, rates map[string]traffic
 	}
 
 	// Hub cards: the gateway and this machine.
-	gwTxt, gwName := "◇ " + ux.C(ux.Yellow, "no gateway"), " (none detected)"
+	gwTxt, gwName := "◇ "+ux.C(ux.Yellow, "no gateway"), " (none detected)"
 	if env.gwIP != "" {
 		gwTxt = "  ◇ " + ux.C(ux.Yellow, env.gwIP)
 		gwName = " " + gwCell(env.gwRTT)

@@ -45,7 +45,6 @@ import (
 	"gnulte-go/internal/ux"
 )
 
-
 func traceMain() {
 	var (
 		maxHops  = flag.Int("m", 30, "maximum number of hops")

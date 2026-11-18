@@ -31,10 +31,10 @@ import (
 type DeltaStatus int
 
 const (
-	DeltaAlive DeltaStatus = iota // present in both, unchanged detail
-	DeltaNew                      // appeared since the previous scan
-	DeltaGone                     // present before, missing now
-	DeltaChanged                  // present in both, but MAC/vendor/type/host moved
+	DeltaAlive   DeltaStatus = iota // present in both, unchanged detail
+	DeltaNew                        // appeared since the previous scan
+	DeltaGone                       // present before, missing now
+	DeltaChanged                    // present in both, but MAC/vendor/type/host moved
 )
 
 func (s DeltaStatus) String() string {

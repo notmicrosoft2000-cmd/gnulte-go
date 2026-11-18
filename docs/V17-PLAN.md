@@ -236,6 +236,19 @@ suffix instead of overwriting. The `compare` subcommand wraps `internal/snapshot
 so the same diff is now a standalone tool. Wired into build/install/uninstall
 and `.gitignore`. The version stays 16.14 until 16.15 ships as a whole.
 
+**Wifi chunk built (16.15 is not yet complete):** `--reason` now takes a numeric
+code or a preset name, with `--list-reasons` printing the presets. Presets live
+in `internal/airframes` (`ParseReason`, `ReasonPresets`, `FormatReason`) beside
+the existing frame builders; named codes are aliases for the same 0-65535
+values and an explicit reason turns off reason rotation. `-s/--station` accepts
+a comma-separated list, and `--streak N` sends N bursts to each station before
+switching to the next (client steering). New pure helpers in `cmd/gnulte-wifi`:
+`ParseStations`, `stationForBurst`, `JitterStats` (per-frame delay counts) and
+`DwellStats` (hop time per channel). Both accumulators are fed by the burst loop
+and read no clock; the closing summary reports jitter and dwell totals. The
+adapter must already be in monitor mode — no channel scanning was added. The
+version stays 16.14 until 16.15 ships as a whole.
+
 ### 17.0 — Cap
 Full docs pass, bare-box verification checklist executed, version → 17.0, README title/shield/alt + tool table (6 tools), `social-preview` refresh if time allows.
 

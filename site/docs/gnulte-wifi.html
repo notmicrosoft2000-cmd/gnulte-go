@@ -30,9 +30,10 @@
     
 
     <p>An 802.11 Deauthentication frame is crafted with the source MAC set to the
-    access point's BSSID and the destination set to one station. The station assumes its
-    router disconnected it and drops the Wi-Fi association — the same behaviour as a
-    router's &ldquo;kick client&rdquo; control, reproduced for authorised testing.</p>
+    access point's BSSID and the destination set to a target station. The station assumes
+    its router disconnected it and drops the Wi-Fi association — the same behaviour as a
+    router's &ldquo;kick client&rdquo; control, reproduced for authorised testing. Several
+    stations can be listed for client steering.</p>
 
     <div class="warn">
       <b>Authorised testing only.</b> Deauthenticating clients on a network you do not
@@ -61,8 +62,10 @@ sudo gnulte-wifi -i wlan0mon -a 00:0c:41:63:45:6a -s aa:bb:cc:dd:ee:ff</code></p
       <tr><th>Option</th><th>Description</th></tr>
       <tr><td><code>-i, --interface IFACE</code></td><td>wireless interface in monitor mode (e.g. <code>wlan0mon</code>)</td></tr>
       <tr><td><code>-a, --ap MAC</code></td><td>access point BSSID (the router's MAC)</td></tr>
-      <tr><td><code>-s, --station MAC</code></td><td>station to disconnect; <code>ff:ff:ff:ff:ff:ff</code> = every client on the BSSID</td></tr>
-      <tr><td><code>--reason CODE</code></td><td>802.11 deauth reason code (default 7 = STA leaving BSS)</td></tr>
+      <tr><td><code>-s, --station MAC[,...]</code></td><td>station(s) to disconnect, comma-separated; <code>ff:ff:ff:ff:ff:ff</code> = every client on the BSSID</td></tr>
+      <tr><td><code>--reason CODE|NAME</code></td><td>deauth reason: a number from 0 to 65535 or a preset name (default <code>7</code> = leaving); an explicit reason turns off rotation</td></tr>
+      <tr><td><code>--list-reasons</code></td><td>list the named reasons and exit</td></tr>
+      <tr><td><code>--streak N</code></td><td>bursts per station before switching to the next, for client steering (default 1)</td></tr>
       <tr><td><code>--count N</code></td><td>frames per burst (default 64)</td></tr>
       <tr><td><code>--delay SECONDS</code></td><td>seconds between bursts (repeat kicks a client that reconnects; default 5)</td></tr>
       <tr><td><code>--jitter-ms N</code></td><td>random 0&ndash;N ms delay before each frame — irregular timing defeats reconnect timers (0 = no jitter)</td></tr>
@@ -81,9 +84,33 @@ sudo gnulte-wifi -i wlan0mon -a 00:0c:41:63:45:6a -s aa:bb:cc:dd:ee:ff</code></p
       <tr><td><code>-h, --help</code></td><td>show the built-in help</td></tr>
     </table></div>
 
+    <h2 id="reasons">Reason presets</h2>
+    <p>The deauth reason accepts a number from 0 to 65535 or a preset name. Presets
+    such as <code>leaving</code>, <code>inactivity</code> and <code>handshake</code>
+    map to the codes a station would see on a normal disconnect.
+    <code>--list-reasons</code> prints the full list. Any numeric code is still
+    accepted; unnamed codes are sent as-is. An explicit <code>--reason</code> turns
+    off reason rotation.</p>
+
+    <h2 id="steering">Client steering</h2>
+    <p>Pass several MACs to <code>-s</code>, separated by commas, to spread a test
+    across clients. <code>--streak N</code> sends N bursts to one station before
+    moving to the next, then wraps. With one station the streak setting has no
+    effect. The adapter must already be in monitor mode; this version does not scan
+    channels.</p>
+
+    <h2 id="stats">Jitter and dwell totals</h2>
+    <p>The closing summary counts the jitter applied to each frame: how many frames
+    were delayed, the smallest and largest delay and the average. With
+    <code>--hop-channels</code> it also reports the time spent on each channel and
+    the number of bursts sent there.</p>
+
     <h2 id="examples">Examples</h2>
 <div class="terminal"><div class="terminal-head"><span><span class="dots"><i></i><i></i><i></i></span>command / output</span><button class="copy" type="button">copy</button></div><div class="terminal-body"><pre><code>sudo gnulte-wifi -i wlan0mon -a 00:0c:41:63:45:6a -s aa:bb:cc:dd:ee:ff --once
-sudo gnulte-wifi -i wlan0mon -a 00:0c:41:63:45:6a -s ff:ff:ff:ff:ff:ff --duration 60 --jitter-ms 150</code></pre></div></div>
+sudo gnulte-wifi -i wlan0mon -a 00:0c:41:63:45:6a -s ff:ff:ff:ff:ff:ff --duration 60 --jitter-ms 150
+gnulte-wifi --list-reasons
+sudo gnulte-wifi -i wlan0mon -a 00:0c:41:63:45:6a -s aa:bb:cc:dd:ee:ff --reason inactivity
+sudo gnulte-wifi -i wlan0mon -a 00:0c:41:63:45:6a -s aa:bb:cc:dd:ee:ff,11:22:33:44:55:66 --streak 2 --hop-channels</code></pre></div></div>
 
     <h2 id="installation">Installation</h2>
     <p>Part of the GNULTE suite. Build and install everything at once;</p>
@@ -109,7 +136,7 @@ sudo ./install.sh   # installs to /usr/local/bin + safety docs</code></pre></div
       <li><a href="gnulte.html">gnulte</a> — the wired equivalent: impair rather than disconnect</li>
       <li><a href="gnulte-scan.html">gnulte-scan</a> — identify the clients before testing them</li>
     </ul>
-  </div></div><aside class="docrail"><div class="docrail-title">On this page</div><ul><li><a href="#requirements">Requirements</a></li><li><a href="#synopsis">Synopsis</a></li><li><a href="#options">Options</a></li><li><a href="#examples">Examples</a></li><li><a href="#installation">Installation</a></li><li><a href="#common-errors">Common errors</a></li><li><a href="#related-tools">Related tools</a></li></ul><div class="docrail-title">Command</div><dl class="facts"><dt>binary</dt><dd>gnulte-wifi(8)</dd><dt>v16.13 reference</dt><dd>flags as shipped</dd><dt>also</dt><dd><a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">source</a></dd></dl><ul class="link-list"><li><span class="arrow">&rarr;</span><a href="#options">All flags: <code>-h</code></a></li></ul></aside></div>
+  </div></div><aside class="docrail"><div class="docrail-title">On this page</div><ul><li><a href="#requirements">Requirements</a></li><li><a href="#synopsis">Synopsis</a></li><li><a href="#options">Options</a></li><li><a href="#reasons">Reason presets</a></li><li><a href="#steering">Client steering</a></li><li><a href="#stats">Jitter and dwell totals</a></li><li><a href="#examples">Examples</a></li><li><a href="#installation">Installation</a></li><li><a href="#common-errors">Common errors</a></li><li><a href="#related-tools">Related tools</a></li></ul><div class="docrail-title">Command</div><dl class="facts"><dt>binary</dt><dd>gnulte-wifi(8)</dd><dt>v16.13 reference</dt><dd>flags as shipped</dd><dt>also</dt><dd><a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">source</a></dd></dl><ul class="link-list"><li><span class="arrow">&rarr;</span><a href="#options">All flags: <code>-h</code></a></li></ul></aside></div>
 </main>
 <footer class="colophon"><div class="wrap">
 <div class="colophon-grid">

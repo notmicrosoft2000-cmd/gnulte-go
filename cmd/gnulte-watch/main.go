@@ -72,6 +72,7 @@ import (
 	"gnulte-go/internal/sound"
 	"gnulte-go/internal/traffic"
 	"gnulte-go/internal/tui"
+	"gnulte-go/internal/update"
 	"gnulte-go/internal/ux"
 )
 
@@ -244,6 +245,8 @@ type lanSession struct {
 }
 
 func main() {
+	update.MaybeCheck(version, os.Args[1:])
+
 	// Two tools live in this binary. `trace`/`top` (and the --trace convenience
 	// flag) are dispatched here, before the watch's own flag set is registered,
 	// so their flags — which share -t, -q, -json with the watch — never collide

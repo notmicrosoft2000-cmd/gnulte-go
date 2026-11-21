@@ -33,6 +33,7 @@ import (
 	"gnulte-go/internal/report"
 	"gnulte-go/internal/reportdir"
 	"gnulte-go/internal/snapshot"
+	"gnulte-go/internal/update"
 )
 
 const version = "17.0"
@@ -51,6 +52,7 @@ compare take the -j / --json exports of gnulte-scan or gnulte-inventory. All
 output is written to stdout unless -o / -html is given.`
 
 func main() {
+	update.MaybeCheck(version, os.Args[1:])
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "gnulte-report:", err)
 		os.Exit(1)

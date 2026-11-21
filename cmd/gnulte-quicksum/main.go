@@ -27,12 +27,14 @@ import (
 	"os"
 
 	"gnulte-go/internal/doctor"
+	"gnulte-go/internal/update"
 	"gnulte-go/internal/ux"
 )
 
 const version = "17.0"
 
 func main() {
+	update.MaybeCheck(version, os.Args[1:])
 	var (
 		asJSON  = flag.Bool("json", false, "output the report as JSON")
 		quiet   = flag.Bool("q", false, "quiet: print only warnings and failures")

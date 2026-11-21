@@ -52,6 +52,7 @@ import (
 	"gnulte-go/internal/settings"
 	"gnulte-go/internal/sound"
 	"gnulte-go/internal/tui"
+	"gnulte-go/internal/update"
 	"gnulte-go/internal/ux"
 )
 
@@ -81,6 +82,7 @@ func (s *session) pl(display, plain string) {
 }
 
 func main() {
+	update.MaybeCheck(version, os.Args[1:])
 	var (
 		iface       = flag.String("i", "", "network interface (default: auto-detect)")
 		cidr        = flag.String("C", "", "CIDR to scan (default: from interface)")

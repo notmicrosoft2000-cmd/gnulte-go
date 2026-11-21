@@ -168,7 +168,7 @@ func TestV17JSONKeysAndOldKeyCompatibility(t *testing.T) {
 		"uptime_guess", "rogue_flag", "arp_sweep", "stealth_arp",
 		"wifi_jitter_ms", "wifi_mix_reasons", "wifi_hop", "wifi_channels",
 		"advanced", "typing", "history", "service_discovery",
-		"hub_detailed", "topology_animation",
+		"hub_detailed", "topology_animation", "auto_update",
 	}
 	for _, k := range wantKeys {
 		if _, ok := keys[k]; !ok {
@@ -191,5 +191,38 @@ func TestV17KeysDefaultWhenMissing(t *testing.T) {
 	}
 	if got.HubDetailed != Default().HubDetailed || got.TopologyAnimation != Default().TopologyAnimation {
 		t.Fatalf("missing v17 keys did not use defaults: %+v", got)
+	}
+}
+
+func TestAutoUpdateDefaultsTrueAndRoundTrips(t *testing.T) {
+	if !Default().AutoUpdate {
+		t.Fatal("AutoUpdate default = false, want true")
+	}
+	c := Default()
+	c.AutoUpdate = false
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := SaveTo(c, path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved map[string]any
+	if err := json.Unmarshal(data, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := saved["auto_update"]; !ok || v != false {
+		t.Fatalf("saved auto_update = %v (present=%v), want false:\n%s", v, ok, data)
+	}
+	got, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != c {
+		t.Fatalf("round trip mismatch:\n got %+v\nwant %+v", got, c)
+	}
+	if got.AutoUpdate {
+		t.Fatal("AutoUpdate = true after round trip, want false")
 	}
 }

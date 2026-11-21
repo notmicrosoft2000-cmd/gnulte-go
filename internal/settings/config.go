@@ -67,6 +67,7 @@ type Config struct {
 	// files load without migration or rewriting.
 	HubDetailed       bool `json:"hub_detailed"`       // show the Detailed controls step in gnulte-hub
 	TopologyAnimation bool `json:"topology_animation"` // animate the PATH topology in gnulte-watch
+	AutoUpdate        bool `json:"auto_update"`        // check for a newer version on startup (TTY only)
 }
 
 // Default returns the built-in defaults, used when no config file exists.
@@ -103,6 +104,7 @@ func Default() Config {
 
 		HubDetailed:       false,
 		TopologyAnimation: true,
+		AutoUpdate:        true,
 	}
 }
 

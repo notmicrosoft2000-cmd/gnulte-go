@@ -268,6 +268,8 @@ func buildItems() []editItem {
 			"ask Standard/Detailed before launching a tool from gnulte-hub", boolText(false)),
 		boolRow("topology animation", func(c *Config) *bool { return &c.TopologyAnimation },
 			"animate the PATH topology in gnulte-watch when reduced motion is not active", boolText(true)),
+		boolRow("check for updates on startup", func(c *Config) *bool { return &c.AutoUpdate },
+			"check once per day for a newer GNULTE version when a tool starts in a terminal", boolText(true)),
 	}
 
 	// Fill in each row's page from the preceding header and mark the one

@@ -190,10 +190,15 @@ func TestSettingsLabelsAndHelpFixes(t *testing.T) {
 
 	e.setPage(4)
 	frame = strings.Join(e.lines(110, 30), "\n")
-	for _, want := range []string{"typing animation", "Detailed controls in hub", "topology animation"} {
+	for _, want := range []string{"typing animation", "Detailed controls in hub", "topology animation", "check for updates on startup"} {
 		if !strings.Contains(frame, want) {
 			t.Fatalf("TERMINAL & UI page missing %q:\n%s", want, frame)
 		}
+	}
+	updates := findItem(t, e, "check for updates on startup")
+	cfg.AutoUpdate = false
+	if err := updates.set(&cfg, "on"); err != nil || !cfg.AutoUpdate {
+		t.Fatalf("startup update row no longer toggles AutoUpdate: err=%v cfg=%+v", err, cfg)
 	}
 }
 

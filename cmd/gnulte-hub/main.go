@@ -34,6 +34,7 @@ import (
 
 	"gnulte-go/internal/settings"
 	"gnulte-go/internal/tui"
+	"gnulte-go/internal/update"
 	"gnulte-go/internal/ux"
 )
 
@@ -408,6 +409,7 @@ asks for administrator access only when it needs it.
 }
 
 func main() {
+	update.MaybeCheck(version, os.Args[1:])
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.BoolVar(showVersion, "v", false, "print version and exit")
 	flag.Usage = usage

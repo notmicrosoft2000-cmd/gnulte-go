@@ -27,6 +27,15 @@ one, or open all the detailed settings. The first two ask which device and how
 slow, then use the same profiles and engine as the flags below. Every flag
 still behaves exactly as before.
 
+## Automatic updates
+
+On an interactive terminal, every tool briefly checks GitHub for a newer
+`VERSION` file at startup. If one exists it asks whether to install; saying yes
+downloads a fresh source tree into a temporary directory, builds there, and
+runs `install.sh`. Nothing is installed without confirmation, and the check is
+skipped for `--version`, `--help`, scripts, and when
+`GNULTE_NO_UPDATE=1` is set. See [docs/AUTO-UPDATE.md](docs/AUTO-UPDATE.md).
+
 ## Seven tools and a front door
 
 | Binary | Root | What it does |

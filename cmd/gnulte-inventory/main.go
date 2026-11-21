@@ -20,12 +20,14 @@ import (
 	"gnulte-go/internal/netutil"
 	"gnulte-go/internal/out"
 	"gnulte-go/internal/safety"
+	"gnulte-go/internal/update"
 	"gnulte-go/internal/ux"
 )
 
 const version = "17.0"
 
 func main() {
+	update.MaybeCheck(version, os.Args[1:])
 	var (
 		iface      = flag.String("i", "", "network interface (default: auto-detect)")
 		doScan     = flag.Bool("s", false, "also ping-sweep the subnet (default: ARP table only)")

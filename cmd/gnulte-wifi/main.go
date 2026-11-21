@@ -42,12 +42,14 @@ import (
 	"gnulte-go/internal/safety"
 	"gnulte-go/internal/settings"
 	"gnulte-go/internal/tui"
+	"gnulte-go/internal/update"
 	"gnulte-go/internal/ux"
 )
 
 const version = "17.0"
 
 func main() {
+	update.MaybeCheck(version, os.Args[1:])
 	var (
 		ifaceArg  = flag.String("i", "", "wireless interface in monitor mode (e.g. wlan0mon)")
 		bssidArg  = flag.String("a", "", "access point BSSID (router MAC), e.g. 00:0c:41:63:45:6a")

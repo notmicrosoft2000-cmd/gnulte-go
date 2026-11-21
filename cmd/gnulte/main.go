@@ -47,6 +47,7 @@ import (
 	"gnulte-go/internal/scenario"
 	"gnulte-go/internal/settings"
 	"gnulte-go/internal/tui"
+	"gnulte-go/internal/update"
 	"gnulte-go/internal/ux"
 )
 
@@ -106,6 +107,7 @@ func clamp(v, lo, hi int) int {
 }
 
 func main() {
+	update.MaybeCheck(version, os.Args[1:])
 	var (
 		ifaceArg  = flag.String("i", "", "network interface (default: auto-detect)")
 		targets   = flag.String("t", "", "target IP(s), comma-separated (hostnames and .local names resolve automatically)")

@@ -6,6 +6,9 @@ set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 cd "$(dirname "$0")"
 
+echo "== building gnulte-hub (cmd/gnulte-hub) =="
+go build -o gnulte-hub ./cmd/gnulte-hub
+
 echo "== building gnulte-scan (cmd/gnulte-scan) =="
 go build -o gnulte-scan ./cmd/gnulte-scan
 
@@ -31,4 +34,4 @@ echo "== running tests =="
 go test ./cmd/... ./internal/...
 go vet ./cmd/... ./internal/...
 
-echo "== done: ./gnulte-scan ./gnulte ./gnulte-wifi ./gnulte-watch ./gnulte-inventory ./gnulte-quicksum ./gnulte-report =="
+echo "== done: ./gnulte-hub ./gnulte-scan ./gnulte ./gnulte-wifi ./gnulte-watch ./gnulte-inventory ./gnulte-quicksum ./gnulte-report =="

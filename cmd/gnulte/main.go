@@ -345,6 +345,40 @@ func main() {
 		}
 	}
 
+	// With no targeting or impairment flags, a terminal launch opens the
+	// plain-language front end instead of the twelve-profile wizard. It only
+	// sets the flags an advanced operator would have typed, so targeting, the
+	// root handshake, the engine and reporting are all unchanged.
+	simple := false
+	if interactive &&
+		*targets == "" && *macArg == "" && *rangeCIDR == "" &&
+		*devTypes == "" && *vendors == "" && *profile == "" &&
+		*latency == 0 && *jitter == 0 && *loss == 0 && *dup == 0 &&
+		*reorder == 0 && *bandwidth == 0 &&
+		!*block && !*randomArg && !*dupcheckArg &&
+		*scenarioArg == "" && *perTarget == "" {
+		switch simpleMenuChoice() {
+		case simpleQuit:
+			fmt.Println("Nothing was started.")
+			return
+		case simpleBlock:
+			*block = true
+			simple = true
+		case simpleShape:
+			p, ok := simpleProfileChoice()
+			if !ok {
+				fmt.Println("Aborted — nothing was started.")
+				return
+			}
+			if p != "" {
+				*profile = p
+				simple = true
+			}
+		case simpleAdvanced:
+			// Keep the detailed wizard below.
+		}
+	}
+
 	scanCtx := sigCtx
 	var targetsList []string
 	switch {
@@ -459,7 +493,7 @@ func main() {
 	if !explicit["sound"] && !explicit["no-sound"] {
 		beep = prefs.Beeps
 	}
-	if interactive && ec.Mode != engine.ModeBlock && scen == nil {
+	if interactive && !simple && ec.Mode != engine.ModeBlock && scen == nil {
 		paramsWizard(&ec, duration, &beep, interval)
 	}
 	// A stray Ctrl-D anywhere in the wizard is an abort, not a "keep every
@@ -1095,6 +1129,10 @@ func usage() {
 Usage:
   gnulte [options]        (prompts for sudo on first launch)
   sudo gnulte [options]
+
+New here? Run gnulte-hub for a simple menu of every tool. With no options,
+gnulte opens a short plain-language menu; every flag below still works as
+before, including the detailed wizard when you pick "I know what I'm doing".
 
 Targeting:
   -t, --target IP       target IP(s), comma-separated (hostnames and .local

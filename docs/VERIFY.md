@@ -39,6 +39,20 @@ privilege, which is expected in a sandbox.
 Site checks: every relative link in the HTML pages resolves to a file, and
 `site/feed.xml` parses as Atom XML with the v17.0 entry first.
 
+## Launcher and simple menu
+
+A later pass on the same checkout added `gnulte-hub` and the plain-language
+front end in `gnulte`. The full matrix above was run again after those edits,
+including the race build and the Darwin vet, with no failures. The piped hub
+run used option 8 to read the safety documents through `gnulte --docs`, then
+option 9 to quit. Two PTY runs reached the simple menu: option 4 quit without
+starting anything, and `1q` opened the effect menu and aborted. All eight
+`--version` banners report v17.0.
+
+The PTY runs used `script -qec './gnulte' /dev/null` with input on stdin. They
+cover menu navigation only; no shaping session was started, so the root and
+live-hardware checks below still stand.
+
 ## Deferred — root or live hardware needed
 
 Run these on a bare box before the release can be called proven there:

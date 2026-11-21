@@ -29,6 +29,12 @@ import (
 // terminal, so the caller can fall back to plain interactive prompts.
 var ErrNotTerminal = errors.New("a real terminal is required")
 
+// One input decoder is shared by every screen in the process. A single read
+// can collect several keys, so keeping the stream alive means a key typed just
+// as one screen closes is still there when the next one opens. The two simple
+// menus in gnulte open back to back. Screens are opened one at a time.
+var sharedKeys = newKeyStream(int(os.Stdin.Fd()))
+
 // Screen is a raw-mode, full-screen terminal for one interactive editor. It
 // enters the alternate buffer, switches stdin to non-canonical input, and
 // guarantees the terminal is restored on Close or on any signal.
@@ -57,7 +63,7 @@ func Open() (*Screen, error) {
 		return nil, errors.New("could not switch the terminal to raw input")
 	}
 	s.restore = restore
-	s.keys = newKeyStream(s.fd)
+	s.keys = sharedKeys
 	if leave, ok := EnterView(); ok {
 		s.leave = leave
 	}

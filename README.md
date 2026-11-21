@@ -16,10 +16,22 @@ test. Scan the LAN, shape a target’s traffic with real kernel `tc netem`,
 watch every device live, and hand off from one tool to the next: the whole
 toolkit shares one live view of your network.
 
-## The seven tools
+## Start here
+
+`gnulte-hub` is the easy way in. Run it with no options and pick what you want
+to do from a menu. It finds the other binaries beside itself or on your `PATH`
+and runs them in the same terminal. Nothing is started until you choose.
+
+Running `gnulte` on its own opens a shorter menu too: slow down a device, block
+one, or open all the detailed settings. The first two ask which device and how
+slow, then use the same profiles and engine as the flags below. Every flag
+still behaves exactly as before.
+
+## Seven tools and a front door
 
 | Binary | Root | What it does |
 | --- | --- | --- |
+| `gnulte-hub` | no | Friendly menu that finds and runs the tools below. Does no network work itself |
 | `gnulte` | **yes** | Interactive shaping engine — ARP-spoofed routing into `tc netem` (latency, jitter, loss, duplication, reordering, bandwidth), live dashboard, live `tc -s qdisc` telemetry, HTML report. Discreet `-S` stealth spoofing |
 | `gnulte-watch` | optional | Live LAN watch with a **six-screen console**: hosts, talkers (ranked with bars & peers), flows (A ⇄ B, root socket), neighbours (ARP), screen 5's **Live Interconnection map** (devices as nodes, live flows as pulsing edges), and screen 6's **history** (session alarms + today's recorded timeline). Its `top` and `trace` subcommands add live per-host bandwidth and mtr-style hop-by-hop probes. `--json` emits a JSON-lines feed; the report adds a 7-day trend |
 | `gnulte-scan` | optional | Parallel sweep + in-Go deep port scanner — OUI vendor, mDNS/NetBIOS names, device types, OS fingerprinting, `-T` tabbed browser, and live re-scanning with `--watch N` |
@@ -112,7 +124,7 @@ each independently shippable.
   reports, merges snapshots, diffs two exports and files reports into dated
   folders. `gnulte-wifi` takes named deauth reasons and comma-separated station
   lists, steers between clients with `--streak`, and counts jitter and channel
-  dwell in its closing summary. The suite is seven tools on the Go standard
+  dwell in its closing summary. The suite is seven tools and one launcher on the Go standard
   library alone.
 
 ## Steady Hands (v16)
@@ -160,7 +172,7 @@ required: raw ARP probing/injection and capture are implemented in-process.
 ```sh
 git clone https://github.com/notmicrosoft2000-cmd/gnulte-go.git
 cd gnulte-go
-./build.sh          # builds all seven binaries, runs go vet + go test on the Go packages
+./build.sh          # builds all eight executables, runs go vet + go test on the Go packages
 sudo ./install.sh   # installs to /usr/local/bin + safety docs
 ```
 
@@ -171,7 +183,8 @@ behind the source tree. Uninstall: `sudo ./uninstall.sh [--purge]`.
 ## Quick start
 
 ```sh
-sudo gnulte                                            # guided menu: target → conditions → run
+gnulte-hub                                             # friendly menu for every tool
+sudo gnulte                                            # simple menu: target → effect → run
 sudo gnulte -t 192.168.1.50 -l 300 -j 30 --duration 90 # 300ms latency + 30ms jitter, 90s auto-stop
 sudo gnulte -r 192.168.1.0/24 -w 192.168.1.100 --profile throttle --duration 600
 

@@ -3,7 +3,7 @@ set -euo pipefail
 
 # GNULTE updater: fetch a fresh source tree into a temporary directory and
 # hand it to install.sh. The caller's working tree is never touched.
-TARBALL_URL="https://github.com/notmicrosoft2000-cmd/gnulte/archive/refs/heads/main.tar.gz"
+TARBALL_URL="https://github.com/notmicrosoft2000-cmd/gnulte-go/archive/refs/heads/main.tar.gz"
 
 if ! command -v go >/dev/null 2>&1; then
   echo "Error: Go is required to build GNULTE. Install Go and try again." >&2
@@ -33,11 +33,11 @@ fi
 
 echo "GNULTE: extracting source..."
 tar -xzf source.tar.gz
-if [ ! -d gnulte-main ]; then
-  echo "Error: downloaded archive did not contain gnulte-main." >&2
+if [ ! -d gnulte-go-main ]; then
+  echo "Error: downloaded archive did not contain gnulte-go-main." >&2
   exit 1
 fi
-cd gnulte-main
+cd gnulte-go-main
 chmod +x ./install.sh 2>/dev/null || true
 
 echo "GNULTE: installing (install.sh may ask for sudo)..."

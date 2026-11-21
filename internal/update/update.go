@@ -45,7 +45,7 @@ const (
 
 var (
 	// sourceURL is a var so tests can point the check at a harmless endpoint.
-	sourceURL = "https://raw.githubusercontent.com/notmicrosoft2000-cmd/gnulte/main/VERSION"
+	sourceURL = "https://raw.githubusercontent.com/notmicrosoft2000-cmd/gnulte-go/main/VERSION"
 	// httpClient is overridden in tests with a fake transport (no sockets).
 	httpClient = &http.Client{Timeout: 2 * time.Second}
 	// findInstaller and runInstaller are overridden in tests to observe

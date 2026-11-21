@@ -311,18 +311,29 @@ func tcChangeCommands(c *Config, iface string) [][]string {
 }
 
 // blockRules returns FORWARD-chain DROP match fragments for block mode,
-// e.g. {"-d", "1.2.3.4", "-j", "DROP"}. They are applied with -I and torn
-// down with -D so Stop() can use the identical fragment.
+// e.g. {"-d", "1.2.3.4", "-m", "comment", "--comment", "GNULTE", "-j", "DROP"}.
+// They are applied with -I and torn down with -D so Stop() can use the
+// identical fragment. The comment marker lets --cleanup find its own rules
+// even after a crash or a killed session.
 func blockRules(c *Config) [][]string {
 	var rules [][]string
 	for _, t := range c.Targets {
 		if c.RangeStart != "" && t == c.RangeStart {
 			continue
 		}
-		rules = append(rules, []string{"-d", t, "-j", "DROP"})
-		rules = append(rules, []string{"-s", t, "-j", "DROP"})
+		drop := []string{"-m", "comment", "--comment", cleanupMarker, "-j", "DROP"}
+		rules = append(rules, append([]string{"-d", t}, drop...))
+		rules = append(rules, append([]string{"-s", t}, drop...))
 	}
 	return rules
+}
+
+// PlanCommands exposes the pure command builders behind --plan. It performs
+// no I/O and needs no privileges: the caller renders the returned argument
+// vectors for display only. netemArgsFor/rateFor are folded into the tc
+// trees just as they are for a live run, so the plan cannot drift from it.
+func PlanCommands(c *Config, iface string) (tree, changes, drops [][]string) {
+	return tcTreeCommands(c, iface), tcChangeCommands(c, iface), blockRules(c)
 }
 
 func readForward() (string, error) {
@@ -822,7 +833,9 @@ func (s *Session) stopSpoofs() {
 	}
 	s.spoofs = nil
 	if s.cfg.Gateway != "" {
-		s.announceRealGateway()
+		if err := s.announceRealGateway(); err != nil {
+			s.traceCommand("gateway re-announce: " + err.Error())
+		}
 	}
 }
 
@@ -833,32 +846,31 @@ func (s *Session) stopSpoofs() {
 // enforcing — so it actively re-poisons the link at teardown. Putting the
 // router's own MAC in the sender field is exactly what correcting it needs,
 // and that requires raw-crafting the frame (arping's -s sets the IP, never
-// the sender MAC).
-func (s *Session) announceRealGateway() {
+// the sender MAC). The error is returned so forced Cleanup can report a
+// failed re-announce; normal teardown merely traces it.
+func (s *Session) announceRealGateway() error {
 	gw := net.ParseIP(s.cfg.Gateway)
 	if gw == nil {
-		return
+		return fmt.Errorf("invalid gateway address %q", s.cfg.Gateway)
 	}
 	gmac, err := arpLookupMAC(s.cfg.Interface, s.cfg.Gateway)
 	if err != nil {
-		s.traceCommand(fmt.Sprintf("gateway MAC unknown at teardown (%v); neighbors re-learn on ARP cache expiry", err))
-		return
+		return fmt.Errorf("gateway MAC unknown (%v); neighbors re-learn on ARP cache expiry", err)
 	}
 	sp, err := arpspoof.Open(s.cfg.Interface)
 	if err != nil {
-		s.traceCommand(fmt.Sprintf("gateway re-announce skipped: %v", err))
-		return
+		return fmt.Errorf("gateway re-announce skipped: %w", err)
 	}
 	defer sp.Close()
 	bcast := net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 	frame := arpspoof.BuildARPReply(gmac, gw, gw, bcast)
 	for i := 0; i < 3; i++ {
 		if err := sp.SendRaw(frame); err != nil {
-			s.traceCommand(fmt.Sprintf("gateway re-announce failed: %v", err))
-			return
+			return fmt.Errorf("gateway re-announce failed: %w", err)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
+	return nil
 }
 
 func (s *Session) stopCapture() {

@@ -22,11 +22,26 @@ for seven days.
 If the network is unavailable, or the version file cannot be read, startup
 continues silently. There is no retry loop and no background service.
 
-## When the check is skipped
+## Checking on demand
 
-The check does not run when:
+Any tool accepts `--check-update`:
 
-- the command is `--version`, `-v`, `--help`, `-h`, or `--no-update-check`;
+```bash
+gnulte --check-update
+gnulte-hub --check-update
+```
+
+It reports the installed and available versions and exits. In a terminal it
+also offers the same y/N install prompt. The hub has a **Check for updates now**
+menu row for the same thing. An explicit check ignores the "check on startup"
+setting and the seven-day snooze; `GNULTE_NO_UPDATE` still disables it.
+
+## When the startup check is skipped
+
+The startup check does not run when:
+
+- the command is `--version`, `-v`, `--help`, `-h`, `--no-update-check`,
+  `--plan`, `--dry-run`, `--cleanup`, `doctor`, or `--completions`;
 - stdout or stdin is not a terminal (pipes, scripts, CI);
 - `GNULTE_NO_UPDATE` is set in the environment; or
 - **Settings → Terminal & UI → check for updates on startup** is off.

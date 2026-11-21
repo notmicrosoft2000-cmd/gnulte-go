@@ -194,10 +194,10 @@ func TestBlockRules(t *testing.T) {
 		return s
 	}(), "\n")
 	for _, want := range []string{
-		"-d 192.168.1.50 -j DROP",
-		"-s 192.168.1.50 -j DROP",
-		"-d 192.168.1.51 -j DROP",
-		"-s 192.168.1.51 -j DROP",
+		"-d 192.168.1.50 -m comment --comment GNULTE -j DROP",
+		"-s 192.168.1.50 -m comment --comment GNULTE -j DROP",
+		"-d 192.168.1.51 -m comment --comment GNULTE -j DROP",
+		"-s 192.168.1.51 -m comment --comment GNULTE -j DROP",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("block rules missing %q\n%q", want, joined)

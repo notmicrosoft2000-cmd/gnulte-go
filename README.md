@@ -36,6 +36,15 @@ runs `install.sh`. Nothing is installed without confirmation, and the check is
 skipped for `--version`, `--help`, scripts, and when
 `GNULTE_NO_UPDATE=1` is set. See [docs/AUTO-UPDATE.md](docs/AUTO-UPDATE.md).
 
+## Quality of life
+
+`gnulte-hub --completions bash|zsh|fish` prints a completion script, and
+`gnulte-hub doctor` runs the pre-flight checks with a compact PASS/WARN/FAIL
+report. Any tool accepts `--check-update`. `gnulte --plan` prints the exact
+commands a shaping run would use without touching the network, and
+`sudo gnulte --cleanup` removes leftover qdiscs and marked firewall rules after
+an interrupted run. See [docs/QOL.md](docs/QOL.md).
+
 ## Seven tools and a front door
 
 | Binary | Root | What it does |

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"gnulte-go/internal/doctor"
 	"gnulte-go/internal/settings"
 )
 
@@ -51,12 +53,13 @@ func TestHubScreenCopy(t *testing.T) {
 	wantLabels := []string{
 		"Test a connection", "Check this machine", "Find devices",
 		"See connected devices", "Watch live traffic", "Wi-Fi tools",
-		"Open reports", "Read the safety rules", "Quit",
+		"Open reports", "Read the safety rules", "Check for updates now", "Quit",
 	}
 	wantDetails := []string{
 		"pick a device, then shape its traffic", "is everything ready?",
 		"sweep the network", "saved inventory", "seven-screen live monitor",
-		"authorised deauth testing", "list, merge and compare", "before you begin", "",
+		"authorised deauth testing", "list, merge and compare", "before you begin",
+		"see whether a newer release is available", "",
 	}
 	available := make([]bool, len(wantLabels))
 	for i := range available {
@@ -209,14 +212,22 @@ func TestActions(t *testing.T) {
 		"gnulte-inventory": false, "gnulte-watch": false, "gnulte-wifi": false,
 		"gnulte-report": false,
 	}
+	foundUpdate := false
 	for _, a := range list {
 		if a.Binary == "" {
+			continue
+		}
+		if a.Binary == updateAction {
+			foundUpdate = true
 			continue
 		}
 		if _, ok := want[a.Binary]; !ok {
 			t.Errorf("unexpected binary %q in menu", a.Binary)
 		}
 		want[a.Binary] = true
+	}
+	if !foundUpdate {
+		t.Error("menu has no Check for updates now row")
 	}
 	for name, found := range want {
 		if !found {
@@ -268,5 +279,114 @@ func TestMenuItemsMarkMissing(t *testing.T) {
 	}
 	if items[1].Detail != list[1].Detail {
 		t.Errorf("available tool detail = %q, want %q", items[1].Detail, list[1].Detail)
+	}
+}
+
+func TestUpdateMenuRowIsAlwaysAvailable(t *testing.T) {
+	list := actions()
+	var row *action
+	for i := range list {
+		if list[i].Binary == updateAction {
+			row = &list[i]
+		}
+	}
+	if row == nil {
+		t.Fatal("no update action")
+	}
+	if row.Label != "Check for updates now" || row.Detail != "see whether a newer release is available" {
+		t.Fatalf("update row = %+v", row)
+	}
+	if !actionAvailable(t.TempDir(), *row) {
+		t.Fatal("the built-in update row must not depend on a binary on disk")
+	}
+
+	available := make([]bool, len(list))
+	items := menuItems(list, available)
+	idx := -1
+	for i, a := range list {
+		if a.Binary == updateAction {
+			idx = i
+		}
+	}
+	if got := items[idx].Detail; got != row.Detail {
+		t.Errorf("update row detail = %q, want %q (not 'not installed')", got, row.Detail)
+	}
+}
+
+func TestPrintDoctorReport(t *testing.T) {
+	checks := []doctor.Check{
+		{Name: "tc", Status: doctor.Pass, Detail: "impair and shape traffic"},
+		{Name: "privileges", Status: doctor.Warn, Detail: "euid 1000", Hint: "use sudo"},
+		{Name: "iptables", Status: doctor.Fail, Detail: "not found in PATH", Hint: "apt install iptables"},
+	}
+	var out bytes.Buffer
+	printDoctorReport(&out, checks)
+	text := out.String()
+	for _, token := range []string{"PASS", "WARN", "FAIL", "fix: use sudo", "1 passed, 1 warning(s), 1 failure(s)"} {
+		if !strings.Contains(text, token) {
+			t.Errorf("doctor report missing %q: %q", token, text)
+		}
+	}
+}
+
+func TestRunCLIDoctor(t *testing.T) {
+	var out, errOut bytes.Buffer
+	handled, code := runCLI([]string{"doctor"}, &out, &errOut)
+	if !handled {
+		t.Fatal("doctor was not handled")
+	}
+	if code != 0 && code != 1 {
+		t.Fatalf("doctor exit code = %d, want 0 or 1", code)
+	}
+	if !strings.Contains(out.String(), "GNULTE DOCTOR") || !strings.Contains(out.String(), "passed,") {
+		t.Fatalf("doctor output = %q", out.String())
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("unexpected stderr %q", errOut.String())
+	}
+}
+
+func TestRunCLICompletions(t *testing.T) {
+	for _, shell := range []string{"bash", "zsh", "fish"} {
+		t.Run(shell, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			handled, code := runCLI([]string{"--completions", shell}, &out, &errOut)
+			if !handled || code != 0 {
+				t.Fatalf("handled=%v code=%d stderr=%q", handled, code, errOut.String())
+			}
+			if !strings.Contains(out.String(), "gnulte-hub") {
+				t.Error("completion script has no hub entry")
+			}
+		})
+	}
+
+	t.Run("equals form", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		handled, code := runCLI([]string{"--completions=zsh"}, &out, &errOut)
+		if !handled || code != 0 || !strings.HasPrefix(out.String(), "#compdef ") {
+			t.Fatalf("handled=%v code=%d out=%q err=%q", handled, code, out.String(), errOut.String())
+		}
+	})
+
+	for _, args := range [][]string{{"--completions"}, {"--completions", "powershell"}} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			handled, code := runCLI(args, &out, &errOut)
+			if !handled || code != 2 {
+				t.Fatalf("handled=%v code=%d, want true/2", handled, code)
+			}
+			if out.Len() != 0 || !strings.Contains(errOut.String(), "gnulte-hub:") {
+				t.Fatalf("out=%q err=%q", out.String(), errOut.String())
+			}
+		})
+	}
+}
+
+func TestUsageMentionsNewFlags(t *testing.T) {
+	out := captureStdout(t, usage)
+	for _, token := range []string{"--version", "doctor", "--completions", "--check-update"} {
+		if !strings.Contains(out, token) {
+			t.Errorf("usage missing %q: %q", token, out)
+		}
 	}
 }

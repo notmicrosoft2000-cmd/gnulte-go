@@ -23,6 +23,7 @@ package update
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,6 +42,9 @@ import (
 const (
 	declineWindow    = 7 * 24 * time.Hour
 	installerMissing = "Installer not found. Run: sudo ./update.sh from the GNULTE source tree."
+	// explicitUpdateFlag asks for a one-shot report. It is deliberately absent
+	// from the startup skip list below: an explicit request is never skipped.
+	explicitUpdateFlag = "--check-update"
 )
 
 var (
@@ -52,6 +56,9 @@ var (
 	// install attempts without touching the filesystem or launching bash.
 	findInstaller = discoverInstaller
 	runInstaller  = launchInstaller
+	// osExit is overridden in tests so an explicit CLI check can be exercised
+	// without ending the test process.
+	osExit = os.Exit
 )
 
 // state is the on-disk record of a declined update.
@@ -109,20 +116,20 @@ func compareVersions(current, latest string) bool {
 	return got.newer(cur)
 }
 
-// fetchLatest reads the first non-empty, non-comment line of the published
-// VERSION file. Any failure is reported as "no update" to the caller.
-func fetchLatest() (string, bool) {
+// fetchLatestVersion reads the first non-empty, non-comment line of the
+// published VERSION file, returning the reason it failed for explicit checks.
+func fetchLatestVersion() (string, error) {
 	resp, err := httpClient.Get(sourceURL)
 	if err != nil {
-		return "", false
+		return "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return "", false
+		return "", fmt.Errorf("could not read the version file (HTTP %s)", resp.Status)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if err != nil {
-		return "", false
+		return "", err
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
@@ -131,11 +138,30 @@ func fetchLatest() (string, bool) {
 		}
 		v, ok := parseVersion(line)
 		if !ok {
-			return "", false
+			return "", errors.New("could not read the version file")
 		}
-		return v.String(), true
+		return v.String(), nil
 	}
-	return "", false
+	return "", errors.New("could not read the version file")
+}
+
+// fetchLatest is the quiet-startup seam: any failure means "no update".
+func fetchLatest() (string, bool) {
+	latest, err := fetchLatestVersion()
+	if err != nil {
+		return "", false
+	}
+	return latest, true
+}
+
+// Status reports the published version and whether it is newer than current.
+// An explicit check uses this so a network failure can be shown to the user.
+func Status(current string) (latest string, available bool, err error) {
+	latest, err = fetchLatestVersion()
+	if err != nil {
+		return "", false, err
+	}
+	return latest, compareVersions(current, latest), nil
 }
 
 func loadState(path string) state {
@@ -188,30 +214,9 @@ func launchInstaller(path string) error {
 	return cmd.Run()
 }
 
-// maybeCheck contains the whole check behind injectable output, input and
-// state path so it can be tested without a terminal or a network connection.
-// It returns the normalized latest version and whether the user accepted.
-func maybeCheck(current string, args []string, out io.Writer, in io.Reader, statePath string) (string, bool) {
-	if os.Getenv("GNULTE_NO_UPDATE") != "" {
-		return "", false
-	}
-	for _, arg := range args {
-		switch arg {
-		case "-v", "--version", "-version", "version", "-h", "--help", "help", "--no-update-check":
-			return "", false
-		}
-	}
-
-	latest, ok := fetchLatest()
-	if !ok || !compareVersions(current, latest) {
-		return "", false
-	}
-
-	s := loadState(statePath)
-	if s.DeclinedVersion == latest && time.Since(s.DeclinedAt) < declineWindow {
-		return "", false
-	}
-
+// offerUpdate is the shared y/N prompt and installer path. It returns the
+// normalized latest version and whether the user accepted.
+func offerUpdate(current, latest string, out io.Writer, in io.Reader, statePath string) (string, bool) {
 	fmt.Fprintf(out, "\nGNULTE v%s — update available: v%s. Install now? [y/N] ", current, latest)
 	answer, _ := bufio.NewReader(in).ReadString('\n')
 	answer = strings.ToLower(strings.TrimSpace(answer))
@@ -232,10 +237,83 @@ func maybeCheck(current string, args []string, out io.Writer, in io.Reader, stat
 	return latest, true
 }
 
+// maybeCheck contains the quiet startup check behind injectable output, input
+// and state path so it can be tested without a terminal or a network. It still
+// honours the seven-day decline cache and the ordinary skip flags.
+func maybeCheck(current string, args []string, out io.Writer, in io.Reader, statePath string) (string, bool) {
+	if os.Getenv("GNULTE_NO_UPDATE") != "" {
+		return "", false
+	}
+	for _, arg := range args {
+		switch arg {
+		case "-v", "--version", "-version", "version", "-h", "--help", "help", "--no-update-check",
+			// These are non-interactive/maintenance entry points. A prompt here
+			// would pollute completion output or block a cleanup run.
+			"--completions", "-completions", "doctor", "--plan", "--dry-run", "--cleanup":
+			return "", false
+		}
+		if strings.HasPrefix(arg, "--completions=") {
+			return "", false
+		}
+	}
+
+	latest, ok := fetchLatest()
+	if !ok || !compareVersions(current, latest) {
+		return "", false
+	}
+
+	s := loadState(statePath)
+	if s.DeclinedVersion == latest && time.Since(s.DeclinedAt) < declineWindow {
+		return "", false
+	}
+	return offerUpdate(current, latest, out, in, statePath)
+}
+
+// explicitCheck always reports: it ignores the AutoUpdate setting and the
+// decline cache, but a non-terminal only gets the instruction line, never a
+// prompt it cannot answer.
+func explicitCheck(current string, out io.Writer, in io.Reader, statePath string) {
+	latest, available, err := Status(current)
+	if err != nil {
+		fmt.Fprintf(out, "GNULTE update check failed: %v\n", err)
+		return
+	}
+	if !available {
+		fmt.Fprintf(out, "GNULTE v%s is up to date.\n", current)
+		return
+	}
+	if !ux.TTY() || !tui.StdinTTY() {
+		fmt.Fprintf(out, "GNULTE v%s — update available: v%s. Run: sudo ./update.sh from the GNULTE source tree.\n", current, latest)
+		return
+	}
+	_, _ = offerUpdate(current, latest, out, in, statePath)
+}
+
+func hasArg(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
+}
+
 // MaybeCheck offers an update at startup when running interactively and the
-// user has not disabled checks. It returns silently on every skip or error.
+// user has not disabled checks. With --check-update it reports once regardless
+// of terminal or settings (GNULTE_NO_UPDATE still wins). When the flag came
+// from the real command line the tool exits right after the report, before its
+// own flag set can reject the unknown flag; the hub passes a synthetic slice
+// from its menu and therefore returns to pause and redraw.
 func MaybeCheck(current string, args []string) {
 	if os.Getenv("GNULTE_NO_UPDATE") != "" {
+		return
+	}
+	statePath := filepath.Join(filepath.Dir(settings.Path()), "update-state.json")
+	if hasArg(args, explicitUpdateFlag) {
+		explicitCheck(current, os.Stdout, os.Stdin, statePath)
+		if hasArg(os.Args[1:], explicitUpdateFlag) {
+			osExit(0)
+		}
 		return
 	}
 	if !ux.TTY() || !tui.StdinTTY() {
@@ -245,6 +323,5 @@ func MaybeCheck(current string, args []string) {
 	if err != nil || !cfg.AutoUpdate {
 		return
 	}
-	statePath := filepath.Join(filepath.Dir(settings.Path()), "update-state.json")
 	_, _ = maybeCheck(current, args, os.Stdout, os.Stdin, statePath)
 }

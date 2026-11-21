@@ -21,6 +21,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -32,6 +33,8 @@ import (
 	"strings"
 	"syscall"
 
+	"gnulte-go/internal/completions"
+	"gnulte-go/internal/doctor"
 	"gnulte-go/internal/settings"
 	"gnulte-go/internal/tui"
 	"gnulte-go/internal/update"
@@ -39,6 +42,10 @@ import (
 )
 
 const version = "17.0"
+
+// updateAction is a menu sentinel, not a binary on disk. An empty Binary means
+// Quit, so the built-in update check needs a non-empty value of its own.
+const updateAction = "@update"
 
 // Exact copy for the contextual hub screens. Keeping it in constants makes
 // the plain-menu fallback and the full-screen frames say the same thing.
@@ -95,8 +102,18 @@ func actions() []action {
 		{Label: "Wi-Fi tools", Detail: "authorised deauth testing", Binary: "gnulte-wifi"},
 		{Label: "Open reports", Detail: "list, merge and compare", Binary: "gnulte-report"},
 		{Label: "Read the safety rules", Detail: "before you begin", Binary: "gnulte", Args: []string{"--docs"}},
+		{Label: "Check for updates now", Detail: "see whether a newer release is available", Binary: updateAction},
 		{Label: "Quit", Detail: ""},
 	}
+}
+
+// actionAvailable keeps the built-in rows out of the binary lookup: they are
+// part of the hub itself, so they are always available.
+func actionAvailable(dir string, a action) bool {
+	if a.Binary == "" || a.Binary == updateAction {
+		return true
+	}
+	return findBinary(dir, a.Binary) != ""
 }
 
 // findBinary looks beside the launcher first so a folder copied to a USB
@@ -130,7 +147,7 @@ func menuItems(list []action, available []bool) []tui.MenuItem {
 	items := make([]tui.MenuItem, len(list))
 	for i, a := range list {
 		detail := a.Detail
-		if a.Binary != "" && !available[i] {
+		if a.Binary != "" && a.Binary != updateAction && !available[i] {
 			detail = "not installed"
 		}
 		items[i] = tui.MenuItem{Label: a.Label, Detail: detail}
@@ -395,21 +412,77 @@ func pause() {
 	_, _ = fmt.Fscanln(os.Stdin, &discard)
 }
 
+// printDoctorReport is a compact plain rendering of the shared doctor checks,
+// using the same PASS/WARN/FAIL vocabulary as gnulte-quicksum.
+func printDoctorReport(out io.Writer, checks []doctor.Check) {
+	fmt.Fprintln(out, "GNULTE DOCTOR")
+	for _, c := range checks {
+		fmt.Fprintf(out, "  %s  %-22s %s\n", c.Status.String(), c.Name, c.Detail)
+		if c.Hint != "" && c.Status != doctor.Pass {
+			fmt.Fprintf(out, "        %-22s fix: %s\n", "", c.Hint)
+		}
+	}
+	pass, warn, fail := doctor.Counts(checks)
+	fmt.Fprintf(out, "  %d passed, %d warning(s), %d failure(s)\n", pass, warn, fail)
+}
+
+// runCLI handles the hub's non-interactive entry points. handled is false for
+// the ordinary menu launch (including --version, which the flag set handles).
+func runCLI(args []string, out, errOut io.Writer) (handled bool, code int) {
+	if len(args) == 0 {
+		return false, 0
+	}
+	if args[0] == "doctor" {
+		checks := doctor.Run(doctor.Gather(context.Background()))
+		printDoctorReport(out, checks)
+		return true, doctor.ExitCode(checks)
+	}
+	for _, arg := range args {
+		if arg == "--completions" || arg == "-completions" {
+			if len(args) < 2 {
+				fmt.Fprintln(errOut, "gnulte-hub: --completions needs a shell: bash, zsh or fish")
+				return true, 2
+			}
+			return runCompletions(args[1], out, errOut)
+		}
+		if shell, ok := strings.CutPrefix(arg, "--completions="); ok {
+			return runCompletions(shell, out, errOut)
+		}
+	}
+	return false, 0
+}
+
+func runCompletions(shell string, out, errOut io.Writer) (bool, int) {
+	script, err := completions.Script(shell)
+	if err != nil {
+		fmt.Fprintf(errOut, "gnulte-hub: %v\n", err)
+		return true, 2
+	}
+	fmt.Fprint(out, script)
+	return true, 0
+}
+
 func usage() {
 	fmt.Printf(`gnulte-hub v%s — friendly launcher for the GNULTE toolkit
 
 Usage:
-  gnulte-hub              open the menu
-  gnulte-hub --version    print version and exit
+  gnulte-hub                     open the menu
+  gnulte-hub --version           print version and exit
+  gnulte-hub doctor              run the pre-flight health check
+  gnulte-hub --completions SHELL print a bash, zsh or fish completion script
 
 Pick an action with the arrow keys or its number. The hub finds the other
 tools next to itself or on PATH and runs them in this terminal. Each tool
-asks for administrator access only when it needs it.
+asks for administrator access only when it needs it. --check-update reports
+whether a newer release exists; GNULTE_NO_UPDATE disables all update checks.
 `, version)
 }
 
 func main() {
 	update.MaybeCheck(version, os.Args[1:])
+	if handled, code := runCLI(os.Args[1:], os.Stdout, os.Stderr); handled {
+		os.Exit(code)
+	}
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.BoolVar(showVersion, "v", false, "print version and exit")
 	flag.Usage = usage
@@ -435,7 +508,7 @@ func main() {
 	dir := exeDir()
 	available := make([]bool, len(list))
 	for i, a := range list {
-		available[i] = findBinary(dir, a.Binary) != ""
+		available[i] = actionAvailable(dir, a)
 	}
 
 	// The saved value only preselects H2. The hub never writes this file.
@@ -460,6 +533,13 @@ func main() {
 		if a.Binary == "" {
 			fmt.Println("Bye.")
 			return
+		}
+		if a.Binary == updateAction {
+			// The synthetic slice makes update report without ending the hub.
+			update.MaybeCheck(version, []string{"--check-update"})
+			tui.FlushPending()
+			pause()
+			continue
 		}
 		path := findBinary(dir, a.Binary)
 		if path == "" {

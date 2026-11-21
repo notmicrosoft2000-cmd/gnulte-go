@@ -152,6 +152,10 @@ func main() {
 		quiet          = flag.Bool("q", false, "quiet: results only")
 		showDocs       = flag.Bool("docs", false, "print the safety documents and exit")
 		resetSafe      = flag.Bool("reset-safety", false, "remove the acceptance record and exit")
+		planArg        = flag.Bool("plan", false, "print the exact commands that would run, make no changes and exit (no root needed)")
+		dryRun         = flag.Bool("dry-run", false, "alias for --plan")
+		cleanupArg     = flag.Bool("cleanup", false, "force teardown of leftover GNULTE state and exit (requires root)")
+		restoreForward = flag.Bool("restore-forward", false, "with --cleanup, set ip_forward back to 1")
 		showVer        = flag.Bool("version", false, "print version and exit")
 		settingsArg    = flag.Bool("settings", false, "open the settings editor (saved defaults) and exit")
 		fromHub        = flag.Bool("from-hub", false, "launched by gnulte-hub: skip the plain-language menu")
@@ -213,6 +217,77 @@ func main() {
 	if *compareArg != "" {
 		if err := runCompare(*compareArg, flag.Args(), *compareHTML); err != nil {
 			fatal(err)
+		}
+		return
+	}
+
+	// --cleanup is a forced teardown, not a test launch: it must never reach
+	// the safety handshake or the sudo re-exec. It needs real root, but the
+	// re-exec is deliberately skipped so a stuck session can be cleared from
+	// a plain root shell (or an unattended script).
+	if *cleanupArg {
+		if os.Geteuid() != 0 {
+			fmt.Println("GNULTE cleanup must run as root (use sudo).")
+			os.Exit(1)
+		}
+		iface := strings.TrimSpace(*ifaceArg)
+		gateway := ""
+		if cfg, err := netutil.DefaultRoute(); err == nil {
+			if iface != "" {
+				cfg = netutil.WithInterface(cfg, iface)
+			}
+			iface = cfg.Interface
+			gateway = cfg.Gateway
+		}
+		actions, problems := engine.Cleanup(context.Background(), iface, gateway, *restoreForward)
+		for _, a := range actions {
+			fmt.Printf("  [✓] %s\n", a)
+		}
+		for _, p := range problems {
+			fmt.Printf("  [!] %s\n", p)
+		}
+		fmt.Println("GNULTE cleanup finished.")
+		if len(problems) > 0 {
+			os.Exit(1)
+		}
+		return
+	}
+
+	// --plan is a pure dry run: it renders the exact command lines from
+	// engine's builders and exits before safety, sudo, settings or Start.
+	// Nothing is executed and no privilege is requested.
+	if *planArg || *dryRun {
+		if *targets == "" && *macArg == "" && *rangeCIDR == "" {
+			fmt.Println("Pass -t, -m or -r with --plan.")
+			os.Exit(2)
+		}
+		iface := strings.TrimSpace(*ifaceArg)
+		gateway := ""
+		if cfg, err := netutil.DefaultRoute(); err == nil {
+			gateway = cfg.Gateway
+			if iface == "" {
+				iface = cfg.Interface
+			}
+		} else if iface == "" {
+			iface = "auto"
+		}
+		ec := engine.Config{
+			Interface:     iface,
+			Gateway:       gateway,
+			Targets:       planTargets(*targets, *macArg, *rangeCIDR),
+			LatencyMS:     *latency,
+			JitterMS:      *jitter,
+			LossPct:       *loss,
+			DupPct:        *dup,
+			ReorderPct:    *reorder,
+			BandwidthKbps: *bandwidth,
+			Stealth:       *stealthArg,
+		}
+		if *block {
+			ec.Mode = engine.ModeBlock
+		}
+		for _, line := range buildPlan(ec, iface) {
+			fmt.Println(line)
 		}
 		return
 	}
@@ -767,6 +842,82 @@ func main() {
 	}
 }
 
+// planTargets turns the explicit targeting flags into the literal values a
+// dry run can show. Name/MAC/range resolution needs a live network (DNS, ARP,
+// ping sweep), which --plan deliberately skips, so those values appear
+// verbatim rather than being expanded.
+func planTargets(tAmt, tMac, rCIDR string) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(v string) {
+		v = strings.TrimSpace(v)
+		if v != "" && !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	for _, t := range splitCSV(tAmt) {
+		add(t)
+	}
+	add(tMac)
+	add(rCIDR)
+	return out
+}
+
+// buildPlan renders the exact privilege-requiring command lines a run would
+// apply. It is a pure helper: command vectors come from engine's builders
+// (which fold in netemArgsFor/rateFor) and the rest are fixed display lines,
+// so it never executes tc, iptables, sysctl, arpspoof or capture and never
+// needs root.
+func buildPlan(ec engine.Config, iface string) []string {
+	lines := []string{
+		"GNULTE plan — no changes will be made",
+		"interface: " + iface,
+	}
+	if ec.Gateway != "" {
+		lines = append(lines, "gateway: "+ec.Gateway)
+	}
+	for _, t := range ec.Targets {
+		lines = append(lines, "target: "+t)
+	}
+	mode := "shape"
+	if ec.Mode == engine.ModeBlock {
+		mode = "block (100% DROP)"
+	}
+	lines = append(lines, "mode: "+mode)
+
+	tree, changes, drops := engine.PlanCommands(&ec, iface)
+	lines = append(lines, "tc qdisc/class tree:")
+	for _, args := range tree {
+		lines = append(lines, "tc "+strings.Join(args, " "))
+	}
+	lines = append(lines, "tc change commands:")
+	for _, args := range changes {
+		lines = append(lines, "tc "+strings.Join(args, " "))
+	}
+	note := " (only inserted in block mode)"
+	if ec.Mode == engine.ModeBlock {
+		note = ""
+	}
+	lines = append(lines, "iptables FORWARD rules"+note+":")
+	for _, r := range drops {
+		args := append([]string{"-I", "FORWARD"}, r...)
+		lines = append(lines, "iptables "+strings.Join(args, " "))
+	}
+	lines = append(lines,
+		"echo 1 > /proc/sys/net/ipv4/ip_forward",
+		"arpspoof directions:",
+	)
+	for _, t := range ec.Targets {
+		lines = append(lines,
+			fmt.Sprintf("arpspoof -i %s -t %s %s", iface, t, ec.Gateway),
+			fmt.Sprintf("arpspoof -i %s -t %s %s", iface, ec.Gateway, t),
+		)
+	}
+	lines = append(lines, "No packets were sent and no settings were changed.")
+	return lines
+}
+
 // maxRangeTargets caps how many addresses --range may expand to. See
 // resolveTargets: the expansion is materialised in RAM before any probing.
 const maxRangeTargets = 4096
@@ -1204,6 +1355,12 @@ Advanced:
       --compare A B       diff two -j report JSON snapshots (A, then B) and exit
       --compare-html FILE with --compare, also write the diff as an HTML report
       --dupcheck          scan LAN for duplicate IPs / ARP conflicts and exit
+      --plan, --dry-run   print the exact tc/iptables/arp commands that would
+                          run, make no changes and exit (no root needed;
+                          requires -t, -m or -r)
+      --cleanup           force teardown of leftover GNULTE qdisc/FORWARD
+                          rules and re-announce the gateway (requires root)
+      --restore-forward   with --cleanup, set ip_forward back to 1
       --settings          open the settings editor (saved defaults) and exit
       --docs              print the safety documents and exit
       --reset-safety      remove the acceptance record and exit

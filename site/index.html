@@ -4,50 +4,167 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GNULTE · GNU LAN Network Testing Environment</title>
-<meta name="description" content="Seven Linux tools for shaping, watching and inspecting traffic on a network you own or are authorised to test.">
+<meta name="description" content="Seven tools plus gnulte-hub, eight executables for shaping, watching and inspecting traffic on a network you own or are authorised to test.">
 <link rel="icon" href="img/favicon.ico">
 <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
-<link rel="stylesheet" href="css/gnulte.css?v=field-1">
+<link rel="stylesheet" href="css/workstation.css?v=workstation-1">
 </head>
 <body>
 <a class="skip" href="#content">Skip to content</a>
-<div class="regbar"><div class="wrap regbar-inner"><span class="reg-id"><svg class="glyph-mini" viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3"><rect x="2" y="2" width="36" height="36"/><path d="M20 20 L9 9 M20 20 L31 9 M20 20 L9 31 M20 20 L31 31"/></svg>GNULTE <span class="reg-sub">GNU LAN Network Testing Environment</span></span><span class="reg-meta">v17.0 &middot; GPL-3.0-or-later &middot; Linux &middot; <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">source</a></span></div></div>
-<header class="masthead"><div class="wrap masthead-inner"><a class="wordmark" href="index.html"><svg class="glyph" viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6">
-<rect x="1" y="1" width="38" height="38"/>
-<path d="M20 20 L9 9 M20 20 L31 9 M20 20 L9 31 M20 20 L31 31"/>
+<div class="utility"><div class="wrap utility-inner"><span>GNULTE <b>v17.0</b> &middot; GPL-3.0-or-later &middot; Linux</span><span><a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">source</a> &middot; <a href="changelog.html">releases</a></span></div></div>
+<header class="site-header"><div class="wrap header-inner">
+<a class="brand" href="index.html"><svg viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6">
+<rect x="1" y="1" width="38" height="38"/><path d="M20 20 L9 9 M20 20 L31 9 M20 20 L9 31 M20 20 L31 31"/>
 <circle cx="20" cy="20" r="3.2" fill="currentColor" stroke="none"/>
-<circle cx="9" cy="9" r="2.2" fill="currentColor" stroke="none"/>
-<circle cx="31" cy="9" r="2.2" fill="currentColor" stroke="none"/>
-<circle cx="9" cy="31" r="2.2" fill="currentColor" stroke="none"/>
-<circle cx="31" cy="31" r="2.2" fill="currentColor" stroke="none"/>
-</svg><span><span class="wordmark-name">GNULTE</span><span class="wordmark-sub">field manual &middot; Linux network testing</span></span></a><form class="site-search" action="search.html" method="get" role="search"><label class="sr-only" for="site-q">Search the site</label><input id="site-q" type="search" name="q" placeholder="search the manual"><button type="submit" aria-label="Search">&#9166;</button></form></div></header>
-<nav class="mainnav" aria-label="Primary"><div class="wrap mainnav-inner"><button class="navtoggle" type="button" aria-expanded="false">menu</button><ul class="navlist"><li><a href="index.html" class="active">Overview</a></li><li><a href="tools.html">Tools</a></li><li><a href="docs.html">Manual</a></li><li><a href="downloads.html">Downloads</a></li><li><a href="changelog.html">Changelog</a></li><li><a href="about.html">About</a></li><li><a href="support.html">Help</a></li></ul></div></nav>
+<circle cx="9" cy="9" r="2.2" fill="currentColor" stroke="none"/><circle cx="31" cy="9" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="9" cy="31" r="2.2" fill="currentColor" stroke="none"/><circle cx="31" cy="31" r="2.2" fill="currentColor" stroke="none"/>
+</svg><span><span class="brand-name">GNULTE</span><span class="brand-sub">GNU LAN Network Testing Environment</span></span></a>
+<button class="navtoggle" type="button" aria-expanded="false" aria-controls="primary-nav">menu</button>
+<nav class="site-nav" id="primary-nav" aria-label="Primary"><a href="tools.html">Features</a>
+<a href="docs.html">Documentation</a>
+<a href="downloads.html">Download</a>
+<a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">GitHub</a></nav>
+</div></header>
 <main id="content" class="wrap">
-<div class="crumbs"><a href="index.html">GNULTE</a><span class="sep">/</span>GNULTE</div>
-<section class="hero"><div><div class="page-kicker">GNU LAN NETWORK TESTING ENVIRONMENT &middot; v17.0</div><h1>GNULTE</h1><p class="intro">Seven Linux tools to shape, watch and inspect traffic on a network you own or are explicitly authorised to test. The tools share one device store, so a scan becomes a target list and a live watch becomes a baseline.</p><div class="terminal"><div class="terminal-head"><span><span class="dots"><i></i><i></i><i></i></span>one shaped host, 90 seconds</span><button class="copy" type="button">copy</button></div><div class="terminal-body"><pre><code>sudo gnulte -t 192.168.1.50 -l 300 -j 30 --duration 90</code></pre></div></div><div class="actions"><a class="button" href="docs/install.html">Install</a><a class="button ghost" href="tools.html">Tool index</a><a class="button ghost" href="docs.html">Read the manual</a></div><p class="logline"><b>$</b> scan first &middot; ask permission first &middot; clean up after</p></div><div class="release-card"><h2>Release v17.0</h2><dl><dt>Version</dt><dd>17.0 &middot; 2026-11-18</dd><dt>License</dt><dd>GPL-3.0-or-later</dd><dt>Language</dt><dd>Go 1.21+ &middot; standard library only</dd><dt>Platform</dt><dd>Linux (amd64 and other Go targets)</dd><dt>Kernel interface</dt><dd><code>tc netem</code>, AF_PACKET, raw ICMP</dd><dt>Helper binaries</dt><dd>none since v16.10</dd></dl><div class="actions"><a class="button" href="downloads.html">build from source</a></div></div></section><section class="sheet" id="suite"><div class="sheet-head"><span class="sheet-no">01 /</span><h2>The suite</h2></div><div class="sheet-body"><div class="workflow"><div class="workflow-step"><span class="n">01</span><span class="cmd"><code>gnulte-scan --deep</code></span><span class="d">Find what is on the subnet: hosts, ports, vendors, names.</span></div><div class="workflow-step"><span class="n">02</span><span class="cmd"><code>gnulte-watch</code></span><span class="d">Watch it live. <code>x</code> saves the inventory to the shared store.</span></div><div class="workflow-step"><span class="n">03</span><span class="cmd"><code>gnulte -t &lt;ip&gt;</code></span><span class="d">Shape one host; <code>&#9166;</code> in the watch hands the target over.</span></div><div class="workflow-step"><span class="n">04</span><span class="cmd"><code>gnulte-watch top</code></span><span class="d">Measure what the shaping did to throughput.</span></div><div class="workflow-step"><span class="n">05</span><span class="cmd"><code>gnulte-quicksum</code></span><span class="d">Verify the machine before and after the run.</span></div><div class="workflow-step"><span class="n">06</span><span class="cmd"><code>gnulte-report</code></span><span class="d">Keep the reports. Index the hub and archive the run's exports.</span></div></div><p>Each binary does one job. Discovery feeds observation, observation hands off to shaping, and the measuring tools record what changed. All seven read and write <code>~/.config/gnulte-go/devices.json</code>.</p><div class="table-wrap"><table class="data"><thead><tr><th>Binary</th><th>Root</th><th>What it does</th><th>Manual</th></tr></thead><tbody><tr><td><code>gnulte</code></td><td><span class="tag root">root</span></td><td>Traffic shaping: latency, jitter, loss, duplication, reordering and bandwidth caps through <code>tc netem</code>, with ARP-redirected routing, a live dashboard and an HTML report.</td><td><a href="docs/gnulte.html">gnulte(8)</a></td></tr><tr><td><code>gnulte-watch</code></td><td><span class="tag optional">optional</span></td><td>Live LAN watch: six screens of hosts, talkers, flows, ARP neighbours, interconnection map and session history. Passive counting; nothing is shaped.</td><td><a href="docs/gnulte-watch.html">gnulte-watch(8)</a></td></tr><tr><td><code>gnulte-scan</code></td><td><span class="tag optional">optional</span></td><td>Parallel ARP/ICMP sweep plus an in-Go TCP port scanner, OUI vendors, mDNS/NetBIOS names, OS fingerprinting, <code>--watch</code> and a tabbed browser.</td><td><a href="docs/gnulte-scan.html">gnulte-scan(8)</a></td></tr><tr><td><code>gnulte-inventory</code></td><td><span class="tag user">user</span></td><td>Instant inventory from the kernel ARP/neighbour table: vendors, mDNS hostnames and type guesses. CSV, JSON, YAML or HTML. No root.</td><td><a href="docs/gnulte-inventory.html">gnulte-inventory(8)</a></td></tr><tr><td><code>gnulte-wifi</code></td><td><span class="tag root">root</span></td><td>Targeted 802.11 deauthentication from monitor mode for authorised disassociation testing: named or numeric reason codes, multi-station client steering, per-frame jitter counters, channel-dwell stats and channel hopping.</td><td><a href="docs/gnulte-wifi.html">gnulte-wifi(8)</a></td></tr><tr><td><code>gnulte-quicksum</code></td><td><span class="tag user">user</span></td><td>Pre-flight check: privileges, <code>tc</code>/<code>iptables</code>, <code>ip_forward</code>, netem/netfilter modules, route, duplicate IPs and the safety record. PASS/WARN/FAIL, <code>--json</code>, exit code.</td><td><a href="docs/gnulte-quicksum.html">gnulte-quicksum(8)</a></td></tr><tr><td><code>gnulte-watch trace</code></td><td><span class="tag root">root</span></td><td>mtr-style hop-by-hop probe: in-process ICMP echo at every TTL with per-hop last/avg/best/worst and loss. No <code>traceroute(8)</code>.</td><td><a href="docs/gnulte-watch-trace.html">gnulte-watch trace(8)</a></td></tr><tr><td><code>gnulte-watch top</code></td><td><span class="tag root">root</span></td><td>Live per-host and per-conversation bandwidth from an in-process <code>AF_PACKET</code> counter, ranked with rates, peers and bars. CSV/JSON snapshots.</td><td><a href="docs/gnulte-watch-top.html">gnulte-watch top(8)</a></td></tr><tr><td><code>gnulte-report</code></td><td><span class="tag user">user</span></td><td>Work with saved reports: list and index the hub, merge JSON device exports, diff two snapshots and file reports into dated folders. No root.</td><td><a href="docs/gnulte-report.html">gnulte-report(8)</a></td></tr></tbody></table></div></div></section><section class="sheet" id="unplugged"><div class="sheet-head"><span class="sheet-no">02 /</span><h2>Unplugged</h2></div><div class="sheet-body"><p>The shell-outs are gone. Since v16.6 each helper has been replaced with in-process code, shipped as an independent increment. <code>tc</code> and <code>iptables</code> remain because they are the kernel interface.</p><div class="table-wrap"><table class="data"><thead><tr><th>Helper binary</th><th>Replaced by</th><th>Since</th></tr></thead><tbody><tr><td><code>arping</code> / <code>arp-scan</code></td><td>in-Go ARP who-has frames over AF_PACKET</td><td>v16.6</td></tr><tr><td><code>ping</code></td><td>in-process raw IPPROTO_ICMP echo</td><td>v16.7</td></tr><tr><td><code>tcpdump</code></td><td>in-process AF_PACKET capture writing pcap</td><td>v16.8</td></tr><tr><td><code>traceroute(8)</code></td><td>in-Go per-TTL ICMP probe in gnulte-watch trace</td><td>v16.10</td></tr></tbody></table></div><p class="table-note">Full history: <a href="changelog.html#unplugged">the Unplugged programme</a>.</p></div></section><section class="sheet"><div class="sheet-head"><span class="sheet-no">03 /</span><h2>From the changelog</h2></div><div class="sheet-body"><div class="table-wrap"><table class="data"><thead><tr><th>Release</th><th>Change</th></tr></thead><tbody><tr><td><a href="changelog.html#v17.0">17.0</a></td><td>Report desk, named deauth reasons, multi-station steering, jitter and channel-dwell totals.</td></tr><tr><td><a href="changelog.html#v16.14">16.14</a></td><td>Sweepers with memory, new and closed port alerts, standard-library banners, <code>--compare</code>.</td></tr><tr><td><a href="changelog.html#v16.13">16.13</a></td><td>Watch history, JSON-lines event feed, 7-day latency trend and a per-host health score.</td></tr></tbody></table></div><p class="table-note">All releases: <a href="changelog.html">changelog</a> &middot; <a href="https://github.com/notmicrosoft2000-cmd/gnulte-go/commits/main">commit log</a>.</p></div></section><section class="sheet"><div class="sheet-head"><span class="sheet-no">04 /</span><h2>Before you run it</h2></div><div class="sheet-body"><aside class="warn"><b>Authorised use only</b><span>GNULTE redirects ARP traffic, impairs kernel queues, captures packets and injects 802.11 frames. Use it only on networks, systems and devices you own or are explicitly authorised to test. <a href="about.html#safety">Read the policy</a> or run <code>gnulte --docs</code>.</span></aside></div></section>
+<div class="crumbs"><a href="index.html">GNULTE</a><span class="sep">/</span>Overview</div>
+<section class="hero">
+  <div>
+    <div class="page-kicker">GNU LAN NETWORK TESTING ENVIRONMENT &middot; v17.0</div>
+    <h1>GNULTE</h1>
+    <p class="intro">Eight Linux executables for observing, testing and impairing a network you own or are explicitly authorised to test. They work at the kernel's queue layer, in the foreground, with no background service and no account.</p>
+    <div class="actions">
+      <a class="btn" href="downloads.html">Download for Linux</a>
+      <a class="btn ghost" href="docs.html">View Documentation</a>
+    </div>
+    <div class="hero-meta"><span>GPL-3.0-or-later</span><span>Go standard library</span><span>Linux &middot; amd64 / arm64</span><span>v17.0 &middot; 2026-11-18</span></div>
+    <p class="logline"><b>$</b> authorised use only &middot; scan first &middot; clean up after</p>
+  </div>
+  <figure class="window" aria-label="GNULTE inventory interface preview">
+    <div class="window-bar"><span><span class="marks"><i></i><i></i><i></i></span> gnulte-inventory &mdash; 192.168.99.0/24</span><span>passive &middot; no root</span></div>
+    <div class="window-tabs"><span class="on">devices &middot; 13</span><span>host context</span><span>route</span><span>resolvers</span><span>sockets</span></div>
+    <div class="window-body">
+      <div class="window-main"><pre class="capture"><span class="head">  ══════════════════════════════════════════════════════════════════════════════
+  GNULTE DEVICES   v17.0   LAN inventory
+  authorized network testing only
+  ══════════════════════════════════════════════════════════════════════════════
+
+ ──────────────  ─────────────────  ────────────────────────────────────  ───────────────  ──────────────
+ IP              MAC                VENDOR                                HOSTNAME         TYPE
+ ──────────────  ─────────────────  ────────────────────────────────────  ───────────────  ──────────────
+ <span class="gateway">192.168.99.1</span>    28:30:AC:60:C4:CB  Frontiir Co. Ltd.                     -                Router/Gateway
+ <span class="ip">192.168.99.5</span>    DA:B1:37:58:CD:FC  -                                     -                -
+ <span class="ip">192.168.99.14</span>   F2:8B:C4:75:3B:C3  -                                     -                -
+ <span class="ip">192.168.99.31</span>   0C:C6:FD:90:E5:95  Xiaomi Communications Co Ltd          Android-2.local  Mobile
+ <span class="ip">192.168.99.56</span>   C0:B8:83:63:B6:3B  Intel Corporate                       -                Computer
+ <span class="ip">192.168.99.57</span>   C0:B8:83:63:B6:3B  Intel Corporate                       -                Computer
+ <span class="ip">192.168.99.68</span>   6E:31:FA:51:CE:DA  -                                     Android.local    Mobile
+ <span class="ip">192.168.99.214</span>  7C:A7:B0:92:76:C7  SHENZHEN BILIAN ELECTRONIC CO.        -                Device
+ ──────────────  ─────────────────  ────────────────────────────────────  ───────────────  ──────────────
+devices found — 13</span></pre></div>
+      <aside class="window-side">
+        <p class="panel-label">Host context &middot; read-only</p>
+        <dl class="kv">
+          <dt>enp0s31f6</dt><dd class="green">UP 1Gb/s</dd>
+          <dt>wlan0</dt><dd class="green">UP 866Mb/s</dd>
+          <dt>tailscale0</dt><dd class="green">UP</dd>
+          <dt>inet</dt><dd>192.168.99.56/24</dd>
+          <dt>route</dt><dd>default via .1</dd>
+          <dt>resolver</dt><dd>192.168.99.1</dd>
+          <dt>firewall</dt><dd>nftables reported</dd>
+          <dt>listening</dt><dd>22, 53, 8080</dd>
+          <dt>sockets</dt><dd>18 est / 3 wait</dd>
+          <dt>traffic</dt><dd>1.8 / 0.4 MB/s</dd>
+          <dt>peers seen</dt><dd>1</dd>
+        </dl>
+        <p class="subtle">Context from standard system utilities. GNULTE does not audit DNS or firewall policy.</p>
+      </aside>
+    </div>
+    <div class="window-status"><span><span class="dot"></span>passive capture</span><span>13 neighbours</span><span>192.168.99.0/24</span><span>last sweep 2s ago</span><span>peers seen 1</span></div>
+    <figcaption class="figcaption">Real <code>gnulte-inventory</code> output from an authorised test LAN. Host context is illustrative read-only output, not a GNULTE security verdict.</figcaption>
+  </figure>
+</section>
+
+<section class="section">
+  <div class="section-head"><span class="section-no">01 /</span><h2>Capabilities</h2></div>
+  <ul class="cap-list">
+    <li><span class="n">01</span><div><h3>Network inspection</h3><p>Neighbour tables, ARP frames, vendors, hostnames and device types.</p></div><p><code>gnulte-inventory</code>, <code>gnulte-scan</code></p><span class="snippet">ip neigh &middot; ARP &middot; mDNS</span></li>
+    <li><span class="n">02</span><div><h3>Traffic impairment</h3><p>Latency, jitter, loss, duplication, reordering and bandwidth caps on one target.</p></div><p><code>gnulte</code></p><span class="snippet">tc netem &middot; delay / loss</span></li>
+    <li><span class="n">03</span><div><h3>Live observation</h3><p>Hosts, top talkers, per-pair conversations, alarms and up/down history.</p></div><p><code>gnulte-watch</code></p><span class="snippet">seven screens &middot; passive</span></li>
+    <li><span class="n">04</span><div><h3>Path and throughput</h3><p>Per-hop loss and latency, then per-host and per-flow bandwidth from raw frames.</p></div><p><code>gnulte-watch trace</code>, <code>top</code></p><span class="snippet">ICMP TTL &middot; AF_PACKET</span></li>
+    <li><span class="n">05</span><div><h3>Port and service discovery</h3><p>Parallel sweep, in-Go TCP scan, banners, OUI vendors and OS guesses.</p></div><p><code>gnulte-scan</code></p><span class="snippet">TCP &middot; banners &middot; OUI</span></li>
+    <li><span class="n">06</span><div><h3>Wi-Fi testing</h3><p>Targeted 802.11 disassociation for authorised client-reconnect tests.</p></div><p><code>gnulte-wifi</code></p><span class="snippet">monitor mode &middot; root</span></li>
+    <li><span class="n">07</span><div><h3>Reports</h3><p>List, merge, diff and file the JSON and HTML output from a test run.</p></div><p><code>gnulte-report</code></p><span class="snippet">merge &middot; diff &middot; archive</span></li>
+  </ul>
+</section>
+
+<section class="section">
+  <div class="section-head"><span class="section-no">02 /</span><h2>Technical philosophy</h2><p class="section-note">The design constraints are part of the tool, not a marketing layer.</p></div>
+  <div class="principles">
+    <details open><summary>Native Linux integration</summary><p>Shaping uses <code>tc netem</code> and netfilter; observation uses AF_PACKET, raw ICMP and mac80211. <code>tc</code> and <code>iptables</code> remain because they are the kernel interface.</p></details>
+    <details open><summary>Inspectable by design</summary><p>Every command has <code>-h</code>, machine-readable output where it makes sense, and a report you can read after the run. The source is the release artifact.</p></details>
+    <details><summary>No background services</summary><p>Tools run in the foreground. A shaping run restores the previous qdisc and <code>ip_forward</code> on exit; a second Ctrl+C is needed only to force an interrupted teardown.</p></details>
+    <details><summary>Local-first state</summary><p>Configuration, device store, acceptance record and reports live under the user's home directory. There is no account, cloud component or telemetry channel.</p></details>
+    <details><summary>User-controlled targeting</summary><p>The engine refuses to target the gateway or the operator's own machine. Consent is recorded locally and can be reset explicitly.</p></details>
+    <details><summary>Honest boundaries</summary><p>GNULTE shows host context such as resolver status and listening sockets. It does not decide whether a DNS policy or firewall rule is correct; that judgement stays with the operator.</p></details>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-head"><span class="section-no">03 /</span><h2>Install from source</h2></div>
+  <div class="grid-2">
+    <div>
+      <p>Go 1.21 or newer. No third-party Go modules. Distro package prerequisites are on the download page.</p>
+      <div class="terminal"><div class="terminal-head"><span><span class="dots"><i></i><i></i><i></i></span>terminal</span><button class="copy" type="button">copy</button></div><div class="terminal-body"><pre><code>git clone https://github.com/notmicrosoft2000-cmd/gnulte-go.git
+cd gnulte-go
+./build.sh
+sudo ./install.sh
+gnulte-hub</code></pre></div></div>
+    </div>
+    <div>
+      <p><code>build.sh</code> runs <code>go vet ./cmd/... ./internal/...</code> and <code>go test ./cmd/... ./internal/...</code> before it hands over binaries. <code>install.sh</code> reads the version from the built tools and aborts if they disagree.</p>
+      <div class="actions"><a class="btn" href="downloads.html">Distro instructions</a><a class="btn ghost" href="docs/install.html">Installation manual</a></div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-head"><span class="section-no">04 /</span><h2>Before you run it</h2></div>
+  <aside class="warn"><b>Authorised use only</b><span>GNULTE redirects ARP traffic, impairs kernel queues, captures packets and can inject 802.11 management frames. Use it only on networks, systems and devices you own or are explicitly authorised to test. <a href="about.html#safety">Read the policy</a> or run <code>gnulte --docs</code>.</span></aside>
+</section>
 </main>
 <footer class="colophon"><div class="wrap">
 <div class="colophon-grid">
   <div>
-    <svg class="mark" viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6">
-<rect x="1" y="1" width="38" height="38"/>
-<path d="M20 20 L9 9 M20 20 L31 9 M20 20 L9 31 M20 20 L31 31"/>
+    <svg viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6">
+<rect x="1" y="1" width="38" height="38"/><path d="M20 20 L9 9 M20 20 L31 9 M20 20 L9 31 M20 20 L31 31"/>
 <circle cx="20" cy="20" r="3.2" fill="currentColor" stroke="none"/>
-<circle cx="9" cy="9" r="2.2" fill="currentColor" stroke="none"/>
-<circle cx="31" cy="9" r="2.2" fill="currentColor" stroke="none"/>
-<circle cx="9" cy="31" r="2.2" fill="currentColor" stroke="none"/>
-<circle cx="31" cy="31" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="9" cy="9" r="2.2" fill="currentColor" stroke="none"/><circle cx="31" cy="9" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="9" cy="31" r="2.2" fill="currentColor" stroke="none"/><circle cx="31" cy="31" r="2.2" fill="currentColor" stroke="none"/>
 </svg>
     <h3>GNULTE</h3>
-    <p>GNU LAN Network Testing Environment. Seven single-purpose Linux tools, standard library only, GPL-3.0-or-later.</p>
+    <p>GNU LAN Network Testing Environment. Eight Linux executables, standard library only, GPL-3.0-or-later.</p>
     <p>Maintained by Neptune Productions. Built on <code>tc</code>/netem, netfilter, AF_PACKET and mac80211.</p>
   </div>
-  <div><h3>The suite</h3><ul><li><a href="docs/gnulte.html">gnulte</a></li><li><a href="docs/gnulte-watch.html">gnulte-watch</a></li><li><a href="docs/gnulte-scan.html">gnulte-scan</a></li><li><a href="docs/gnulte-inventory.html">gnulte-inventory</a></li><li><a href="docs/gnulte-wifi.html">gnulte-wifi</a></li><li><a href="docs/gnulte-quicksum.html">gnulte-quicksum</a></li><li><a href="docs/gnulte-report.html">gnulte-report</a></li></ul></div>
-  <div><h3>Manual</h3><ul><li><a href="docs/install.html">Installation</a></li><li><a href="docs/configuration.html">Configuration</a></li><li><a href="docs/usage.html">Usage</a></li><li><a href="docs/troubleshooting.html">Troubleshooting</a></li><li><a href="docs/faq.html">FAQ</a></li></ul></div>
+  <div><h3>Executables</h3><ul><li><a href="docs/gnulte-hub.html">gnulte-hub</a></li>
+<li><a href="docs/gnulte.html">gnulte</a></li>
+<li><a href="docs/gnulte-watch.html">gnulte-watch</a></li>
+<li><a href="docs/gnulte-scan.html">gnulte-scan</a></li>
+<li><a href="docs/gnulte-inventory.html">gnulte-inventory</a></li>
+<li><a href="docs/gnulte-wifi.html">gnulte-wifi</a></li>
+<li><a href="docs/gnulte-quicksum.html">gnulte-quicksum</a></li>
+<li><a href="docs/gnulte-report.html">gnulte-report</a></li></ul></div>
+  <div><h3>Guides</h3><ul>
+    <li><a href="docs/install.html">Installation</a></li>
+    <li><a href="docs/configuration.html">Configuration</a></li>
+    <li><a href="docs/usage.html">Usage</a></li>
+    <li><a href="docs/troubleshooting.html">Troubleshooting</a></li>
+    <li><a href="docs/faq.html">FAQ</a></li>
+    <li><a href="search.html">Search</a></li>
+  </ul></div>
   <div><h3>Project</h3><ul>
     <li><a href="about.html">About &amp; safety</a></li>
     <li><a href="changelog.html">Changelog</a></li>
-    <li><a href="news.html">Field notes</a></li>
+    <li><a href="news.html">Release notes</a></li>
     <li><a href="downloads.html">Downloads</a></li>
     <li><a href="support.html">Getting help</a></li>
     <li><a href="contact.html">Contact</a></li>
@@ -55,9 +172,9 @@
   </ul></div>
 </div>
 <div class="colophon-bottom"><span>v17.0 &middot; 2026-11-18 &middot; source: github.com/notmicrosoft2000-cmd/gnulte-go</span>
-<span><a href="index.html">home</a><a href="search.html">search</a><a href="about.html#safety">authorised use</a></span></div>
+<span><a href="index.html">home</a><a href="tools.html">tools</a><a href="about.html#safety">authorised use</a></span></div>
 </div></footer>
-<script src="js/site.js?v=field-1"></script>
-<script src="js/search.js?v=field-1"></script>
+<script src="js/workstation.js?v=workstation-1"></script>
+
 </body>
 </html>

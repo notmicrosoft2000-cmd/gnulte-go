@@ -45,11 +45,16 @@ import (
 //	5 MAP       gateway · self · every device as a node; live pairs as edges
 //	             (needs the root capture socket), busiest link pulsing
 //
+// v17 adds screen 7, the animated PATH topology:
+//
+//	7 PATH      target · this host · router · internet, motion driven by the
+//	            watch's existing ping samples (no capture socket needed)
+//
 // Rows scale with terminal width (compact 2-line < 78 cols, normal 3-line,
 // wide 4-line ≥ 116 cols) and every host keeps one stable hue across screens
 // so you can follow a device by colour alone.
 
-// Screen modes.
+// Screen modes. PATH is appended after HISTORY so screens 1–6 keep their keys.
 const (
 	scrHosts = iota
 	scrTalkers
@@ -57,6 +62,7 @@ const (
 	scrArp
 	scrMap
 	scrHistory
+	scrPath
 )
 
 // screenLabel is the mode tag shown in the header status line.
@@ -72,6 +78,8 @@ func screenLabel(s int) string {
 		return "MAP"
 	case scrHistory:
 		return "HISTORY"
+	case scrPath:
+		return "PATH"
 	default:
 		return "HOSTS"
 	}
@@ -110,6 +118,12 @@ type viewState struct {
 	count     int  // how many rows the last draw showed (after the alarm filter)
 	currentIP string
 	gCmd      string // transient "gnulte -t <ip>" hint shown under the footer
+	// handoffPending means ⏎/g was pressed. buildView resolves the first
+	// frame's freshly sorted cursor row and launches once; handoffLaunchedIP
+	// then pins that target for later frames so a 1 Hz redraw never spawns a
+	// second window (or overwrites the hint for the host actually launched).
+	handoffPending    bool
+	handoffLaunchedIP string
 }
 
 // Row ordering modes.
@@ -155,6 +169,12 @@ type watchEnv struct {
 	width       int  // terminal columns, for layoutFor
 	neigh       map[string]string
 	pulse       bool // map screen: highlight the busiest link this draw
+
+	// PATH motion. animation folds the saved topology_animation setting with
+	// the TTY/TERM/no-animation rules in main; pathTick advances once per
+	// existing 1 Hz watch tick (never from a frame timer or a second reader).
+	animation bool
+	pathTick  int
 
 	events []watchEvent // this session's transitions, oldest first
 	today  []watchEvent // today's stored transitions, oldest first
@@ -457,12 +477,24 @@ func buildView(st *viewState, hosts []string, info map[string]hostInfo, rates ma
 	if st.showHelp {
 		helpExtra = 2
 	}
-	if st.gCmd != "" {
+	// A pending handoff also prints a command line: reserve its row before
+	// sizing the body, otherwise the resolved hint would be clipped by the
+	// final height cap.
+	if st.gCmd != "" || st.handoffPending {
 		gcmdExtra = 1
 	}
+	// PATH has a shorter header (exact D.TITLE + rule) and no TOTAL pane:
+	// its tail is the D1 rule and the D.FOOT key line instead.
+	pathView := st.screen == scrPath
 	overhead := headerH + footerH + helpExtra + gcmdExtra + totalH
+	if pathView {
+		overhead = 2 + 1 + footerH + helpExtra + gcmdExtra
+	}
 
 	out := envHeader(st, hosts, rates, env)
+	if pathView {
+		out = pathHeader(env)
+	}
 
 	switch st.screen {
 	case scrTalkers:
@@ -526,6 +558,11 @@ func buildView(st *viewState, hosts []string, info map[string]hostInfo, rates ma
 		st.cursor = 0
 		st.currentIP = ""
 		out = append(out, historyLines(env, height-overhead)...)
+	case scrPath:
+		// A target card is a diagram node, never a launch target. PATH clears
+		// currentIP here AND handoffIP refuses it as a second line of defence.
+		st.currentIP = ""
+		out = append(out, pathLines(st, hosts, info, rates, stats, env, height-overhead)...)
 	default:
 		// ----- host rows, windowed by line budget so the cursor never leaves
 		// the screen and the frame never overflows a short terminal -----
@@ -563,20 +600,48 @@ func buildView(st *viewState, hosts []string, info map[string]hostInfo, rates ma
 		}
 	}
 
-	// ----- session totals (all screens) -----
-	tot := netTotals(hosts, rates)
-	out = append(out, "", ux.C(ux.Dim, "  "+strings.Repeat("─", 40)))
-	out = append(out, fmt.Sprintf("  %-17s %s",
-		ux.C(ux.Bold, "TOTAL"), ux.TruncPad(rateLine(tot.rx, tot.rxp, env.iv)+"    "+upRateLine(tot.tx, tot.txp, env.iv), 46)))
-
-	// ----- footer hints -----
-	out = append(out, "  "+ux.C(ux.Dim, footerHint(st)))
-	if st.gCmd != "" {
-		out = append(out, "  "+ux.C(ux.Bold+ux.Green, "⬢ "+st.gCmd))
+	// Resolve a ⏎/g handoff *after* the screen switch has pinned currentIP to
+	// this frame's cursor row (B1), but launch only once. redraws run at the
+	// watch's 1 Hz tick, so re-calling handoffGNULTE here would open a fresh
+	// terminal every second until the next key. Once launched, the hint stays
+	// the one for the target actually handed off.
+	if st.handoffPending && st.handoffLaunchedIP == "" {
+		if ip := handoffIP(st.screen, st.currentIP); ip != "" {
+			st.gCmd = handoffGNULTE(env.nic, ip)
+			st.handoffLaunchedIP = ip
+		} else {
+			st.gCmd = ""
+			st.handoffPending = false
+		}
 	}
-	if st.showHelp {
-		out = append(out, ux.C(ux.Dim, "  1 hosts · 2 talkers (ranked ↓/↑ + whom each talks to) · 3 flows (pairs, root socket)"))
-		out = append(out, ux.C(ux.Dim, "  4 ARP neighbours · 5 map (interconnection, root socket) · s sort · ⏎ test with gnulte · Tab/d detail · x save devices"))
+
+	if pathView {
+		// D1 closes with one rule and the exact PATH key line, not the
+		// host-screen TOTAL pane.
+		out = append(out, ux.C(ux.Dim, "  "+strings.Repeat("─", 80)))
+		out = append(out, "  "+ux.C(ux.Dim, footerHint(st)))
+		if st.gCmd != "" {
+			out = append(out, "  "+ux.C(ux.Bold+ux.Green, "⬢ "+st.gCmd))
+		}
+		if st.showHelp {
+			out = append(out, ux.C(ux.Dim, "  "+pathDotKey))
+		}
+	} else {
+		// ----- session totals (screens 1–6) -----
+		tot := netTotals(hosts, rates)
+		out = append(out, "", ux.C(ux.Dim, "  "+strings.Repeat("─", 40)))
+		out = append(out, fmt.Sprintf("  %-17s %s",
+			ux.C(ux.Bold, "TOTAL"), ux.TruncPad(rateLine(tot.rx, tot.rxp, env.iv)+"    "+upRateLine(tot.tx, tot.txp, env.iv), 46)))
+
+		// ----- footer hints -----
+		out = append(out, "  "+ux.C(ux.Dim, footerHint(st)))
+		if st.gCmd != "" {
+			out = append(out, "  "+ux.C(ux.Bold+ux.Green, "⬢ "+st.gCmd))
+		}
+		if st.showHelp {
+			out = append(out, ux.C(ux.Dim, "  1 hosts · 2 talkers (ranked ↓/↑ + whom each talks to) · 3 flows (pairs, root socket)"))
+			out = append(out, ux.C(ux.Dim, "  4 ARP neighbours · 5 map (interconnection, root socket) · s sort · ⏎ test with gnulte · Tab/d detail · x save devices"))
+		}
 	}
 	// Hard guarantee: never draw taller than the terminal (a very short TTY
 	// with every pane open can exhaust even the packed budget).
@@ -1052,6 +1117,457 @@ func mapEndpHost(e string, hostSet map[string]bool, env watchEnv) bool {
 	return ip == env.selfIP || (env.gwIP != "" && ip == env.gwIP) || hostSet[ip]
 }
 
+// ----- screen 7: animated PATH -------------------------------------------
+//
+// PATH is built only from data the watch already owns: the ping sampler's
+// up/down state, average RTT and loss, this host's IP/interface, the gateway's
+// last RTT, aggregate capture rates and the existing up/down transitions. It
+// deliberately says nothing about ARP redirect, tc/netem, forwarding, scenario
+// phases, invented rates or invented timestamps.
+
+const (
+	pathDotKey  = "one dot = one probe sample"
+	pathNoEvent = "no transitions this session"
+	pathNoRate  = "rate — (no capture socket)"
+	pathFooter  = "p/7 PATH · 1-6 screens · handoff off · Esc HOSTS · q quit"
+)
+
+// pathMotion is the per-tick animation state. Only the selected target's
+// pinger decides it, so dots follow real samples rather than a decorative
+// timer. change needs no separate state: node glyphs and the EVENTS list are
+// rebuilt from the same up/down transitions every tick.
+type pathMotion int
+
+const (
+	pathWaiting  pathMotion = iota // no successful reply yet
+	pathProbe                      // ping sent: dots move target → self → router
+	pathReply                      // reply arrived: dots return router → self → target
+	pathLoss                       // timeout: the dot stops at GNULTE as ✗
+	pathFallback                   // reduced motion: static frame, no dots
+)
+
+func pathMotionFor(st *hostStat, tick int, animation bool) pathMotion {
+	if !animation {
+		return pathFallback
+	}
+	if st == nil || st.ping.count+st.ping.drops == 0 {
+		return pathWaiting
+	}
+	if st.ping.last < 0 {
+		return pathLoss
+	}
+	if tick%2 == 0 {
+		return pathReply
+	}
+	return pathProbe
+}
+
+// pathHeader is the exact D.TITLE band: name, interface, subnet and PATH.
+func pathHeader(env watchEnv) []string {
+	title := "LIVE LAN WATCH"
+	if env.nic != "" {
+		title += " · " + env.nic
+	}
+	if env.subnet != "" {
+		title += " · " + env.subnet
+	}
+	title += " · PATH"
+	return []string{
+		"  " + ux.C(ux.Bold+ux.Header, title),
+		ux.C(ux.Dim, "  "+strings.Repeat("─", 80)),
+	}
+}
+
+// pathLayout returns content rows per node, the gap between cards, the edge
+// lane width and the card inner widths for the three D1 width bands. The self
+// card is wide enough to hold D.NRATE untruncated even in compact mode.
+func pathLayout(width int) (inner [4]int, gap, lane, rows int) {
+	switch layoutFor(width) {
+	case layoutCompact:
+		return [4]int{14, 27, 10, 11}, 2, 4, 2
+	case layoutWide:
+		return [4]int{20, 27, 14, 12}, 6, 10, 4
+	default:
+		return [4]int{16, 27, 12, 11}, 2, 7, 3
+	}
+}
+
+// pathBox wraps fixed-height content in a node card. Padding happens before
+// colouring so ANSI codes never consume a column of the frame.
+func pathBox(content []string, width int) []string {
+	out := []string{"┌" + strings.Repeat("─", width) + "┐"}
+	for _, c := range content {
+		out = append(out, "│"+ux.TruncPad(" "+c, width)+"│")
+	}
+	return append(out, "└"+strings.Repeat("─", width)+"┘")
+}
+
+// pathSelectedIP is the target the animation and the plain transcript follow:
+// the same ↑↓ cursor, clamped into the MAP-ordered target list.
+func pathSelectedIP(st *viewState, nodes []mapNode) string {
+	if len(nodes) == 0 {
+		return ""
+	}
+	return nodes[ux.Clamp(st.cursor, 0, len(nodes)-1)].ip
+}
+
+// pathLines renders the D1 frame body: four node columns, the three labelled
+// edges, the selected target's RTT/loss context and a bounded EVENTS list.
+func pathLines(st *viewState, hosts []string, info map[string]hostInfo, rates map[string]traffic.Rate,
+	stats map[string]*hostStat, env watchEnv, budget int) []string {
+
+	nodes := mapNodes(hosts, info, stats, env)
+	st.count = len(nodes)
+	if st.cursor < 0 {
+		st.cursor = 0
+	}
+	if len(nodes) == 0 {
+		st.cursor = 0
+	} else if st.cursor > len(nodes)-1 {
+		st.cursor = len(nodes) - 1
+	}
+	st.currentIP = ""
+
+	sel := stats[pathSelectedIP(st, nodes)]
+	motion := pathMotionFor(sel, env.pathTick, env.animation)
+	inner, gap, lane, rows := pathLayout(env.width)
+	eventMax := 3
+	switch layoutFor(env.width) {
+	case layoutCompact:
+		eventMax = 2
+	case layoutWide:
+		eventMax = 4
+	}
+	// Short terminals lose the event log first, then the rate row.
+	if budget > 0 && budget < 1+rows+2+4+1+eventMax {
+		eventMax = 0
+		rows = 2
+	}
+
+	heads := []string{"TARGET(S)", "GNULTE · this host", "ROUTER", "INTERNET"}
+	heading := ""
+	for i, h := range heads {
+		if i > 0 {
+			heading += strings.Repeat(" ", gap+2)
+		}
+		heading += "  " + ux.C(ux.Bold, ux.TruncPad(h, inner[i]))
+	}
+	out := []string{heading}
+
+	targets := pathTargetCards(nodes, stats, env, inner[0], rows)
+	if len(targets) == 0 {
+		bare := make([]string, rows)
+		bare[0] = "—"
+		targets = [][]string{bare}
+	}
+	self := pathSelfCards(hosts, rates, env, inner[1], rows)
+	router := pathRouterCards(env, inner[2], rows)
+	internet := pathInternetCards(inner[3], rows)
+
+	for gi, tc := range targets {
+		cards := [][]string{tc, self, router, internet}
+		if gi > 0 {
+			// The other three nodes are shared: draw them once, leave blank
+			// cards alongside the stacked target cards.
+			for c := 1; c < 4; c++ {
+				cards[c] = make([]string, rows)
+			}
+		}
+		boxes := make([][]string, 4)
+		for c := range cards {
+			boxes[c] = pathBox(cards[c], inner[c])
+		}
+		for r := 0; r < len(boxes[0]); r++ {
+			line := ""
+			for c := 0; c < 4; c++ {
+				if c > 0 {
+					line += strings.Repeat(" ", gap+2)
+				}
+				line += boxes[c][r]
+			}
+			if motion == pathWaiting {
+				line = ux.C(ux.Dim, line)
+			}
+			out = append(out, line)
+		}
+	}
+
+	out = append(out, "")
+	out = append(out, pathEdgeLabels(lane))
+	out = append(out, pathEdgeLine(motion, env.pathTick, lane))
+	if rows >= 3 {
+		out = append(out, pathEdgeStats(sel, env))
+	}
+	if eventMax > 0 {
+		out = append(out, "", "  "+ux.C(ux.Bold, "EVENTS"))
+		if len(env.events) == 0 {
+			out = append(out, "  "+ux.C(ux.Dim, pathNoEvent))
+		} else {
+			shown := 0
+			for i := len(env.events) - 1; i >= 0 && shown < eventMax; i-- {
+				out = append(out, "  "+pathEventLine(env.events[i]))
+				shown++
+			}
+		}
+	}
+	return capPath(out, budget)
+}
+
+// capPath trims whole lines, never a label mid-word.
+func capPath(out []string, budget int) []string {
+	if budget < 1 {
+		return nil
+	}
+	if len(out) > budget {
+		return out[:budget]
+	}
+	return out
+}
+
+// pathTargetCards builds one card per watched target. Compact terminals reuse
+// mapGrid's one-line node card from the MAP screen.
+func pathTargetCards(nodes []mapNode, stats map[string]*hostStat, env watchEnv, width, rows int) [][]string {
+	grid := mapGrid(nodes, env)
+	out := make([][]string, 0, len(nodes))
+	for i, n := range nodes {
+		name := n.name
+		if name == "" || name == "(no identity)" {
+			name = "—"
+		}
+		line := ux.C(ux.Hue(n.hue), "● ") + ux.TruncPad(name, width-2)
+		if rows == 2 && i < len(grid) {
+			line = ux.TruncPad(strings.TrimSpace(grid[i]), width)
+		}
+		content := []string{
+			line,
+			ux.TruncPad(n.ip, width),
+			pathRTT(stats[n.ip]),
+			"loss " + pathLossValue(stats[n.ip]),
+		}
+		out = append(out, content[:rows])
+	}
+	return out
+}
+
+func pathSelfCards(hosts []string, rates map[string]traffic.Rate, env watchEnv, width, rows int) []string {
+	self := env.selfIP
+	if self == "" {
+		self = "—"
+	}
+	nic := env.nic
+	if nic == "" {
+		nic = "—"
+	}
+	content := []string{
+		ux.C(ux.Cyan, "◉ ") + ux.TruncPad(self, width-2),
+		"iface " + ux.TruncPad(nic, width-6),
+		pathRateCell(hosts, rates, env),
+		"",
+	}
+	if env.hasCounter {
+		t := netTotals(hosts, rates)
+		content[3] = "↑ " + ux.HumanRate(bps(t.tx, env.iv))
+	}
+	return content[:rows]
+}
+
+func pathRouterCards(env watchEnv, width, rows int) []string {
+	gw := env.gwIP
+	if gw == "" {
+		gw = "—"
+	}
+	content := []string{
+		ux.C(ux.Target, "◇ ") + ux.TruncPad(gw, width-2),
+		"gateway",
+		"RTT " + pathGWRTTValue(env.gwRTT),
+		"",
+	}
+	return content[:rows]
+}
+
+func pathInternetCards(width, rows int) []string {
+	content := []string{"upstream", "not probed", "", ""}
+	return content[:rows]
+}
+
+// pathRateCell is D.NRATE when there is no capture socket; otherwise it is
+// the watch's own aggregate down rate. PATH is never gated on the socket.
+func pathRateCell(hosts []string, rates map[string]traffic.Rate, env watchEnv) string {
+	if !env.hasCounter {
+		return pathNoRate
+	}
+	t := netTotals(hosts, rates)
+	if t.rx == 0 && t.tx == 0 {
+		return "rate —"
+	}
+	return "rate " + ux.HumanRate(bps(t.rx, env.iv)) + "↓"
+}
+
+// pathLane paints one edge lane. At most three dots ride it, one cell further
+// per 1 Hz tick; reduced motion keeps the static ───▸─── form.
+func pathLane(width int, motion pathMotion, tick int, forward bool) string {
+	switch motion {
+	case pathWaiting:
+		return strings.Repeat("┄", width)
+	case pathFallback:
+		return pathStaticLane(width)
+	}
+	glyph := '▸'
+	if !forward {
+		glyph = '◂'
+	}
+	cells := []rune(strings.Repeat("─", width))
+	pos := tick % width
+	if !forward {
+		pos = width - 1 - (tick % width)
+	}
+	for i := 0; i < 3 && i < width; i++ {
+		p := pos - i
+		if !forward {
+			p = pos + i
+		}
+		if p >= 0 && p < width {
+			cells[p] = glyph
+		}
+	}
+	return string(cells)
+}
+
+// pathStaticLane is the reduced-motion / D1 edge shape.
+func pathStaticLane(width int) string {
+	if width <= 1 {
+		return strings.Repeat("─", width)
+	}
+	mid := (width - 1) / 2
+	return strings.Repeat("─", mid) + "▸" + strings.Repeat("─", width-1-mid)
+}
+
+// pathLossLane ends the probe edge at GNULTE with a ✗ and no travelling dot.
+func pathLossLane(width int) string {
+	if width < 1 {
+		return ""
+	}
+	return strings.Repeat("─", width-1) + "✗"
+}
+
+func pathEdgeLine(motion pathMotion, tick, lane int) string {
+	forward := motion != pathReply
+	first := pathLane(lane, motion, tick, forward)
+	middle := pathLane(lane, motion, tick, forward)
+	if motion == pathLoss {
+		// A timeout only kills the probe edge: the dot stops at GNULTE.
+		first, middle = pathLossLane(lane), pathStaticLane(lane)
+	}
+	// The uplink is never probed by the watch, so it stays static (or dashed
+	// while the selected target is still waiting for its first reply).
+	last := pathStaticLane(lane)
+	if motion == pathWaiting {
+		last = strings.Repeat("┄", lane)
+	}
+	return "  ● " + first + " ◉ " + middle + " ◇ " + last + " ▭"
+}
+
+func pathEdgeLabels(lane int) string {
+	return "     " + ux.TruncPad("probe", lane+2) + "   " +
+		ux.TruncPad("gateway", lane+2) + "   " + ux.TruncPad("uplink", lane+2)
+}
+
+// pathEdgeStats is the D1 context strip under the edges: the selected target's
+// real RTT/loss, the gateway's last reply and the unprobed internet node.
+func pathEdgeStats(st *hostStat, env watchEnv) string {
+	target := "RTT " + pathRTTValue(st) + " · loss " + pathLossValue(st)
+	return "  " + ux.TruncPad(target, 24) +
+		ux.TruncPad("last reply "+pathGWRTTValue(env.gwRTT), 18) +
+		ux.TruncPad("not probed", 12)
+}
+
+// pathEventLine is one of exactly two allowed transition forms: never an
+// invented cause, phase or timestamp.
+func pathEventLine(ev watchEvent) string {
+	state := "down"
+	if ev.up {
+		state = "up"
+	}
+	return ev.when.Format("15:04:05") + "  host " + ev.ip + " " + state
+}
+
+// pathRTTValue and pathLossValue use only the watch's own ping samples. A
+// single timeout does not erase a measured average: ✗ belongs on the loss
+// edge, while an RTT is "—" only until something has actually replied.
+func pathRTTValue(st *hostStat) string {
+	if st == nil || st.ping.count == 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%d ms", st.ping.avg())
+}
+
+func pathRTTTranscript(st *hostStat) string {
+	if st == nil || st.ping.count == 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%dms", st.ping.avg())
+}
+
+func pathLossValue(st *hostStat) string {
+	if st == nil || st.ping.count+st.ping.drops == 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%.0f%%", st.ping.loss())
+}
+
+// pathRTT colours the frame's RTT with watch's own health thresholds — the
+// ones grade uses — never monitor's severity bands (which are not exported).
+func pathRTT(st *hostStat) string {
+	code := ux.Dim
+	if st != nil && st.ping.count > 0 {
+		code = ux.Green
+		switch {
+		case st.alarm || st.ping.last < 0 || st.ping.loss() >= 10:
+			code = ux.Red
+		case st.ping.loss() > 2 || st.ping.jitter() > 30:
+			code = ux.Yellow
+		}
+	}
+	return ux.C(code, "RTT "+pathRTTValue(st))
+}
+
+// -2 is "not tried yet", -1 is a failed last attempt (see gwCell in main.go).
+func pathGWRTTValue(rtt int) string {
+	switch rtt {
+	case -2:
+		return "—"
+	case -1:
+		return "✗"
+	default:
+		return fmt.Sprintf("%d ms", rtt)
+	}
+}
+
+// pathTranscriptLine is the ANSI-free, one-line PATH fallback for piped runs
+// and for the session log when PATH is the active view.
+func pathTranscriptLine(target string, st *hostStat, env watchEnv, total netTotal) string {
+	if target == "" {
+		target = "—"
+	}
+	self, nic, gw := env.selfIP, env.nic, env.gwIP
+	if self == "" {
+		self = "—"
+	}
+	if nic == "" {
+		nic = "—"
+	}
+	if gw == "" {
+		gw = "—"
+	}
+	line := fmt.Sprintf("target %s → GNULTE %s (%s) → router %s → internet | RTT %s | loss %s",
+		target, self, nic, gw, pathRTTTranscript(st), pathLossValue(st))
+	if !env.hasCounter {
+		return line + " | " + pathNoRate
+	}
+	return line + fmt.Sprintf(" | rate %s↓ %s↑",
+		ux.HumanRate(bps(total.rx, env.iv)), ux.HumanRate(bps(total.tx, env.iv)))
+}
+
 // arpLines is screen 4: the neighbour table from /proc/net/arp, refreshed
 // live. Every known MAC gets its vendor and (when it is a watched host) its
 // live ping and health grade; the router and this machine appear too, dimmed.
@@ -1164,6 +1680,8 @@ func footerHint(st *viewState) string {
 		return fmt.Sprintf("  map · %d nodes · 1/2/3/4/6 screens · edges = live flows · pulse = busiest link · x save devices · h help · q quit", st.count)
 	case scrHistory:
 		return fmt.Sprintf("  history · %d alarm(s) · 1-5 screens · x save devices · h help · q quit", st.count)
+	case scrPath:
+		return pathFooter
 	default:
 		filter := ""
 		if st.alarmOnly {

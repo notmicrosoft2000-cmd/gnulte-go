@@ -26,6 +26,44 @@ func TestParseMenuChoice(t *testing.T) {
 	}
 }
 
+func TestMenuFrameWithContextNoteFooter(t *testing.T) {
+	items := []MenuItem{
+		{Label: "First", Detail: "one"},
+		{Label: "Second", Detail: "two"},
+	}
+	opts := MenuOptions{
+		Context:  []string{"First context line", "Second context line"},
+		Note:     "A note below the list",
+		Footer:   "custom keys",
+		Selected: 1,
+	}
+	frame := MenuFrameWith("A title", items, opts.Selected, opts)
+	joined := strings.Join(frame, "\n")
+	for _, want := range []string{
+		"A title", "First context line", "Second context line",
+		"First", "Second", "A note below the list", "custom keys", "▸ 2",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("frame is missing %q: %q", want, joined)
+		}
+	}
+	if strings.Contains(joined, defaultMenuFooter) {
+		t.Errorf("custom footer did not replace the default: %q", joined)
+	}
+	titleAt := strings.Index(joined, "A title")
+	contextAt := strings.Index(joined, "First context line")
+	rowAt := strings.Index(joined, "1  First")
+	noteAt := strings.Index(joined, "A note below the list")
+	footerAt := strings.Index(joined, "custom keys")
+	if !(titleAt < contextAt && contextAt < rowAt && rowAt < noteAt && noteAt < footerAt) {
+		t.Errorf("frame copy is out of order: %q", joined)
+	}
+	// title, rule, two context lines, blank, rows, blank, note, footer, blank
+	if want := len(items) + 9; len(frame) != want {
+		t.Errorf("frame has %d lines, want %d: %q", len(frame), want, joined)
+	}
+}
+
 func TestMenuFrame(t *testing.T) {
 	items := []MenuItem{
 		{Label: "Slow down a device", Detail: "pick a device"},

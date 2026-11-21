@@ -33,15 +33,36 @@ type MenuItem struct {
 	Detail string
 }
 
-// MenuFrame lays out a picker for a full-frame redraw. The selected row gets
-// the arrow marker; every other row is indented the same amount so the list
-// does not jump when the selection moves.
-func MenuFrame(title string, items []MenuItem, sel int) []string {
+// MenuOptions adds contextual copy to a picker without changing the key
+// bindings. Context lines appear between the title rule and the list, Note is
+// a single line below it, and Footer replaces the default key hint. Selected
+// is the initially highlighted row (zero by default), so a launcher can
+// preselect a saved choice without reordering the labels.
+type MenuOptions struct {
+	Context  []string
+	Note     string
+	Footer   string
+	Selected int
+}
+
+const defaultMenuFooter = "↑/↓ choose   Enter run   number jump   q quit"
+
+// MenuFrameWith lays out a picker with contextual copy for a full-frame
+// redraw. The selected row gets the arrow marker; every other row is indented
+// the same amount so the list does not jump when the selection moves.
+func MenuFrameWith(title string, items []MenuItem, sel int, opts MenuOptions) []string {
+	footer := opts.Footer
+	if footer == "" {
+		footer = defaultMenuFooter
+	}
 	lines := []string{
 		"  " + title,
 		"  " + strings.Repeat("─", 52),
-		"",
 	}
+	for _, line := range opts.Context {
+		lines = append(lines, "  "+line)
+	}
+	lines = append(lines, "")
 	for i, item := range items {
 		mark := "  "
 		if i == sel {
@@ -53,7 +74,18 @@ func MenuFrame(title string, items []MenuItem, sel int) []string {
 		}
 		lines = append(lines, row)
 	}
-	return append(lines, "", "  ↑/↓ choose   Enter run   number jump   q quit", "")
+	lines = append(lines, "")
+	if opts.Note != "" {
+		lines = append(lines, "  "+opts.Note)
+	}
+	return append(lines, "  "+footer, "")
+}
+
+// MenuFrame lays out a picker for a full-frame redraw. The selected row gets
+// the arrow marker; every other row is indented the same amount so the list
+// does not jump when the selection moves.
+func MenuFrame(title string, items []MenuItem, sel int) []string {
+	return MenuFrameWith(title, items, sel, MenuOptions{})
 }
 
 // Menu asks the operator to pick one item. On a live terminal it opens the
@@ -62,15 +94,24 @@ func MenuFrame(title string, items []MenuItem, sel int) []string {
 // suite can drive the same choices without a PTY. It returns the item index
 // and whether a choice was made.
 func Menu(title string, items []MenuItem) (int, bool) {
+	return MenuWith(title, items, MenuOptions{})
+}
+
+// MenuWith is Menu with contextual copy, a custom footer and an optional
+// preselected row. The keys and the piped-input fallback are identical.
+func MenuWith(title string, items []MenuItem, opts MenuOptions) (int, bool) {
 	if len(items) == 0 {
 		return -1, false
 	}
 	if StdinTTY() && ux.TTY() {
 		if screen, err := Open(); err == nil {
 			defer screen.Close()
-			sel := 0
+			sel := opts.Selected
+			if sel < 0 || sel >= len(items) {
+				sel = 0
+			}
 			for {
-				screen.Draw(MenuFrame(title, items, sel))
+				screen.Draw(MenuFrameWith(title, items, sel, opts))
 				key, r := screen.Key()
 				switch {
 				case key == KeyUp || key == KeyRune && (r == 'k' || r == 'K'):
@@ -88,6 +129,14 @@ func Menu(title string, items []MenuItem) (int, bool) {
 				}
 			}
 		}
+	}
+	// Non-TTY callers still see the context and note before the numbered
+	// prompt; plainMenu keeps the long-standing answer/EOF behaviour.
+	for _, line := range opts.Context {
+		fmt.Println("  " + line)
+	}
+	if opts.Note != "" {
+		fmt.Println("  " + opts.Note)
 	}
 	return plainMenu(title, items)
 }

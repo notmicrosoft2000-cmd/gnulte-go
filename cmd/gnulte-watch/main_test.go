@@ -280,6 +280,47 @@ not-an-ip        0x1         0x2         11:22:33:44:55:66     *        wlan0
 	}
 }
 
+// TestPathTranscriptLineExact pins the ANSI-free one-line PATH fallback from
+// spec §3.5, including the no-capture-socket suffix and unknown values.
+func TestPathTranscriptLineExact(t *testing.T) {
+	st := &hostStat{}
+	for i := 0; i < 20; i++ {
+		st.ping.add(412, 60)
+	}
+	st.ping.add(-1, 60) // 1 drop in 21 attempts → 5%
+	env := watchEnv{nic: "wlan0", selfIP: "192.0.2.5", gwIP: "192.0.2.1", iv: 1}
+	want := "target 192.0.2.10 → GNULTE 192.0.2.5 (wlan0) → router 192.0.2.1 → internet | RTT 412ms | loss 5% | rate — (no capture socket)"
+	got := pathTranscriptLine("192.0.2.10", st, env, netTotal{})
+	if got != want {
+		t.Fatalf("plain PATH line =\n%q\nwant\n%q", got, want)
+	}
+	if strings.ContainsAny(got, "\x1b\r") {
+		t.Fatalf("plain PATH line must be ANSI-free and never repaint: %q", got)
+	}
+
+	env.hasCounter = true
+	got = pathTranscriptLine("192.0.2.10", st, env, netTotal{rx: 1024 * 1024, tx: 512 * 1024})
+	if !strings.Contains(got, "| rate 1.0MB/s↓ 512.0KB/s↑") || strings.Contains(got, pathNoRate) {
+		t.Fatalf("capture-socket PATH line = %q", got)
+	}
+
+	unknown := pathTranscriptLine("", &hostStat{}, watchEnv{}, netTotal{})
+	wantUnknown := "target — → GNULTE — (—) → router — → internet | RTT — | loss — | rate — (no capture socket)"
+	if unknown != wantUnknown {
+		t.Fatalf("unknown PATH line =\n%q\nwant\n%q", unknown, wantUnknown)
+	}
+}
+
+// TestPathAnimationRules pins the automatic reduced-motion fallback. Go tests
+// are piped, so ux.TTY() is false and no environment can enable dots here.
+func TestPathAnimationRules(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	t.Setenv("GNULTE_NO_ANIMATION", "")
+	if pathAnimationEnabled(true) || pathAnimationEnabled(false) {
+		t.Fatal("PATH animation must be off on a dumb terminal / non-TTY")
+	}
+}
+
 // TestGatewayColorAssignment pins the per-host hue slots (appearance order).
 func TestGatewayColorAssignment(t *testing.T) {
 	hosts := []string{"192.0.2.1", "192.0.2.2", "192.0.2.3"}

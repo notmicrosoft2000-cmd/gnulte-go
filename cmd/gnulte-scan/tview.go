@@ -173,11 +173,13 @@ func interactiveTable(rows []discover.Row, log []string, watchEvery int, rescan 
 			// Settings modal: leave the screen, edit+save, reopen on the same
 			// tab. The saved values feed scanPrefs for the next run's deep scan.
 			scr.Close()
-			updated, eerr := settings.Edit(scanPrefs)
+			updated, save, eerr := settings.Edit(scanPrefs)
 			if eerr == nil {
 				scanPrefs = updated
-				if serr := settings.Save(scanPrefs); serr != nil {
-					fmt.Fprintf(os.Stderr, "gnulte-scan: settings: %v\n", serr)
+				if save {
+					if serr := settings.Save(scanPrefs); serr != nil {
+						fmt.Fprintf(os.Stderr, "gnulte-scan: settings: %v\n", serr)
+					}
 				}
 			}
 			scr, err = tui.Open()

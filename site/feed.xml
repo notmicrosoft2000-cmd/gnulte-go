@@ -14,7 +14,7 @@
     <link href="https://notmicrosoft2000-cmd.github.io/gnulte/changelog.html"/>
     <id>https://notmicrosoft2000-cmd.github.io/gnulte/news/17.0</id>
     <updated>2026-11-18T00:00:00Z</updated>
-    <summary>gnulte-report lists and indexes saved reports, merges device snapshots, diffs two exports and files reports into dated folders. gnulte-wifi accepts named deauth reasons and comma-separated station lists, counts jitter per frame and reports channel dwell. Seven tools, standard library only.</summary>
+    <summary>gnulte-report lists and indexes saved reports, merges device snapshots, diffs two exports and files reports into dated folders. gnulte-wifi accepts named deauth reasons and comma-separated station lists, counts jitter per frame and reports channel dwell. Eight executables, standard library only.</summary>
   </entry>
 
   <entry>

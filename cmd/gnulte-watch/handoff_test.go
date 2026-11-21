@@ -1,6 +1,9 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,6 +75,8 @@ func TestBuildViewCursorIPPerScreen(t *testing.T) {
 		{"arp row 3", scrArp, 3, "192.168.100.207"},
 		// map: the last row is the gateway hub, not a host to test.
 		{"map has no host", scrMap, 0, ""},
+		// PATH: a target card is a diagram node; ⏎/g must never launch.
+		{"path has no host", scrPath, 0, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -81,6 +86,92 @@ func TestBuildViewCursorIPPerScreen(t *testing.T) {
 				t.Fatalf("currentIP = %q, want %q", st.currentIP, c.want)
 			}
 		})
+	}
+}
+
+// TestPendingHandoffLaunchesOnceAndHintStaysStable pins both sides of the
+// draw-time handoff fix: the first frame launches against its own cursor row
+// (PTY B1 drift), and later 1 Hz frames must NOT re-launch — handoffGNULTE
+// really spawns a terminal, so one key press may open exactly one window.
+func TestPendingHandoffLaunchesOnceAndHintStaysStable(t *testing.T) {
+	// TERMINAL is honoured first by ux.LaunchTerminal. Point it at a tiny
+	// logging script instead of a terminal: no window, but every call is
+	// counted. /bin/false would hide a repeated launch.
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "launches.log")
+	termPath := filepath.Join(dir, "fake-terminal")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HANDOFF_LOG\"\n"
+	if err := os.WriteFile(termPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake terminal: %v", err)
+	}
+	t.Setenv("TERMINAL", termPath)
+	t.Setenv("HANDOFF_LOG", logPath)
+
+	hosts, stats := testHosts()
+	const (
+		firstIP  = "192.168.100.207"
+		secondIP = "192.168.100.40"
+	)
+	st := &viewState{screen: scrHosts, cursor: 1, sortMode: sortTraffic, handoffPending: true}
+
+	// First frame: .40 is busiest, then .207 at the cursor, then .13. This
+	// frame resolves and launches against the cursor row it actually prints.
+	rates := map[string]traffic.Rate{
+		"192.168.100.13":  {RXBytes: 100},
+		"192.168.100.40":  {RXBytes: 9_000_000},
+		"192.168.100.207": {RXBytes: 5_000_000},
+	}
+	buildView(st, hosts, nil, rates, nil, nil, stats, handoffEnv(nil), 40)
+	if st.currentIP != firstIP {
+		t.Fatalf("first frame cursor row = %q, want %q", st.currentIP, firstIP)
+	}
+	if st.handoffLaunchedIP != firstIP {
+		t.Fatalf("launched IP = %q, want first frame cursor row %q", st.handoffLaunchedIP, firstIP)
+	}
+	if !strings.Contains(st.gCmd, "gnulte -t "+firstIP) {
+		t.Fatalf("first frame hint = %q, want launched target %q", st.gCmd, firstIP)
+	}
+
+	// A live traffic sort reorders rows, so the same cursor index now names a
+	// different host. The next tick must reuse the original hint and must not
+	// launch again against the new row.
+	rates = map[string]traffic.Rate{
+		"192.168.100.13":  {RXBytes: 9_000_000},
+		"192.168.100.40":  {RXBytes: 5_000_000},
+		"192.168.100.207": {RXBytes: 100},
+	}
+	buildView(st, hosts, nil, rates, nil, nil, stats, handoffEnv(nil), 40)
+	if st.currentIP != secondIP {
+		t.Fatalf("second frame cursor row = %q, want %q", st.currentIP, secondIP)
+	}
+	if st.handoffLaunchedIP != firstIP {
+		t.Fatalf("launched IP drifted to %q, want %q", st.handoffLaunchedIP, firstIP)
+	}
+	if !strings.Contains(st.gCmd, "gnulte -t "+firstIP) || strings.Contains(st.gCmd, "gnulte -t "+secondIP) {
+		t.Fatalf("second frame hint = %q, want the launched target %q only", st.gCmd, firstIP)
+	}
+
+	// The fake terminal is detached; wait briefly for its single append, then
+	// give any (buggy) second launch time to show up before counting lines.
+	var log []byte
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		log, _ = os.ReadFile(logPath)
+		if strings.Count(string(log), "\n") >= 1 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read launch log: %v", err)
+	}
+	if n := strings.Count(string(log), "\n"); n != 1 {
+		t.Fatalf("handoff launched %d times, want exactly one: %q", n, log)
+	}
+	if !strings.Contains(string(log), "-t "+firstIP) || strings.Contains(string(log), secondIP) {
+		t.Fatalf("launch args = %q, want only the first frame's target %q", log, firstIP)
 	}
 }
 
@@ -116,7 +207,7 @@ func TestBuildViewClampsCursorPerScreen(t *testing.T) {
 
 // An empty host set must leave nothing to hand off, on every screen.
 func TestBuildViewEmptyHostsHasNoHandoff(t *testing.T) {
-	for _, screen := range []int{scrHosts, scrTalkers, scrFlows, scrArp, scrMap} {
+	for _, screen := range []int{scrHosts, scrTalkers, scrFlows, scrArp, scrMap, scrHistory, scrPath} {
 		st := &viewState{screen: screen}
 		buildView(st, nil, nil, handoffRates(), nil, nil, map[string]*hostStat{}, handoffEnv(nil), 40)
 		if st.currentIP != "" {
@@ -139,6 +230,8 @@ func TestHandoffIPGate(t *testing.T) {
 		{scrArp, stale},
 		{scrFlows, ""},
 		{scrMap, ""},
+		{scrHistory, ""},
+		{scrPath, ""},
 	} {
 		if got := handoffIP(c.screen, stale); got != c.want {
 			t.Errorf("handoffIP(screen=%d, %q) = %q, want %q", c.screen, stale, got, c.want)

@@ -62,6 +62,11 @@ type Config struct {
 	Typing           bool `json:"typing"`            // typewriter animation for the interactive confirmation
 	History          int  `json:"history"`           // ping samples kept per target in the monitors (10-240)
 	ServiceDiscovery bool `json:"service_discovery"` // gnulte-scan: mDNS/DNS-SD service discovery (Avahi-style)
+
+	// v17 terminal surfaces. New keys default in Default(), so older config
+	// files load without migration or rewriting.
+	HubDetailed       bool `json:"hub_detailed"`       // show the Detailed controls step in gnulte-hub
+	TopologyAnimation bool `json:"topology_animation"` // animate the PATH topology in gnulte-watch
 }
 
 // Default returns the built-in defaults, used when no config file exists.
@@ -95,6 +100,9 @@ func Default() Config {
 		Typing:           true,
 		History:          60,
 		ServiceDiscovery: true,
+
+		HubDetailed:       false,
+		TopologyAnimation: true,
 	}
 }
 

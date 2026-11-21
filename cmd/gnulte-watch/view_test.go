@@ -200,7 +200,7 @@ func TestBuildViewNeverExceedsHeight(t *testing.T) {
 		{A: "192.168.100.13:443", B: "151.101.1.69:443", AB: 1000, BA: 200, ABp: 5, BAp: 2},
 		{A: "192.168.100.13:443", B: "192.168.100.40:53", AB: 400, BA: 300, ABp: 4, BAp: 4},
 	}
-	for _, sc := range []int{scrHosts, scrTalkers, scrFlows, scrArp, scrMap, scrHistory} {
+	for _, sc := range []int{scrHosts, scrTalkers, scrFlows, scrArp, scrMap, scrHistory, scrPath} {
 		for _, h := range []int{10, 12, 18, 24, 40} {
 			st := &viewState{detail: true, showHelp: true, screen: sc}
 			env := watchEnv{nic: "wlan0", subnet: "192.168.100.0/24", iv: 1, start: time.Now(),
@@ -613,4 +613,174 @@ func rowsIPs(rows []vrow) []string {
 		out[i] = r.ip
 	}
 	return out
+}
+
+// pathTestEnv is the small watched world used by the PATH frame tests: one
+// target with a real ping sample, a self IP/interface, a gateway RTT and no
+// capture socket (so the D.NRATE label must appear).
+func pathTestEnv(width int) (hosts []string, info map[string]hostInfo, stats map[string]*hostStat, env watchEnv) {
+	hosts = []string{"192.0.2.10"}
+	stats = map[string]*hostStat{hosts[0]: {color: 0}}
+	stats[hosts[0]].ping.add(412, 60)
+	info = map[string]hostInfo{hosts[0]: {IP: hosts[0], Host: "phone"}}
+	env = watchEnv{
+		nic: "wlan0", subnet: "192.0.2.0/24", selfIP: "192.0.2.5",
+		gwIP: "192.0.2.1", gwRTT: 8, iv: 1, width: width,
+		animation: true, pathTick: 1,
+	}
+	return
+}
+
+// TestPathScreenLabelAndKeys pins screen 7's tag and the new key mapping while
+// proving the original 1–6 keys and aliases did not move.
+func TestPathScreenLabelAndKeys(t *testing.T) {
+	if got := screenLabel(scrPath); got != "PATH" {
+		t.Fatalf("screenLabel(scrPath) = %q, want PATH", got)
+	}
+	if scrPath != scrHistory+1 {
+		t.Fatalf("scrPath = %d, want appended after scrHistory (%d)", scrPath, scrHistory)
+	}
+	for _, tc := range []struct {
+		r    rune
+		want int
+	}{
+		{'1', scrHosts}, {'2', scrTalkers}, {'t', scrTalkers},
+		{'3', scrFlows}, {'4', scrArp}, {'5', scrMap}, {'6', scrHistory},
+		{'7', scrPath}, {'p', scrPath}, {'P', scrPath},
+	} {
+		got, ok := watchScreenFor(tc.r)
+		if !ok || got != tc.want {
+			t.Errorf("watchScreenFor(%q) = %d,%v, want %d,true", tc.r, got, ok, tc.want)
+		}
+	}
+	if _, ok := watchScreenFor('z'); ok {
+		t.Fatal("an unrelated letter must not select a screen")
+	}
+	// Esc is the existing peel-one-layer rule: any non-host screen returns to
+	// HOSTS, which includes PATH; no new key reader is involved.
+	if scrPath == scrHosts {
+		t.Fatal("PATH must not be the hosts screen")
+	}
+}
+
+// TestPathFrameExactLabels checks the exact D1 strings survive colouring and
+// that the PATH frame does not leak the host-screen TOTAL pane.
+func TestPathFrameExactLabels(t *testing.T) {
+	hosts, info, stats, env := pathTestEnv(120)
+	st := &viewState{screen: scrPath}
+	out := buildView(st, hosts, info, nil, nil, nil, stats, env, 30)
+	all := ux.StripAnsi(strings.Join(out, "\n"))
+	for _, want := range []string{
+		"LIVE LAN WATCH · wlan0 · 192.0.2.0/24 · PATH",
+		"TARGET(S)", "GNULTE · this host", "ROUTER", "INTERNET",
+		"probe", "gateway", "uplink",
+		"rate — (no capture socket)",
+		"no transitions this session",
+		"p/7 PATH · 1-6 screens · handoff off · Esc HOSTS · q quit",
+		"RTT 412 ms", "loss 0%", "last reply 8 ms", "not probed",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("PATH frame missing exact label %q:\n%s", want, all)
+		}
+	}
+	if strings.Contains(all, "TOTAL") {
+		t.Fatalf("PATH frame must not carry the host-screen TOTAL pane:\n%s", all)
+	}
+	if st.currentIP != "" {
+		t.Fatalf("PATH must clear currentIP, got %q", st.currentIP)
+	}
+	if st.count != 1 {
+		t.Fatalf("PATH target count = %d, want 1", st.count)
+	}
+	// D.DOTKEY is help-overlay only.
+	if strings.Contains(all, pathDotKey) {
+		t.Fatalf("dot-key hint leaked into the normal frame:\n%s", all)
+	}
+}
+
+// TestPathFrameHelpDotKey pins that D.DOTKEY appears only in the help overlay.
+func TestPathFrameHelpDotKey(t *testing.T) {
+	hosts, info, stats, env := pathTestEnv(100)
+	st := &viewState{screen: scrPath, showHelp: true}
+	out := buildView(st, hosts, info, nil, nil, nil, stats, env, 40)
+	if !strings.Contains(ux.StripAnsi(strings.Join(out, "\n")), pathDotKey) {
+		t.Fatalf("help overlay missing %q:\n%s", pathDotKey, strings.Join(out, "\n"))
+	}
+}
+
+// TestPathMotionUsesTickAndFallsBack checks motion comes only from the watch's
+// 1 Hz tick and that reduced motion freezes the frame without removing data.
+func TestPathMotionUsesTickAndFallsBack(t *testing.T) {
+	hosts, info, stats, env := pathTestEnv(100)
+	st := &viewState{screen: scrPath}
+	env.pathTick = 1
+	a := ux.StripAnsi(strings.Join(buildView(st, hosts, info, nil, nil, nil, stats, env, 40), "\n"))
+	env.pathTick = 2
+	b := ux.StripAnsi(strings.Join(buildView(st, hosts, info, nil, nil, nil, stats, env, 40), "\n"))
+	if a == b {
+		t.Fatal("two PATH ticks with animation on must move the dot")
+	}
+	if !strings.Contains(a, "▸") || !strings.Contains(b, "▸") {
+		t.Fatal("animated edges lost their travelling dot")
+	}
+	env.animation = false
+	c := ux.StripAnsi(strings.Join(buildView(st, hosts, info, nil, nil, nil, stats, env, 40), "\n"))
+	env.pathTick = 99
+	d := ux.StripAnsi(strings.Join(buildView(st, hosts, info, nil, nil, nil, stats, env, 40), "\n"))
+	if c != d {
+		t.Fatal("reduced-motion PATH must not change between ticks")
+	}
+	if !strings.Contains(c, "RTT 412 ms") {
+		t.Fatalf("static fallback lost live numbers:\n%s", c)
+	}
+}
+
+// TestPathLaneDotCap pins "at most three dots per edge, one cell per tick".
+func TestPathLaneDotCap(t *testing.T) {
+	for tick := 0; tick < 24; tick++ {
+		for _, motion := range []pathMotion{pathProbe, pathReply} {
+			lane := pathLane(12, motion, tick, motion == pathProbe)
+			n := strings.Count(lane, "▸") + strings.Count(lane, "◂")
+			if n < 1 || n > 3 {
+				t.Fatalf("tick %d motion %d: %d dots in %q", tick, motion, n, lane)
+			}
+		}
+	}
+	if got := pathLane(7, pathWaiting, 3, true); got != "┄┄┄┄┄┄┄" {
+		t.Fatalf("waiting edge = %q, want dashed", got)
+	}
+	if got := pathLane(7, pathFallback, 3, true); got != "───▸───" {
+		t.Fatalf("fallback edge = %q, want static ───▸───", got)
+	}
+	if got := pathLossLane(7); got != "──────✗" {
+		t.Fatalf("loss edge = %q, want ✗ at GNULTE", got)
+	}
+}
+
+// TestPathRTTUsesWatchThresholds pins that PATH colouring reuses watch's own
+// health thresholds (grade's loss/jitter/alarm bands), not monitor's bands.
+func TestPathRTTUsesWatchThresholds(t *testing.T) {
+	stable := &hostStat{}
+	stable.ping.add(20, 60)
+	if got := pathRTT(stable); got != ux.C(ux.Green, "RTT 20 ms") {
+		t.Fatalf("stable RTT = %q", got)
+	}
+	jittery := &hostStat{}
+	for _, rtt := range []int{10, 100, 10, 100} {
+		jittery.ping.add(rtt, 60)
+	}
+	if got := pathRTT(jittery); got != ux.C(ux.Yellow, "RTT 55 ms") {
+		t.Fatalf("jittery RTT = %q", got)
+	}
+	lost := &hostStat{}
+	for i := 0; i < 20; i++ {
+		lost.ping.add(20, 60)
+	}
+	lost.ping.add(-1, 60)
+	if got := pathRTT(lost); got != ux.C(ux.Red, "RTT 20 ms") {
+		t.Fatalf("losing RTT = %q", got)
+	}
+	if got := pathRTT(&hostStat{}); got != ux.C(ux.Dim, "RTT —") {
+		t.Fatalf("unknown RTT = %q", got)
+	}
 }

@@ -4,6 +4,11 @@ Status: **locked**. Owner: this session. Branch/chain: incremental bumps `16.6 �
 
 Tool names below use the post-consolidation suite. The pre-flight check started as `gnulte-doctor`, the path probe as `gnulte-trace`, the bandwidth view as `gnulte-top`, the inventory as `gnulte-devices`, and the watch as `gnulte-lan`. All were renamed or folded into `gnulte-watch` in the six-tool consolidation; `gnulte-report` joined at the 17.0 cap for a seven-tool suite.
 
+> Amendment (2026-11-21): `gnulte-hub` landed as the launcher after this plan
+> was locked. The tree now builds and installs **eight executables = seven
+> tools + gnulte-hub**; `build.sh` and `install.sh` are the authority for the
+> current count. The seven-tool wording above and at the cap is history.
+
 ## Locked decisions
 
 - **Spine: Program A — zero-dependency core.** Replace every helper-binary shell-out with in-Go implementations so the toolkit runs on a bare box. `tc` / `iptables` stay: they *are* the kernel interface.
@@ -18,7 +23,7 @@ Tool names below use the post-consolidation suite. The pre-flight check started 
 - Scope Go checks to `./cmd/... ./internal/...`: plain `./...` also walks an unreadable ignored sample directory. Linux target. `GOOS=darwin go vet ./cmd/... ./internal/...` must stay clean → use `*_linux.go` / build tags for platform-specific code; cross-platform code stays shared.
 - Sandbox has **no root**: the engine cannot be exercised end-to-end here. `GNULTE_AS_ROOT=1` is the harness shim (re-exec skip). Live net checks go through PTY harnesses (`~/Documents/gnulte-verify/pty17.py` pattern; add `pty18.py` per feature as needed).
 - The seven files once allowed to drift (`cmd/gnulte-watch/view.go`, `internal/engine/qdisc.go`, `internal/engine/qdisc_test.go`, `internal/inventory/inventory.go`, `internal/inventory/inventory_test.go`, `internal/scanner/diff.go`, `internal/scanner/diff_test.go`) were formatted in v16.14; `gofmt -l cmd internal` is now clean. New code must not reintroduce drift.
-- Verification per bump: `go build ./cmd/... ./internal/...` → `go vet ./cmd/... ./internal/...` → `go test -count=1 ./cmd/... ./internal/...` → `go test -race -count=1 ./cmd/... ./internal/...` → `GOOS=darwin go vet ./cmd/... ./internal/...` → `gofmt -l cmd internal`. Version bump (`const version` in the seven `cmd/*/main.go` + README badge) in the same commit as the feature; commit locally once green, push only when asked.
+- Verification per bump: `go build ./cmd/... ./internal/...` → `go vet ./cmd/... ./internal/...` → `go test -count=1 ./cmd/... ./internal/...` → `go test -race -count=1 ./cmd/... ./internal/...` → `GOOS=darwin go vet ./cmd/... ./internal/...` → `gofmt -l cmd internal`. Version bump (`const version` in the eight `cmd/*/main.go` — seven tools + `gnulte-hub` — + README badge) in the same commit as the feature; commit locally once green, push only when asked.
 
 ## Build chain
 
@@ -250,11 +255,12 @@ adapter must already be in monitor mode — no channel scanning was added.
 16.15 shipped as v17.0.
 
 ### 17.0 — Cap — **SHIPPED** (v17.0)
-Version bumped to 17.0 in all seven commands, the README badge and the site's
-current-version stamps; historical v16.13 release entries stay as history. The
-full docs pass covers the site, the report and Wi-Fi references, the seven-tool
-directory and the search index. `docs/VERIFY.md` records the matrix run here and
-the root and live checks this sandbox cannot perform. There are no
+Version bumped to 17.0 in all eight executables (seven tools + `gnulte-hub`),
+the README badge and the site's current-version stamps; historical v16.13
+release entries stay as history. The full docs pass covers the site, the
+report and Wi-Fi references, the eight-executable directory (seven tools +
+`gnulte-hub`) and the search index. `docs/VERIFY.md` records the matrix run
+here and the root and live checks this sandbox cannot perform. There are no
 `social-preview` assets in the tree, so that optional item does not apply.
 
 ## Verification conventions (every bump)

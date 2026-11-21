@@ -300,6 +300,7 @@ func lanMain() {
 		alarmRate   = flag.Int("alarm-rate", 0, "alarm hosts above N kbps (0 = settings)")
 		alarmLat    = flag.Int("alarm-latency-ms", 0, "alarm hosts above N ms average ping (0 = settings)")
 		quiet       = flag.Bool("q", false, "quiet: no banner, plain transcript")
+		pathOnly    = flag.Bool("path", false, "PATH-only run: one plain topology line per tick")
 		showVer     = flag.Bool("version", false, "print version and exit")
 	)
 	flag.BoolVar(showVer, "v", false, "print version and exit")
@@ -337,6 +338,7 @@ func lanMain() {
 	// mid-watch edit (a nonzero flag always beats saved settings).
 	iv, histCap, alarmRateKbps, alarmLatencyMs, timeout :=
 		configLive(cfgLoaded, *interval, *histSamples, *alarmRate, *alarmLat)
+	animation := pathAnimationEnabled(cfgLoaded.TopologyAnimation)
 
 	// Administrator-privilege handshake: counting packets needs a raw socket.
 	if os.Geteuid() != 0 && os.Getenv("GNULTE_AS_ROOT") != "1" {
@@ -460,6 +462,9 @@ func lanMain() {
 	}
 
 	view := &viewState{auto: subnet != ""}
+	if *pathOnly {
+		view.screen = scrPath
+	}
 
 	// Up/down timeline store: one JSONL file under the same config dir as the
 	// rest of gnulte-go. Best-effort — a read-only config dir must not stop
@@ -524,6 +529,7 @@ func lanMain() {
 		lastFlows []traffic.Flow
 		alarmOn   bool
 		dbSaved   bool // the watch was folded into the shared device store (x / quit)
+		pathTick  int  // PATH advances one dot cell per existing 1 Hz tick
 	)
 
 	// Pings run in the background so a slow host (or a quiet one that waits
@@ -588,10 +594,14 @@ func lanMain() {
 	}
 
 	// handleKey applies one key press to the view. ok reports whether anything
-	// changed and must be repainted; quit ends the watch. Handoff hints and
-	// save confirmations live in view.gCmd until the next key.
+	// changed and must be repainted; quit ends the watch. Save confirmations
+	// live in view.gCmd until the next key; ⏎/g only set a pending handoff,
+	// which buildView resolves once against the cursor row of the first frame
+	// it prints (later frames reuse that hint, so no per-tick window spawn).
 	handleKey := func(k tui.Key, r rune) (ok, quit bool) {
 		view.gCmd = ""
+		view.handoffPending = false
+		view.handoffLaunchedIP = ""
 		switch k {
 		case tui.KeyUp:
 			if view.cursor > 0 {
@@ -607,7 +617,7 @@ func lanMain() {
 			// Live Interconnection handoff: open gnulte against the selected
 			// host in a fresh terminal (falls back to printing the command).
 			if ip := handoffIP(view.screen, view.currentIP); ip != "" {
-				view.gCmd = handoffGNULTE(nic, ip)
+				view.handoffPending = true
 				return true, false
 			}
 			view.detail = !view.detail
@@ -640,29 +650,9 @@ func lanMain() {
 				view.alarmOnly = !view.alarmOnly
 				view.screen = scrHosts
 				return true, false
-			case '1':
-				view.screen = scrHosts
-				return true, false
-			case '2', 't', 'T':
-				view.screen = scrTalkers
-				return true, false
-			case '3', 'f', 'F':
-				view.screen = scrFlows
-				return true, false
-			case '4', 'n', 'N':
-				view.screen = scrArp
-				return true, false
-			case '5', 'm', 'M':
-				view.screen = scrMap
-				view.detail = false
-				return true, false
-			case '6', 'y', 'Y':
-				view.screen = scrHistory
-				view.detail = false
-				return true, false
 			case 'g', 'G':
 				if ip := handoffIP(view.screen, view.currentIP); ip != "" {
-					view.gCmd = handoffGNULTE(nic, ip)
+					view.handoffPending = true
 				}
 				return true, false
 			case 'd', 'D':
@@ -680,18 +670,31 @@ func lanMain() {
 				if scr != nil {
 					scr.Close()
 					scr = nil
-					updated, eerr := settings.Edit(cfgLoaded)
+					updated, save, eerr := settings.Edit(cfgLoaded)
 					if eerr == nil {
 						cfgLoaded = updated
-						if serr := settings.Save(cfgLoaded); serr != nil {
-							fmt.Fprintf(os.Stderr, "gnulte-watch: settings: %v\n", serr)
+						if save {
+							if serr := settings.Save(cfgLoaded); serr != nil {
+								fmt.Fprintf(os.Stderr, "gnulte-watch: settings: %v\n", serr)
+							}
 						}
 						iv, histCap, alarmRateKbps, alarmLatencyMs, timeout =
 							configLive(cfgLoaded, *interval, *histSamples, *alarmRate, *alarmLat)
+						animation = pathAnimationEnabled(cfgLoaded.TopologyAnimation)
 						tick.Reset(time.Duration(iv) * time.Second)
 					}
 					if s, err := tui.Open(); err == nil {
 						scr = s
+					}
+					return true, false
+				}
+			default:
+				// Digits 1–7 and the screen aliases. Esc (above) is the only
+				// way back from PATH; ⏎/g are inert there via handoffIP.
+				if screen, ok := watchScreenFor(r); ok {
+					view.screen = screen
+					if screen == scrMap || screen == scrHistory || screen == scrPath {
+						view.detail = false
 					}
 					return true, false
 				}
@@ -819,6 +822,8 @@ func lanMain() {
 			width:      ux.Width(),
 			neigh:      lastNeigh,
 			pulse:      view.screen == scrMap && time.Now().Unix()%2 == 0,
+			animation:  animation,
+			pathTick:   pathTick,
 			events:     sess.events,
 			today:      sess.today,
 		}
@@ -832,6 +837,8 @@ func lanMain() {
 			finish()
 			return
 		case <-tick.C:
+			// The only clock PATH has: one cell of dot motion per watch tick.
+			pathTick++
 			var rates map[string]traffic.Rate
 			var flows []traffic.Flow
 			if hasCounter {
@@ -887,8 +894,19 @@ func lanMain() {
 			lastRates, lastFlows = rates, flows
 
 			// The transcript (plain, ANSI-free) is what travels into the HTML
-			// report and the scrollback in non-interactive runs.
+			// report and the scrollback in non-interactive runs. When PATH is
+			// the active view (or this is a PATH-only plain run) one topology
+			// line replaces the per-host block; screens 1–6 are untouched.
 			lines := buildLines(hosts, info, rates, flows, hostSet, stats, nic, iv)
+			if view.screen == scrPath || *pathOnly {
+				penv := watchEnv{
+					nic: nic, subnet: subnet, selfIP: cfg.SelfIP, gwIP: cfg.Gateway,
+					iv: iv, hasCounter: hasCounter,
+				}
+				nodes := mapNodes(hosts, info, stats, penv)
+				target := pathSelectedIP(view, nodes)
+				lines = []string{pathTranscriptLine(target, stats[target], penv, netTotals(hosts, rates))}
+			}
 			switch {
 			case jsonMode:
 				// One machine object per tick; stdout stays pure JSON.
@@ -1127,13 +1145,45 @@ func bps(bytes int64, iv int) int64 {
 	return bytes / int64(iv)
 }
 
+// watchScreenFor maps a single key rune to a watch screen. Keys 1–6 and their
+// original aliases are unchanged; 7 and p (PATH) are appended. Keeping this
+// mapping pure makes the new key selection testable without a PTY.
+func watchScreenFor(r rune) (int, bool) {
+	switch r {
+	case '1':
+		return scrHosts, true
+	case '2', 't', 'T':
+		return scrTalkers, true
+	case '3', 'f', 'F':
+		return scrFlows, true
+	case '4', 'n', 'N':
+		return scrArp, true
+	case '5', 'm', 'M':
+		return scrMap, true
+	case '6', 'y', 'Y':
+		return scrHistory, true
+	case '7', 'p', 'P':
+		return scrPath, true
+	}
+	return scrHosts, false
+}
+
+// pathAnimationEnabled folds the saved topology_animation setting with the
+// three automatic reduced-motion rules. It is a plain boolean so a piped run
+// never paints dots and a dumb terminal never receives escape sequences.
+func pathAnimationEnabled(topology bool) bool {
+	return topology && ux.TTY() &&
+		os.Getenv("TERM") != "dumb" &&
+		os.Getenv("GNULTE_NO_ANIMATION") != "1"
+}
+
 // handoffIP decides which IP an ⏎/g handoff may launch against, or "" when
 // there is none.
 //
 // buildView sets currentIP to the host under the cursor on the screens whose
-// rows *are* hosts (hosts, talkers, ARP) and clears it on the two that are
-// not: a flow row is a pair of endpoints with no single host, and the map's
-// last row is the gateway hub, which is a diagram node rather than a target.
+// rows *are* hosts (hosts, talkers, ARP) and clears it on the ones that are
+// not: a flow row is a pair of endpoints, the map's last row is the gateway
+// hub, HISTORY rows are transitions, and a PATH card is a diagram node.
 // Returning "" there means ⏎ falls back to the detail pane and g is a no-op,
 // instead of launching gnulte against whatever host the cursor last sat on
 // when the screen was still the hosts list.
@@ -1141,6 +1191,8 @@ func handoffIP(screen int, currentIP string) string {
 	switch screen {
 	case scrHosts, scrTalkers, scrArp:
 		return currentIP
+	case scrFlows, scrMap, scrHistory, scrPath:
+		return ""
 	}
 	return ""
 }

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gnulte-hub(8) · GNULTE</title>
+<meta name="description" content="gnulte-hub: plain-language menu that finds and runs the GNULTE executables.">
+<link rel="icon" href="../img/favicon.ico">
+<link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
+<link rel="stylesheet" href="../css/workstation.css?v=workstation-1">
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<div class="utility"><div class="wrap utility-inner"><span>GNULTE <b>v17.0</b> &middot; GPL-3.0-or-later &middot; Linux</span><span><a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">source</a> &middot; <a href="../changelog.html">releases</a></span></div></div>
+<header class="site-header"><div class="wrap header-inner">
+<a class="brand" href="../index.html"><svg viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6">
+<rect x="1" y="1" width="38" height="38"/><path d="M20 20 L9 9 M20 20 L31 9 M20 20 L9 31 M20 20 L31 31"/>
+<circle cx="20" cy="20" r="3.2" fill="currentColor" stroke="none"/>
+<circle cx="9" cy="9" r="2.2" fill="currentColor" stroke="none"/><circle cx="31" cy="9" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="9" cy="31" r="2.2" fill="currentColor" stroke="none"/><circle cx="31" cy="31" r="2.2" fill="currentColor" stroke="none"/>
+</svg><span><span class="brand-name">GNULTE</span><span class="brand-sub">GNU LAN Network Testing Environment</span></span></a>
+<button class="navtoggle" type="button" aria-expanded="false" aria-controls="primary-nav">menu</button>
+<nav class="site-nav" id="primary-nav" aria-label="Primary"><a href="../tools.html">Features</a>
+<a href="../docs.html" class="active">Documentation</a>
+<a href="../downloads.html">Download</a>
+<a href="https://github.com/notmicrosoft2000-cmd/gnulte-go">GitHub</a></nav>
+</div></header>
+<main id="content" class="wrap">
+<div class="crumbs"><a href="../index.html">GNULTE</a><span class="sep">/</span><a href="../docs.html">Manual</a><span class="sep">/</span>gnulte-hub(8)</div>
+<header class="page-head"><div class="page-kicker">MANUAL &middot; COMMAND REFERENCE &middot; v17.0</div><h1>gnulte-hub(8)</h1><p class="lede">Plain-language launcher for the GNULTE toolkit. last updated 2026-11-21</p></header>
+<div class="docgrid">
+<nav class="docnav" aria-label="Manual"><div class="docnav-title">Manual &middot; v17.0</div><ul>
+<li class="grp">Guides</li>
+<li><a href="../docs/install.html">Installation</a></li>
+<li><a href="../docs/configuration.html">Configuration</a></li>
+<li><a href="../docs/usage.html">Usage</a></li>
+<li class="grp">Reference</li>
+<li><a href="../docs/gnulte-hub.html">gnulte-hub(8)</a></li>
+<li><a href="../docs/gnulte.html">gnulte(8)</a></li>
+<li><a href="../docs/gnulte-watch.html">gnulte-watch(8)</a></li>
+<li><a href="../docs/gnulte-scan.html">gnulte-scan(8)</a></li>
+<li><a href="../docs/gnulte-inventory.html">gnulte-inventory(8)</a></li>
+<li><a href="../docs/gnulte-wifi.html">gnulte-wifi(8)</a></li>
+<li><a href="../docs/gnulte-quicksum.html">gnulte-quicksum(8)</a></li>
+<li><a href="../docs/gnulte-report.html">gnulte-report(8)</a></li>
+<li class="grp">Help</li>
+<li><a href="../docs/troubleshooting.html">Troubleshooting</a></li>
+<li><a href="../docs/faq.html">FAQ</a></li>
+</ul></nav>
+<div class="docmain"><div class="col-main">
+
+<h2 id="synopsis">Synopsis</h2>
+<div class="terminal"><div class="terminal-head"><span><span class="dots"><i></i><i></i><i></i></span>command</span><button class="copy" type="button">copy</button></div><div class="terminal-body"><pre><code>gnulte-hub
+gnulte-hub --version</code></pre></div></div>
+
+<h2 id="description">Description</h2>
+<p><code>gnulte-hub</code> is the front door for the toolkit. It draws a numbered menu, then runs the selected binary in the same terminal. It does no network work itself and needs no privileges; each child asks for root only when the operation needs it.</p>
+<p>The launcher looks for a binary in the directory that contains <code>gnulte-hub</code> first, then falls back to <code>PATH</code>. A directory copied to a USB stick therefore works without changing the environment. Tools that are not found are marked <code>not installed</code> in the menu.</p>
+
+<h2 id="usage">Usage</h2>
+<div class="terminal"><div class="terminal-head"><span><span class="dots"><i></i><i></i><i></i></span>terminal</span><button class="copy" type="button">copy</button></div><div class="terminal-body"><pre><code>gnulte-hub              open the menu
+gnulte-hub --version    print version and exit
+gnulte-hub -v           same as --version</code></pre></div></div>
+<p>Pick a row with the arrow keys or its number. After a child exits, press Enter to return to the menu. <code>q</code> or the Quit row leaves the launcher.</p>
+<p>Rows 1&ndash;7 first ask for <b>Standard</b> or <b>Detailed</b> controls. Detailed adds launch-only
+session controls for beeps, ping interval and command echo; it never writes the settings file.
+<b>Test a connection</b> then asks what you want to do and offers four presets or exact numbers.
+Choosing exact numbers asks for latency, jitter, loss, duplication, reorder, bandwidth and duration
+in the launcher, then passes them to <code>gnulte</code> with <code>--from-hub</code> so the numeric
+wizard is not shown twice. Presets pass <code>--profile</code> instead. Target selection, the root
+handshake and all safety checks still happen inside <code>gnulte</code>.</p>
+
+<h2 id="menu">Menu actions</h2>
+<div class="table-wrap"><table class="data"><thead><tr><th>Row</th><th>Runs</th></tr></thead><tbody>
+<tr><td>Test a connection</td><td><code>gnulte</code></td></tr>
+<tr><td>Check this machine</td><td><code>gnulte-quicksum</code></td></tr>
+<tr><td>Find devices</td><td><code>gnulte-scan</code></td></tr>
+<tr><td>See connected devices</td><td><code>gnulte-inventory</code></td></tr>
+<tr><td>Watch live traffic</td><td><code>gnulte-watch</code></td></tr>
+<tr><td>Wi-Fi tools</td><td><code>gnulte-wifi</code></td></tr>
+<tr><td>Open reports</td><td><code>gnulte-report</code></td></tr>
+<tr><td>Read the safety rules</td><td><code>gnulte --docs</code></td></tr>
+</tbody></table></div>
+
+<h2 id="exit-status">Exit status</h2>
+<dl class="facts">
+<dt>0</dt><dd>Normal exit, including <code>--version</code> and a clean Quit.</dd>
+<dt>130</dt><dd>Interrupt or terminate signal. The launcher restores the screen and exits.</dd>
+</dl>
+<p>If a child exits with a non-zero status, the launcher prints that status and waits for Enter before returning to the menu.</p>
+
+<h2 id="files">Files</h2>
+<p><code>gnulte-hub</code> reads one saved preference, <code>hub_detailed</code>, and writes no state. The choice persists only when you save it in settings. The binaries it launches use the paths in <a href="../docs/install.html#where-things-live">Where things live</a>.</p>
+
+<h2 id="see-also">See also</h2>
+<ul class="link-list">
+<li><span class="arrow">&rarr;</span><a href="gnulte.html">gnulte(8)</a></li>
+<li><span class="arrow">&rarr;</span><a href="gnulte-quicksum.html">gnulte-quicksum(8)</a></li>
+<li><span class="arrow">&rarr;</span><a href="../docs/usage.html">Usage recipes</a></li>
+<li><span class="arrow">&rarr;</span><a href="../about.html#safety">Authorised use</a></li>
+</ul>
+
+</div></div>
+<aside class="docrail"><div class="docrail-title">On this page</div><ul>
+<li><a href="#synopsis">Synopsis</a></li><li><a href="#description">Description</a></li><li><a href="#usage">Usage</a></li><li><a href="#menu">Menu actions</a></li><li><a href="#exit-status">Exit status</a></li><li><a href="#files">Files</a></li><li><a href="#see-also">See also</a></li>
+</ul><div class="docrail-title">Manual</div><ul class="link-list"><li><span class="arrow">&rarr;</span><a href="../docs.html">Documentation index</a></li><li><span class="arrow">&rarr;</span><a href="../docs/install.html">Installation</a></li></ul></aside>
+</div>
+</main>
+<footer class="colophon"><div class="wrap">
+<div class="colophon-grid">
+  <div>
+    <svg viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6">
+<rect x="1" y="1" width="38" height="38"/><path d="M20 20 L9 9 M20 20 L31 9 M20 20 L9 31 M20 20 L31 31"/>
+<circle cx="20" cy="20" r="3.2" fill="currentColor" stroke="none"/>
+<circle cx="9" cy="9" r="2.2" fill="currentColor" stroke="none"/><circle cx="31" cy="9" r="2.2" fill="currentColor" stroke="none"/>
+<circle cx="9" cy="31" r="2.2" fill="currentColor" stroke="none"/><circle cx="31" cy="31" r="2.2" fill="currentColor" stroke="none"/>
+</svg>
+    <h3>GNULTE</h3>
+    <p>GNU LAN Network Testing Environment. Eight Linux executables, standard library only, GPL-3.0-or-later.</p>
+    <p>Maintained by Neptune Productions. Built on <code>tc</code>/netem, netfilter, AF_PACKET and mac80211.</p>
+  </div>
+  <div><h3>Executables</h3><ul><li><a href="../docs/gnulte-hub.html">gnulte-hub</a></li>
+<li><a href="../docs/gnulte.html">gnulte</a></li>
+<li><a href="../docs/gnulte-watch.html">gnulte-watch</a></li>
+<li><a href="../docs/gnulte-scan.html">gnulte-scan</a></li>
+<li><a href="../docs/gnulte-inventory.html">gnulte-inventory</a></li>
+<li><a href="../docs/gnulte-wifi.html">gnulte-wifi</a></li>
+<li><a href="../docs/gnulte-quicksum.html">gnulte-quicksum</a></li>
+<li><a href="../docs/gnulte-report.html">gnulte-report</a></li></ul></div>
+  <div><h3>Guides</h3><ul>
+    <li><a href="../docs/install.html">Installation</a></li>
+    <li><a href="../docs/configuration.html">Configuration</a></li>
+    <li><a href="../docs/usage.html">Usage</a></li>
+    <li><a href="../docs/troubleshooting.html">Troubleshooting</a></li>
+    <li><a href="../docs/faq.html">FAQ</a></li>
+    <li><a href="../search.html">Search</a></li>
+  </ul></div>
+  <div><h3>Project</h3><ul>
+    <li><a href="../about.html">About &amp; safety</a></li>
+    <li><a href="../changelog.html">Changelog</a></li>
+    <li><a href="../news.html">Release notes</a></li>
+    <li><a href="../downloads.html">Downloads</a></li>
+    <li><a href="../support.html">Getting help</a></li>
+    <li><a href="../contact.html">Contact</a></li>
+    <li><a href="../feed.xml">Atom feed</a></li>
+  </ul></div>
+</div>
+<div class="colophon-bottom"><span>v17.0 &middot; 2026-11-18 &middot; source: github.com/notmicrosoft2000-cmd/gnulte-go</span>
+<span><a href="../index.html">home</a><a href="../tools.html">tools</a><a href="../about.html#safety">authorised use</a></span></div>
+</div></footer>
+<script src="../js/workstation.js?v=workstation-1"></script>
+
+</body>
+</html>

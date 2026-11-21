@@ -136,21 +136,24 @@ func main() {
 		noReport    = flag.Bool("no-report", false, "skip writing the post-test HTML report")
 		probePorts  = flag.String("probe-ports", "", "TCP fallback probe ports for ICMP-filtered targets, e.g. 443,80,53")
 
-		duration    = flag.Int("duration", 0, "auto-stop after N seconds (0 = until interrupt)")
-		captureArg  = flag.String("c", "", "capture target traffic to FILE as pcap ('-' = stdout)")
-		stealthArg  = flag.Bool("S", false, "stealth ARP spoofing: answer only when asked (far less visible to other scanners)")
-		block       = flag.Bool("block", false, "fully block the target (no forwarding) instead of shaping")
-		soundArg    = flag.Bool("sound", true, "beep per ping result, pitch scaled by latency (default: on)")
-		noSound     = flag.Bool("no-sound", false, "disable the per-ping beeps")
-		interval    = flag.Int("interval", 1, "seconds between pings (1-60)")
-		force       = flag.Bool("force", false, "skip interactive confirmations (require explicit flags)")
-		noBanner    = flag.Bool("no-banner", false, "skip the banner (alias: --minimal)")
-		quiet       = flag.Bool("q", false, "quiet: results only")
-		showDocs    = flag.Bool("docs", false, "print the safety documents and exit")
-		resetSafe   = flag.Bool("reset-safety", false, "remove the acceptance record and exit")
-		showVer     = flag.Bool("version", false, "print version and exit")
-		settingsArg = flag.Bool("settings", false, "open the settings editor (saved defaults) and exit")
-		trafficWin  = flag.Bool("traffic-window", false, "with 2+ targets, open the GNULTE-WATCH watch in a separate terminal window")
+		duration       = flag.Int("duration", 0, "auto-stop after N seconds (0 = until interrupt)")
+		captureArg     = flag.String("c", "", "capture target traffic to FILE as pcap ('-' = stdout)")
+		stealthArg     = flag.Bool("S", false, "stealth ARP spoofing: answer only when asked (far less visible to other scanners)")
+		block          = flag.Bool("block", false, "fully block the target (no forwarding) instead of shaping")
+		soundArg       = flag.Bool("sound", true, "beep per ping result, pitch scaled by latency (default: on)")
+		noSound        = flag.Bool("no-sound", false, "disable the per-ping beeps")
+		echoCommands   = flag.Bool("echo-commands", false, "echo tc/arpspoof/sysctl commands this launch (overrides saved setting)")
+		noEchoCommands = flag.Bool("no-echo-commands", false, "hide tc/arpspoof/sysctl commands this launch (overrides saved setting)")
+		interval       = flag.Int("interval", 1, "seconds between pings (1-60)")
+		force          = flag.Bool("force", false, "skip interactive confirmations (require explicit flags)")
+		noBanner       = flag.Bool("no-banner", false, "skip the banner (alias: --minimal)")
+		quiet          = flag.Bool("q", false, "quiet: results only")
+		showDocs       = flag.Bool("docs", false, "print the safety documents and exit")
+		resetSafe      = flag.Bool("reset-safety", false, "remove the acceptance record and exit")
+		showVer        = flag.Bool("version", false, "print version and exit")
+		settingsArg    = flag.Bool("settings", false, "open the settings editor (saved defaults) and exit")
+		fromHub        = flag.Bool("from-hub", false, "launched by gnulte-hub: skip the plain-language menu")
+		trafficWin     = flag.Bool("traffic-window", false, "with 2+ targets, open the GNULTE-WATCH watch in a separate terminal window")
 	)
 	flag.StringVar(ifaceArg, "interface", "", "network interface (default: auto-detect)")
 	flag.StringVar(targets, "target", "", "target IP(s), comma-separated")
@@ -245,25 +248,36 @@ func main() {
 	if err != nil {
 		fatal(fmt.Errorf("settings: %v", err))
 	}
+	// Command echo is a saved setting, but the hub's Detailed controls can
+	// override it for this launch only. The JSON key is never written here.
+	echoCommandsOn := prefs.Advanced
+	if *echoCommands {
+		echoCommandsOn = true
+	}
+	if *noEchoCommands {
+		echoCommandsOn = false
+	}
 	typingOn = prefs.Typing && !*quiet && ansi
 
-	// The settings editor is a full-screen terminal TU/t and writes straight
-	// back to the config file, then hands control back to the shell.
+	// The settings editor is a full-screen terminal UI that returns the edited
+	// config and a save flag; it does not write the file itself.
 	if *settingsArg {
 		if !stdinIsTTY() {
 			fatal(fmt.Errorf("the settings editor needs a real terminal"))
 		}
-		updated, err := settings.Edit(prefs)
+		updated, save, err := settings.Edit(prefs)
 		if err != nil {
 			if err == tui.ErrNotTerminal {
 				fatal(fmt.Errorf("the settings editor needs a real terminal"))
 			}
 			fatal(err)
 		}
-		if err := settings.Save(updated); err != nil {
-			fatal(fmt.Errorf("settings: %v", err))
+		if save {
+			if err := settings.Save(updated); err != nil {
+				fatal(fmt.Errorf("settings: %v", err))
+			}
+			fmt.Printf("settings saved to %s\n", settings.Path())
 		}
-		fmt.Printf("settings saved to %s\n", settings.Path())
 		return
 	}
 
@@ -350,7 +364,7 @@ func main() {
 	// sets the flags an advanced operator would have typed, so targeting, the
 	// root handshake, the engine and reporting are all unchanged.
 	simple := false
-	if interactive &&
+	if interactive && !*fromHub &&
 		*targets == "" && *macArg == "" && *rangeCIDR == "" &&
 		*devTypes == "" && *vendors == "" && *profile == "" &&
 		*latency == 0 && *jitter == 0 && *loss == 0 && *dup == 0 &&
@@ -419,7 +433,7 @@ func main() {
 		Verbose: func(line string) {
 			// Advanced mode echoes the exact command line as it runs; the
 			// transcript (and therefore the HTML report) always records it.
-			bootf(!prefs.Advanced || *quiet, "  $ "+line)
+			bootf(!echoCommandsOn || *quiet, "  $ "+line)
 		},
 	}
 	if *profile != "" && !strings.HasPrefix(*profile, "save:") {
@@ -1172,6 +1186,9 @@ Advanced:
       --block             fully block the target (no forwarding)
       --sound             beep per ping result, pitch scales with latency (default: on)
       --no-sound          disable the per-ping beeps
+      --echo-commands     echo tc/arpspoof/sysctl commands this launch
+      --no-echo-commands  hide those commands this launch (does not save)
+      --from-hub          launched by gnulte-hub; skip the plain-language menu
       --export FILE       stream per-second results to a CSV file
       --note TEXT         label this session (shown in the console header
                           and the report, e.g. --note gaming-test-3)

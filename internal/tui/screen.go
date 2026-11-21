@@ -35,6 +35,15 @@ var ErrNotTerminal = errors.New("a real terminal is required")
 // menus in gnulte open back to back. Screens are opened one at a time.
 var sharedKeys = newKeyStream(int(os.Stdin.Fd()))
 
+// FlushPending drops any partially decoded key press in the shared stream so
+// a menu cannot hand a stray arrow byte to the next screen or child process.
+// Platforms without a raw key stream simply have nothing to flush.
+func FlushPending() {
+	if flusher, ok := any(sharedKeys).(interface{ flushPending() }); ok {
+		flusher.flushPending()
+	}
+}
+
 // Screen is a raw-mode, full-screen terminal for one interactive editor. It
 // enters the alternate buffer, switches stdin to non-canonical input, and
 // guarantees the terminal is restored on Close or on any signal.

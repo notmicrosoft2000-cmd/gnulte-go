@@ -6,11 +6,13 @@
 package main
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"gnulte-go/internal/traffic"
+	"gnulte-go/internal/ux"
 )
 
 // TestHistoryScreenRendersAlarmsAndToday builds screen 6 with one session
@@ -75,5 +77,46 @@ func TestHistoryScreenBudget(t *testing.T) {
 func TestScreenLabelHistory(t *testing.T) {
 	if got := screenLabel(scrHistory); got != "HISTORY" {
 		t.Fatalf("screenLabel(scrHistory) = %q", got)
+	}
+}
+
+// TestPathEventsOnlyRealTransitions pins the D1 EVENTS contract: the only
+// event forms are <watchEvent.when> host <ip> up/down. No ARP redirect, netem,
+// forwarding, scenario phase, optimisation language or invented timestamp may
+// leak into the PATH frame.
+func TestPathEventsOnlyRealTransitions(t *testing.T) {
+	hosts, info, stats, env := pathTestEnv(120)
+	now := time.Now()
+	env.events = []watchEvent{
+		{when: now.Add(-9 * time.Second), ip: "192.0.2.10", name: "phone", up: true},
+		{when: now.Add(-3 * time.Second), ip: "192.0.2.11", name: "tablet", up: false},
+	}
+	out := buildView(&viewState{screen: scrPath}, hosts, info, nil, nil, nil, stats, env, 40)
+	all := ux.StripAnsi(strings.Join(out, "\n"))
+	want := map[string]bool{
+		env.events[0].when.Format("15:04:05") + "  host 192.0.2.10 up":   false,
+		env.events[1].when.Format("15:04:05") + "  host 192.0.2.11 down": false,
+	}
+	for line := range want {
+		if !strings.Contains(all, line) {
+			t.Errorf("PATH frame missing exact event line %q:\n%s", line, all)
+		}
+	}
+	for _, banned := range []string{
+		"ARP redirect", "netem", "tc ", "forwarding", "scenario", "phase",
+		"optimis", "no transitions this session",
+	} {
+		if strings.Contains(strings.ToLower(all), strings.ToLower(banned)) {
+			t.Errorf("PATH frame invented forbidden text %q:\n%s", banned, all)
+		}
+	}
+	// Every timestamp in the frame must be one of the two real transitions.
+	ts := regexp.MustCompile(`\d\d:\d\d:\d\d`)
+	for _, line := range strings.Split(all, "\n") {
+		for _, m := range ts.FindAllString(line, -1) {
+			if !strings.Contains(line, m+"  host ") {
+				t.Errorf("invented timestamp %q in line %q", m, line)
+			}
+		}
 	}
 }

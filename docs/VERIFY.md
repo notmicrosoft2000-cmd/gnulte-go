@@ -26,15 +26,20 @@ of the tree.
 Version and root-free CLI paths:
 
 ```
-go run ./cmd/<name> --version      # each of the seven commands
+go run ./cmd/<name> --version      # each of the eight executables (seven tools + gnulte-hub)
 go run ./cmd/gnulte-wifi --list-reasons
 go run ./cmd/gnulte-report --help
 go run ./cmd/gnulte-quicksum --json
 ```
 
-All seven version banners print v17.0. `--list-reasons` prints ten named codes,
+All eight version banners print v17.0. `--list-reasons` prints ten named codes,
 the report help exits 0, and quicksum exits 0 with a WARN for the missing root
 privilege, which is expected in a sandbox.
+
+> Amendment (2026-11-21): the 2026-11-18 pass above predates `gnulte-hub` and
+> originally covered seven tools. Counts in this document now use eight
+> executables = seven tools + `gnulte-hub`, matching `build.sh` and `install.sh`;
+> the launcher pass below re-ran the matrix across all eight.
 
 Site checks: every relative link in the HTML pages resolves to a file, and
 `site/feed.xml` parses as Atom XML with the v17.0 entry first.
@@ -47,7 +52,7 @@ including the race build and the Darwin vet, with no failures. The piped hub
 run used option 8 to read the safety documents through `gnulte --docs`, then
 option 9 to quit. Two PTY runs reached the simple menu: option 4 quit without
 starting anything, and `1q` opened the effect menu and aborted. All eight
-`--version` banners report v17.0.
+`--version` banners (seven tools + `gnulte-hub`) report v17.0.
 
 The PTY runs used `script -qec './gnulte' /dev/null` with input on stdin. They
 cover menu navigation only; no shaping session was started, so the root and
@@ -58,8 +63,8 @@ live-hardware checks below still stand.
 Run these on a bare box before the release can be called proven there:
 
 1. Install with `sudo ./install.sh`, then run `--version` on each installed
-   binary. All seven must agree on v17.0; the installer already aborts on a
-   version mismatch.
+   executable. All eight (seven tools + `gnulte-hub`) must agree on v17.0; the
+   installer already aborts on a version mismatch.
 2. Run `sudo gnulte-quicksum` and clear any FAIL before shaping.
 3. On a network you own, put an adapter in monitor mode and send a single
    deauth burst with `gnulte-wifi`. Confirm the station drops and reconnects on
@@ -71,7 +76,8 @@ Run these on a bare box before the release can be called proven there:
    both a clean exit and an interrupt. This is the restore guarantee the soak
    runner was meant to hammer.
 6. Work the interactive paths through the PTY harness at
-   `~/Documents/gnulte-verify/pty17.py`.
+   `~/Documents/gnulte-verify/pty17.py`. Its screen render checks cover
+   screens 2–5, not 1–6; HOSTS, HISTORY and PATH need separate checks.
 
 The soak runner from the plan was skipped by decision. Step 5 covers one cycle
 of the same ground; a longer back-to-back run is still worth doing on hardware.

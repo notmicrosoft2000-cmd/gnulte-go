@@ -134,14 +134,16 @@ func main() {
 		if !ux.TTY() || !tui.StdinTTY() {
 			fatal(fmt.Errorf("the settings editor needs a real terminal"))
 		}
-		updated, err := settings.Edit(prefs)
+		updated, save, err := settings.Edit(prefs)
 		if err != nil {
 			fatal(err)
 		}
-		if err := settings.Save(updated); err != nil {
-			fatal(fmt.Errorf("settings: %v", err))
+		if save {
+			if err := settings.Save(updated); err != nil {
+				fatal(fmt.Errorf("settings: %v", err))
+			}
+			fmt.Printf("settings saved to %s\n", settings.Path())
 		}
-		fmt.Printf("settings saved to %s\n", settings.Path())
 		return
 	}
 	if !explicit["count"] && prefs.WifiCount >= 1 {

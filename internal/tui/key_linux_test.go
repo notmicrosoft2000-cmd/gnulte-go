@@ -31,6 +31,63 @@ func TestKeyStreamBuffersQueuedKeys(t *testing.T) {
 	}
 }
 
+// TestKeyStreamReadsOneByteAtATime stops a menu from consuming a key that
+// belongs to the next screen or child process. A queued digit must still be
+// pending after an arrow is decoded.
+func TestKeyStreamReadsOneByteAtATime(t *testing.T) {
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pr.Close()
+	defer pw.Close()
+
+	k := newKeyStream(int(pr.Fd()))
+	if _, err := pw.WriteString("\x1b[B3"); err != nil {
+		t.Fatal(err)
+	}
+	if key, _ := k.read(); key != KeyDown {
+		t.Fatalf("first key = %d, want KeyDown", key)
+	}
+	if len(k.pending) != 0 {
+		t.Fatalf("pending = %q, want no read-ahead past the arrow", k.pending)
+	}
+	if key, r := k.read(); key != KeyRune || r != '3' {
+		t.Fatalf("second key = (%d, %q), want KeyRune '3'", key, r)
+	}
+}
+
+// TestFlushPendingDropsPartialKey checks that a stray arrow prefix cannot be
+// mistaken for the first key of a child process or a canonical-mode prompt.
+func TestFlushPendingDropsPartialKey(t *testing.T) {
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pr.Close()
+	defer pw.Close()
+
+	k := newKeyStream(int(pr.Fd()))
+	k.pending = []byte("\x1b[")
+	k.flushPending()
+	if len(k.pending) != 0 {
+		t.Fatalf("flushPending left %q behind", k.pending)
+	}
+	if _, err := pw.WriteString("3"); err != nil {
+		t.Fatal(err)
+	}
+	if key, r := k.read(); key != KeyRune || r != '3' {
+		t.Fatalf("key after flush = (%d, %q), want KeyRune '3'", key, r)
+	}
+
+	// The exported handoff helper reaches the same shared stream.
+	sharedKeys.pending = []byte{'\x1b'}
+	FlushPending()
+	if len(sharedKeys.pending) != 0 {
+		t.Fatalf("FlushPending left %q behind", sharedKeys.pending)
+	}
+}
+
 // TestKeyStreamLoneEsc ensures a lone Escape is reported after its grace pause.
 func TestKeyStreamLoneEsc(t *testing.T) {
 	pr, pw, err := os.Pipe()

@@ -59,11 +59,17 @@ type keyStream struct {
 
 func newKeyStream(fd int) *keyStream { return &keyStream{fd: fd} }
 
+// flushPending drops a partial key press (a lone ESC or the start of an arrow
+// sequence) before handing input to another screen or a child process.
+func (k *keyStream) flushPending() { k.pending = nil }
+
 // read blocks until a full key press is decoded. A leading ESC is given a short
 // grace window so a lone Escape does not wait on an absent arrow sequence.
 // ISIG stays enabled, so Ctrl+C still interrupts the process.
 func (k *keyStream) read() (Key, rune) {
-	buf := make([]byte, 16)
+	// One byte per read is deliberate: a menu must not swallow the next
+	// process's keystrokes by reading a full terminal buffer ahead.
+	buf := make([]byte, 1)
 	for {
 		// Always start from a filled buffer: parse before reading meant an
 		// empty buffer busy-spun on the nothing-more path.
@@ -114,7 +120,8 @@ func (k *keyStream) read() (Key, rune) {
 // sequences are still consumed atomically and a lone ESC is resolved after its
 // short grace beat (bounded by the caller's deadline).
 func (k *keyStream) poll(maxWaitMs int64) (Key, rune) {
-	buf := make([]byte, 16)
+	// Match read(): never queue more than one byte from the terminal.
+	buf := make([]byte, 1)
 	deadline := time.Now().Add(time.Duration(maxWaitMs) * time.Millisecond)
 	for {
 		for len(k.pending) == 0 {

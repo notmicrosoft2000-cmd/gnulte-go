@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""PTY render-check for gnulte-top (v16.11).
+"""PTY render-check for gnulte-watch top (v17.0).
 
 Only a real terminal proves the live full-screen view paints and that 'q'
-reaches the loop. In the sandbox the AF_PACKET counter is unavailable, so the
-rates are all zero; the view must still render, show the measuring/empty state,
-and exit cleanly on q.
+reaches the loop. The bandwidth view is now the `top` subcommand of
+`gnulte-watch`, not a standalone `gnulte-top` binary. In the sandbox the
+AF_PACKET counter is unavailable, so the rates are all zero; the view must
+still render, show the measuring/empty state, and exit cleanly on q.
+GNULTE_AS_ROOT=1 skips the sudo re-exec; the first-run safety acceptance must
+already be on record.
+
+Usage: python3 pty_top.py [path/to/gnulte-watch]
 """
 import os
 import pty
@@ -15,7 +20,8 @@ import subprocess
 import sys
 import time
 
-BIN = sys.argv[1] if len(sys.argv) > 1 else "/tmp/opencode/gnulte-top"
+# Path to the gnulte-watch binary; "top" is passed as its first argument.
+BIN = sys.argv[1] if len(sys.argv) > 1 else "/tmp/opencode/gnulte-watch"
 ANSI = re.compile(rb"\x1b\[[0-9;?]*[a-zA-Z]|\x1b[()][A-Z0-9]|\x1b[=>]|\r")
 
 
@@ -56,7 +62,7 @@ def run(args, send_after, keys):
 
 
 def main():
-    text, code = run(["-i", "1"], 2.6, b"q")
+    text, code = run(["top", "-i", "1"], 2.6, b"q")
     ok = True
     if "GNULTE TOP" not in text:
         print("FAIL: title not rendered"); ok = False
@@ -66,7 +72,7 @@ def main():
     if code != 0:
         print(f"FAIL: exit code {code}, want 0 on q"); ok = False
     if ok:
-        print("PASS: gnulte-top rendered the live view and quit cleanly on q")
+        print("PASS: gnulte-watch top rendered the live view and quit cleanly on q")
     else:
         print("--- captured output ---")
         print(text[-2000:])

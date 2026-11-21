@@ -1,10 +1,200 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
+
+	"gnulte-go/internal/settings"
 )
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = old }()
+	fn()
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	return string(out)
+}
+
+func TestHubScreenCopy(t *testing.T) {
+	if h1Title != "GNULTE — what do you want to do?" ||
+		h1Context != "Nothing starts until you choose. Tools run in this terminal and ask for root only when they need it." ||
+		h1Note != "Detailed controls are available on the next step. Direct values never require them." ||
+		h1Foot != "↑/↓ choose   Enter run   number jump   q quit" {
+		t.Fatalf("H1 copy drifted: %q / %q / %q / %q", h1Title, h1Context, h1Note, h1Foot)
+	}
+	if h2Title != "Detailed controls?" || h2Help != "Detailed adds session controls. It does not hide direct value entry." ||
+		h2Foot != "↑/↓ choose   Enter continue   number jump   Esc back" {
+		t.Fatalf("H2 copy drifted: %q / %q / %q", h2Title, h2Help, h2Foot)
+	}
+	if h3Title != "How slow should it feel?" || h3Help != "Presets set latency, jitter, loss, duplication, reorder and bandwidth." ||
+		h3Foot != "↑/↓ choose   Enter continue   number jump   Esc back" {
+		t.Fatalf("H3 copy drifted: %q / %q / %q", h3Title, h3Help, h3Foot)
+	}
+
+	wantLabels := []string{
+		"Test a connection", "Check this machine", "Find devices",
+		"See connected devices", "Watch live traffic", "Wi-Fi tools",
+		"Open reports", "Read the safety rules", "Quit",
+	}
+	wantDetails := []string{
+		"pick a device, then shape its traffic", "is everything ready?",
+		"sweep the network", "saved inventory", "seven-screen live monitor",
+		"authorised deauth testing", "list, merge and compare", "before you begin", "",
+	}
+	available := make([]bool, len(wantLabels))
+	for i := range available {
+		available[i] = true
+	}
+	items := menuItems(actions(), available)
+	if len(items) != len(wantLabels) {
+		t.Fatalf("H1 has %d rows, want %d", len(items), len(wantLabels))
+	}
+	for i, item := range items {
+		if item.Label != wantLabels[i] || item.Detail != wantDetails[i] {
+			t.Errorf("H1 row %d = (%q, %q), want (%q, %q)", i+1,
+				item.Label, item.Detail, wantLabels[i], wantDetails[i])
+		}
+	}
+}
+
+func TestDetailedAndShapingSteps(t *testing.T) {
+	items := detailedItems()
+	if len(items) != 2 || items[0].Label != "Standard" || items[0].Detail != "presets and direct values" ||
+		items[1].Label != "Detailed" || items[1].Detail != "extra session controls" {
+		t.Fatalf("H2 rows = %+v", items)
+	}
+	if got := detailedOptions(false).Selected; got != 0 {
+		t.Errorf("H2 default selection = %d, want 0", got)
+	}
+	if got := detailedOptions(true).Selected; got != 1 {
+		t.Errorf("H2 preselected Detailed = %d, want 1", got)
+	}
+	if got := detailedOptions(true).Note; got != h2Help {
+		t.Errorf("H2 help = %q, want %q", got, h2Help)
+	}
+
+	rows := shapingItems()
+	want := []struct{ label, detail, profile string }{
+		{"A little laggy", "small stutter, still usable", "cellular"},
+		{"Video calls break up", "choppy voice and picture", "voip"},
+		{"Web pages crawl", "slow browsing", "web"},
+		{"Almost offline", "very hard to use", "extreme"},
+		{"Let me choose numbers", "set exact values", ""},
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("H3 has %d rows, want %d", len(rows), len(want))
+	}
+	for i, row := range rows {
+		if row.Label != want[i].label || row.Detail != want[i].detail {
+			t.Errorf("H3 row %d = (%q, %q), want (%q, %q)", i+1,
+				row.Label, row.Detail, want[i].label, want[i].detail)
+		}
+		if got := profileForShapingIndex(i); got != want[i].profile {
+			t.Errorf("profile for H3 row %d = %q, want %q", i+1, got, want[i].profile)
+		}
+	}
+	if got := shapingOptions().Note; got != h3Help {
+		t.Errorf("H3 help = %q, want %q", got, h3Help)
+	}
+}
+
+func TestDirectParams(t *testing.T) {
+	var values shapingValues
+	out := captureStdout(t, func() {
+		got, ok := directParams(strings.NewReader("300\n30\n0\n7\n10\nnope\n60\n"))
+		if !ok {
+			t.Fatal("directParams reported abort")
+		}
+		values = got
+	})
+	want := shapingValues{latency: 300, jitter: 30, loss: 0, duplicate: 7, reorder: 10, bandwidth: 0, duration: 60}
+	if values != want {
+		t.Errorf("directParams = %+v, want %+v", values, want)
+	}
+	for _, part := range []string{
+		"Parameter Configuration:  Enter keeps current values.",
+		"Latency (ms) [0]:", "Jitter (ms) [0]:", "Loss (%) [0]:",
+		"Duplicate (%) [0]:", "Reorder (%) [0]:", "Bandwidth (kbps) [0]:",
+		"Duration (s) [0]:", "ignoring non-numeric value",
+	} {
+		if !strings.Contains(out, part) {
+			t.Errorf("H4 output missing %q: %q", part, out)
+		}
+	}
+	if _, ok := directParams(strings.NewReader("1\n")); ok {
+		t.Error("Ctrl-D/EOF in H4 must abort")
+	}
+	captureStdout(t, func() {
+		blank, ok := directParams(strings.NewReader("\n\n\n\n\n\n\n"))
+		if !ok || blank != (shapingValues{}) {
+			t.Errorf("blank H4 answers = (%+v, %v), want all defaults", blank, ok)
+		}
+	})
+}
+
+func TestShapingLaunchArgs(t *testing.T) {
+	cfg := settings.Default()
+	values := shapingValues{latency: 300, jitter: 30, loss: 0, duplicate: 0, reorder: 0, bandwidth: 0, duration: 60}
+	direct := []string{
+		"--latency", "300", "--jitter", "30", "--loss", "0",
+		"--duplicate", "0", "--reorder", "0", "--bandwidth", "0",
+		"--duration", "60",
+	}
+
+	got := shapingLaunchArgs(4, values, nil, cfg)
+	want := append(append([]string{}, direct...), "--interval", "1", "--sound", "--from-hub")
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("standard direct args = %q, want %q", got, want)
+	}
+
+	offCfg := cfg
+	offCfg.Beeps = false
+	got = shapingLaunchArgs(4, values, nil, offCfg)
+	want = append(append([]string{}, direct...), "--interval", "1", "--no-sound", "--from-hub")
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("standard direct args with beeps off = %q, want %q", got, want)
+	}
+
+	got = shapingLaunchArgs(0, values, nil, cfg)
+	want = []string{"--profile", "cellular", "--from-hub"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("standard preset args = %q, want %q", got, want)
+	}
+
+	ctrl := sessionControls{beep: true, interval: 2, echo: false}
+	got = shapingLaunchArgs(0, values, &ctrl, cfg)
+	want = []string{"--profile", "cellular", "--interval", "2", "--sound", "--no-echo-commands", "--from-hub"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("detailed preset args = %q, want %q", got, want)
+	}
+
+	ctrl.echo = true
+	got = shapingLaunchArgs(4, values, &ctrl, cfg)
+	want = append(append([]string{}, direct...), "--interval", "2", "--sound", "--echo-commands", "--from-hub")
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("detailed direct args = %q, want %q", got, want)
+	}
+	if n := strings.Count(strings.Join(got, " "), "--interval"); n != 1 {
+		t.Errorf("detailed direct args carry %d interval flags, want 1: %q", n, got)
+	}
+}
 
 func TestActions(t *testing.T) {
 	list := actions()

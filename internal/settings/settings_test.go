@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -119,5 +120,76 @@ func TestSaveCreatesDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestV17SurfaceDefaults(t *testing.T) {
+	d := Default()
+	if d.HubDetailed {
+		t.Fatalf("HubDetailed default = true, want false")
+	}
+	if !d.TopologyAnimation {
+		t.Fatalf("TopologyAnimation default = false, want true")
+	}
+	if !d.Advanced {
+		t.Fatalf("Advanced default changed: %+v", d)
+	}
+}
+
+func TestV17JSONKeysAndOldKeyCompatibility(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	data := []byte(`{"hub_detailed":true,"topology_animation":false,"advanced":false,"history":120}`)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.HubDetailed || got.TopologyAnimation || got.Advanced || got.History != 120 {
+		t.Fatalf("v17 keys did not load as written: %+v", got)
+	}
+
+	if err := SaveTo(got, path); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		t.Fatal(err)
+	}
+	wantKeys := []string{
+		"interface", "interval_sec", "timeout_ms", "beeps", "html_report",
+		"scan_threads", "wifi_count", "wifi_delay_sec", "traffic_sec",
+		"alarm_rate_kbps", "alarm_latency_ms", "probe_retries", "os_confidence",
+		"uptime_guess", "rogue_flag", "arp_sweep", "stealth_arp",
+		"wifi_jitter_ms", "wifi_mix_reasons", "wifi_hop", "wifi_channels",
+		"advanced", "typing", "history", "service_discovery",
+		"hub_detailed", "topology_animation",
+	}
+	for _, k := range wantKeys {
+		if _, ok := keys[k]; !ok {
+			t.Errorf("saved config is missing JSON key %q", k)
+		}
+	}
+	if len(keys) != len(wantKeys) {
+		t.Errorf("saved config has %d keys, want %d: %s", len(keys), len(wantKeys), raw)
+	}
+}
+
+func TestV17KeysDefaultWhenMissing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"interface":"auto"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.HubDetailed != Default().HubDetailed || got.TopologyAnimation != Default().TopologyAnimation {
+		t.Fatalf("missing v17 keys did not use defaults: %+v", got)
 	}
 }

@@ -60,6 +60,10 @@ class Term:
             # but every screen, key and handoff is still real).
             e = dict(os.environ, TERM="xterm-256color", COLUMNS="150",
                      LINES="45", GNULTE_AS_ROOT="1")
+            # Handoff tests press ⏎/g for real. Point LaunchTerminal at a
+            # no-op so the hint path runs without opening a GNULTE window;
+            # an explicitly chosen TERMINAL (env or inherited) still wins.
+            e.setdefault("TERMINAL", "/bin/false")
             if env:
                 e.update(env)
             os.execvpe(argv[0], argv, e)
@@ -359,7 +363,10 @@ def test_g(bundle):
     out = t.read(6)
     check("G4 manual r rescan keeps the UI alive", "panic:" not in out, out[-200:])
     os.write(t.fd, b"q")
-    gone, status = t.wait_exit(8.0)
+    # The manual rescan above sweeps the whole /24 synchronously (~28s here)
+    # before q is consumed; give that sweep room so a slow host cannot be
+    # mistaken for a quit bug.
+    gone, status = t.wait_exit(45.0)
     check("G5 -T quits on q", gone, out[-200:])
     if gone and status not in (0, None):
         check("G6 -T exit status", False, f"status={status}")
